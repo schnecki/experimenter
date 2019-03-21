@@ -3,12 +3,16 @@ Exp         -- Adding "json" causes ToJSON and FromJSON instances to be derived.
     startTime UTCTime
     endTime UTCTime Maybe
     initialState ByteString
+    initialInputState ByteString
+    deriving Eq Ord
 
 Param
     experiment ExpId
     name Text
     minBound ByteString
     maxBound ByteString
+    deriving Eq Ord
+
 
 ExpSetup
     experiment ExpId
@@ -25,6 +29,7 @@ ExpResult
     preparationStartTime UTCTime
     preparationEndTime UTCTime
     preparationEndState ByteString
+    preparationEndInputState ByteString
 
 PrepInput
     expResult ExpResultId
@@ -49,8 +54,10 @@ RepResult
     repNr Int
     randomGen Text
     warmUpEndState ByteString
+    warmUpEndInputState ByteString
     warmUpEndTime UTCTime
     repEndState ByteString
+    repEndInputState ByteString
     repEndTime UTCTime
 
 

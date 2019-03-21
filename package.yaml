@@ -33,6 +33,7 @@ dependencies:
 - random
 - bytestring
 - aeson
+- esqueleto
 
 library:
   source-dirs: src

@@ -5,6 +5,7 @@ module Experimenter
 import           Experimenter.Experiment as E
 import           Experimenter.Parameter  as E
 import           Experimenter.Result     as E
+import           Experimenter.Run        as E
 import           Experimenter.Setup      as E
 import           Experimenter.StepResult as E
 

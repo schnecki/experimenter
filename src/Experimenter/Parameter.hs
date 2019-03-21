@@ -1,11 +1,13 @@
 {-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE RankNTypes        #-}
 {-# LANGUAGE TemplateHaskell   #-}
 {-# LANGUAGE TypeFamilies      #-}
 module Experimenter.Parameter where
 
 import           Control.Lens
 import           Data.Serialize
-import qualified Data.Text      as T
+import qualified Data.Text           as T
+import           Experimenter.Models
 import           System.Random
 
 data ParameterSetup a b = ParameterSetup

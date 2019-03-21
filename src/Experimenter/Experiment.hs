@@ -12,14 +12,14 @@ import           Experimenter.StepResult
 import           Data.Serialize          (Get, Putter, Serialize)
 import qualified Data.Text               as T
 
-
-class (Serialize (InputValue a)) => ExperimentDef a where
+class (Serialize (InputValue a), Serialize (InputState a), Serialize a) => ExperimentDef a where
 
   -- ^ Type of input values to the experiment.
   type InputValue a :: *
+  type InputState a :: *
 
   -- ^ Generate some input values.
-  generateInput :: (Monad m) => ([StepResult], a) -> m (InputValue a)
+  generateInput :: (Monad m) => InputState a -> a -> m (InputState a, InputValue a)
 
   -- ^ Preparation (e.g. Loading from saved state, or training phase in ML applications).
   runPreparationStep :: (Monad m) => Maybe (Either (Get a) (a -> InputValue a -> m ([StepResult], a)))
@@ -31,12 +31,6 @@ class (Serialize (InputValue a)) => ExperimentDef a where
   runEvaluationStep :: (Monad m) => a -> InputValue a -> m ([StepResult], a)
 
   -- ^ Provides the parameter setting.
-  parameters :: forall b . (ParameterType b) => a -> [ParameterSetup a b]
-
-  -- ^ Base name of experiment.
-  experimentBaseName :: a -> T.Text
-
-
-  -- modifyParameter :: a -> ParameterType a -> ParameterType a
+  parameters :: forall b . (Serialize b, ParameterType b) => a -> [ParameterSetup a b]
 
 
