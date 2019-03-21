@@ -3,7 +3,8 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Experimenter.Run
-    ( runExperiment
+    ( DatabaseSetup (..)
+    , runExperiment
     ) where
 
 import           Control.Lens
@@ -28,7 +29,7 @@ import           Experimenter.Setup
 
 
 data DatabaseSetup = DatabaseSetup
-  { connectionString    :: BS.ByteString
+  { connectionString    :: BS.ByteString -- ^. e.g. "host=localhost dbname=experimenter user=postgres password=postgres port=5432"
   , parallelConnections :: Int
   }
 
@@ -40,25 +41,26 @@ runExperiment dbSetup setup initInpSt initSt =
   liftSqlPersistMPool $ do
     runMigration migrateAll
     time <- liftIO getCurrentTime
-    let name = (setup ^. experimentBaseName)
+    let name = setup ^. experimentBaseName
     exps <- selectList [ExpName ==. name] []
     params <- mapM (\e -> selectList [ParamExperiment ==. entityKey e] []) exps
-    let mkParamTpl (Param _ n minB maxB) = (n,minB,maxB)
-    let mkMyParams :: [ParameterSetup a] -> [(T.Text, BS.ByteString, BS.ByteString)]
-        mkMyParams xs = map (mkParamTpl . convertParameterSetup (error "Ref not used")) xs
-        myParams :: [(T.Text, BS.ByteString, BS.ByteString)]
-        myParams =  mkMyParams (parameters initSt)
+    let mkParamTpl (Param _ n minB maxB) = (n, minB, maxB)
+    let myParams = map (mkParamTpl . convertParameterSetup (error "Ref not used")) (parameters initSt)
+    kExp <-
+      case find ((== myParams) . map (mkParamTpl . entityVal) . snd) (zip exps params) of
+        Nothing -> do
+          liftIO $ putStrLn "Starting new experiment..."
+          insert $ Exp name time Nothing (runPut $ put initSt) (runPut $ put initInpSt)
+        Just (eExp, _) -> liftIO (putStrLn "Continuing experiment ...") >> return (entityKey eExp)
+    continueExperiment kExp
+    -- liftIO $ print time
 
-          -- map (convertParameterSetup (error "Ref not used")) (parameters initSt)
 
-    -- case find ((== myParams) . map (entityVal)) params of
-    --   Nothing -> do
-    --     kExp <- insert $ Exp name time Nothing (runPut $ put initSt) (runPut $ put initInpSt)
-    liftIO $ print time
+continueExperiment :: MonadIO m => Key Exp -> ReaderT SqlBackend m ()
+continueExperiment kExp = do
 
-getExperiments :: MonadIO m => ReaderT SqlBackend m [Entity Exp]
-getExperiments = rawSql "select ?? from person where name=?" [PersistText "sibi"]
+  undefined
 
 
 convertParameterSetup :: ExpId -> ParameterSetup a -> Param
-convertParameterSetup expId param = Param expId (param ^. parameterName) (runPut $ put $ param ^. bounds._1) (runPut $ put $ param ^. bounds._2)
+convertParameterSetup expId (ParameterSetup name _ _ _ (minB,maxB)) = Param expId name (runPut $ put minB) (runPut $ put maxB)
