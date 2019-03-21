@@ -31,6 +31,6 @@ class (Serialize (InputValue a), Serialize (InputState a), Serialize a) => Exper
   runEvaluationStep :: (Monad m) => a -> InputValue a -> m ([StepResult], a)
 
   -- ^ Provides the parameter setting.
-  parameters :: forall b . (Serialize b, ParameterType b) => a -> [ParameterSetup a b]
+  parameters :: a -> [ParameterSetup a]
 
 

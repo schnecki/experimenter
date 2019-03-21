@@ -51,7 +51,7 @@ data Experiment a = Experiment
   , _experimentStartTime         :: UTCTime
   , _experimentEndTime           :: Maybe UTCTime
   , _experimentSetup             :: ExperimentSetup
-  , _experimentParameters        :: forall b . (ParameterType b) => [ParameterSetup a b]
+  , _experimentParameters        :: forall b . (ParameterType b) => [ParameterSetup a]
   , _experimentInitialState      :: a -- ^ state at period 0
   , _experimentInitialInputState :: InputState a
   , _experimentResults           :: [ExperimentResult a]

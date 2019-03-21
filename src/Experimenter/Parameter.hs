@@ -1,7 +1,9 @@
-{-# LANGUAGE DefaultSignatures #-}
-{-# LANGUAGE RankNTypes        #-}
-{-# LANGUAGE TemplateHaskell   #-}
-{-# LANGUAGE TypeFamilies      #-}
+{-# LANGUAGE DefaultSignatures         #-}
+{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE GADTs                     #-}
+{-# LANGUAGE RankNTypes                #-}
+{-# LANGUAGE TemplateHaskell           #-}
+{-# LANGUAGE TypeFamilies              #-}
 module Experimenter.Parameter where
 
 import           Control.Lens
@@ -9,15 +11,6 @@ import           Data.Serialize
 import qualified Data.Text           as T
 import           Experimenter.Models
 import           System.Random
-
-data ParameterSetup a b = ParameterSetup
-  { _parameterName   :: T.Text           -- ^ Name of parameter.
-  , _setParameter    :: b -> a -> a      -- ^ Set the parameter.
-  , _getParameter    :: a -> b           -- ^ Get the parameter from the current state.
-  , _modifyParameter :: Maybe (b -> IO [b]) -- ^ Either no modification or function.
-  , _bounds          :: (b, b)           -- ^ Bounds (inclusive).
-  }
-makeLenses ''ParameterSetup
 
 class (Serialize b, Ord b, Eq b) => ParameterType b where
   type Type b :: *
@@ -28,6 +21,18 @@ class (Serialize b, Ord b, Eq b) => ParameterType b where
 
   defaultBounds :: (b, b)
   {-# MINIMAL defaultBounds #-}
+
+
+data ParameterSetup a =
+  forall b . (Serialize b, ParameterType b) =>
+  ParameterSetup
+  { _parameterName   :: T.Text           -- ^ Name of parameter.
+  , _setParameter    :: b -> a -> a      -- ^ Set the parameter.
+  , _getParameter    :: a -> b           -- ^ Get the parameter from the current state.
+  , _modifyParameter :: Maybe (b -> IO [b]) -- ^ Either no modification or function.
+  , _bounds          :: (b, b)           -- ^ Bounds (inclusive).
+  }
+makeLenses ''ParameterSetup
 
 
 instance ParameterType Bool where

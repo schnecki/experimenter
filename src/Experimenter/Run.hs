@@ -44,10 +44,10 @@ runExperiment dbSetup setup initInpSt initSt =
     exps <- selectList [ExpName ==. name] []
     params <- mapM (\e -> selectList [ParamExperiment ==. entityKey e] []) exps
     let mkParamTpl (Param _ n minB maxB) = (n,minB,maxB)
-    let mkMyParams :: forall b . (Serialize b, ParameterType b) => [ParameterSetup a b] -> [(T.Text, BS.ByteString, BS.ByteString)]
+    let mkMyParams :: [ParameterSetup a] -> [(T.Text, BS.ByteString, BS.ByteString)]
         mkMyParams xs = map (mkParamTpl . convertParameterSetup (error "Ref not used")) xs
         myParams :: [(T.Text, BS.ByteString, BS.ByteString)]
-        myParams = mkMyParams (parameters initSt)
+        myParams =  mkMyParams (parameters initSt)
 
           -- map (convertParameterSetup (error "Ref not used")) (parameters initSt)
 
@@ -60,5 +60,5 @@ getExperiments :: MonadIO m => ReaderT SqlBackend m [Entity Exp]
 getExperiments = rawSql "select ?? from person where name=?" [PersistText "sibi"]
 
 
-convertParameterSetup :: forall a b . (ExperimentDef a, Serialize b) => ExpId -> ParameterSetup a b -> Param
+convertParameterSetup :: ExpId -> ParameterSetup a -> Param
 convertParameterSetup expId param = Param expId (param ^. parameterName) (runPut $ put $ param ^. bounds._1) (runPut $ put $ param ^. bounds._2)
