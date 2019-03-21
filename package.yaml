@@ -27,6 +27,12 @@ dependencies:
 - lens
 - text
 - cereal
+- monad-logger
+- mtl
+- time
+- random
+- bytestring
+- aeson
 
 library:
   source-dirs: src

@@ -1,0 +1,24 @@
+Experiment json         -- Adding "json" causes ToJSON and FromJSON instances to be derived.
+    name Text
+    startTime UTCTime
+    endTime UTCTime
+    experimentState ExperimentState
+
+InitialState
+    experiment ExperimentId
+    data ByteString
+
+Setup
+    experiment ExperimentId
+    experimentRepetitions Int
+    preparationSteps Int
+    evaluationWarmUpSteps Int Maybe
+    evaluationSteps Int
+    evaluationReplications Int
+    maximumParallelEvaluations Int
+
+
+-- Parameter
+--     ExperimentId
+--     deriving Show
+

@@ -12,7 +12,7 @@ data Parameter a b = Parameter
   }
 
 
-class ParameterType b where
+class (Ord b, Eq b) => ParameterType b where
   type Type b :: *
   defaultModifyParameter :: b -> [b]
 
@@ -32,7 +32,6 @@ instance ParameterType Int where
 instance ParameterType Double where
   type Type Double = Double
   defaultModifyParameter v = [v+0.1, v-0.1]
-
 
 instance ParameterType Float where
   type Type Float = Float

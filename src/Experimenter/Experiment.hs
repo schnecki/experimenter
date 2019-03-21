@@ -33,8 +33,8 @@ class Experiment a where
   -- ^ Provides the parameter setting.
   parameters :: forall b . (ParameterType b) => a -> [Parameter a b]
 
-  -- ^ Name of experiment.
-  experimentName :: a -> T.Text
+  -- ^ Base name of experiment.
+  experimentBaseName :: a -> T.Text
 
 
   -- modifyParameter :: a -> ParameterType a -> ParameterType a
