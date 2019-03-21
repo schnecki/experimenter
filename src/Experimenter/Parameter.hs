@@ -1,40 +1,51 @@
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TypeFamilies    #-}
-
+{-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE TemplateHaskell   #-}
+{-# LANGUAGE TypeFamilies      #-}
 module Experimenter.Parameter where
 
 import           Control.Lens
+import           Data.Serialize
+import qualified Data.Text      as T
+import           System.Random
 
-data Parameter a b = Parameter
-  { _setParameter    :: b -> a -> a      -- ^ Set the parameter.
+data ParameterSetup a b = ParameterSetup
+  { _parameterName   :: T.Text           -- ^ Name of parameter.
+  , _setParameter    :: b -> a -> a      -- ^ Set the parameter.
   , _getParameter    :: a -> b           -- ^ Get the parameter from the current state.
-  , _modifyParameter :: Maybe (b -> [b]) -- ^ Either no modification or function.
+  , _modifyParameter :: Maybe (b -> IO [b]) -- ^ Either no modification or function.
+  , _bounds          :: (b, b)           -- ^ Bounds (inclusive).
   }
+makeLenses ''ParameterSetup
 
-
-class (Ord b, Eq b) => ParameterType b where
+class (Serialize b, Ord b, Eq b) => ParameterType b where
   type Type b :: *
-  defaultModifyParameter :: b -> [b]
+
+  defaultModifyParameter :: b -> IO [b]
+  default defaultModifyParameter :: (Random b) => b -> IO [b]
+  defaultModifyParameter _ = return <$> randomRIO defaultBounds
+
+  defaultBounds :: (b, b)
+  {-# MINIMAL defaultBounds #-}
 
 
 instance ParameterType Bool where
   type Type Bool = Bool
-  defaultModifyParameter = pure . not
+  defaultBounds = (False, True)
 
 instance ParameterType Integer where
   type Type Integer = Integer
-  defaultModifyParameter v = [v+1, v-1]
+  defaultBounds = (-1, 1)
 
 instance ParameterType Int where
   type Type Int = Int
-  defaultModifyParameter v = [v+1, v-1]
+  defaultBounds = (-1, 1)
 
 instance ParameterType Double where
   type Type Double = Double
-  defaultModifyParameter v = [v+0.1, v-0.1]
+  defaultBounds = (0, 1)
 
 instance ParameterType Float where
   type Type Float = Float
-  defaultModifyParameter v = [v+0.1, v-0.1]
+  defaultBounds = (0, 1)
 
 

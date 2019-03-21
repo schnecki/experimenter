@@ -1,15 +1,17 @@
-{-# LANGUAGE RankNTypes      #-}
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE RankNTypes       #-}
+{-# LANGUAGE TemplateHaskell  #-}
 
 
 module Experimenter.Result where
 
-import           Experimenter.Models
+import           Experimenter.Input
+import           Experimenter.Measure
 import           Experimenter.Parameter
-import           Experimenter.StepResult
+import           Experimenter.Setup
 
 import           Control.Lens
-import qualified Data.Text               as T
+import qualified Data.Text              as T
 import           Data.Time
 import           System.Random
 
@@ -17,9 +19,11 @@ import           System.Random
 data ReplicationResult a = ReplicationResult
   { _replicationNumber          :: Integer
   , _replicationRandomGenerator :: forall g . (Show g, Read g, RandomGen g) => g
+  , _warmUpInputValues          :: [Input a]
   , _warmUpResults              :: [Measure]
   , _warmUpEndState             :: a    -- ^ state at end of warm-up phase
   , _warmUpEndTime              :: UTCTime
+  , _replicationInputValues     :: [Input a]
   , _replicationResults         :: [Measure]
   , _replicationEndState        :: a    -- ^ state at end of experiment
   , _replicationEndTime         :: UTCTime
@@ -27,23 +31,24 @@ data ReplicationResult a = ReplicationResult
 makeLenses ''ReplicationResult
 
 data ExperimentResult a = ExperimentResult
-  { _experimentRepetitionNumber :: Integer
-  , _preparationStartTime       :: UTCTime
-  , _preparationResults         :: [Measure]
-  , _preparationEndTime         :: UTCTime
-  , _preparationEndState        :: a -- ^ state after preparation phase
-  , _evaluationResults          :: [ReplicationResult a]
+  { _repetitionNumber       :: Integer
+  , _preparationStartTime   :: UTCTime
+  , _preparationEndTime     :: UTCTime
+  , _preparationInputValues :: [Input a]
+  , _preparationResults     :: [Measure]
+  , _preparationEndState    :: a -- ^ state after preparation phase
+  , _evaluationResults      :: [ReplicationResult a]
   }
 makeLenses ''ExperimentResult
 
 
-data ExperimentResults a = ExperimentResults
-  { _experimentStartTime        :: UTCTime
-  , _experimentEndTime          :: UTCTime
-  , _experimentName             :: T.Text
-  , _experimentSetup            :: Setup
-  , _experimentResultParameters :: forall b . (ParameterType b) => [Parameter a b]
-  , _experimentInitialState     :: a -- ^ state at period 0
-
+data Experiment a = Experiment
+  { _experimentName         :: T.Text
+  , _experimentStartTime    :: UTCTime
+  , _experimentEndTime      :: Maybe UTCTime
+  , _experimentSetup        :: ExperimentSetup
+  , _experimentParameters   :: forall b . (ParameterType b) => [ParameterSetup a b]
+  , _experimentInitialState :: a -- ^ state at period 0
+  , _experimentResults      :: [ExperimentResult a]
   }
-makeLenses ''ExperimentResults
+makeLenses ''Experiment

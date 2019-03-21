@@ -1,24 +1,91 @@
-Experiment json         -- Adding "json" causes ToJSON and FromJSON instances to be derived.
+Exp         -- Adding "json" causes ToJSON and FromJSON instances to be derived.
     name Text
     startTime UTCTime
-    endTime UTCTime
-    experimentState ExperimentState
+    endTime UTCTime Maybe
+    initialState ByteString
 
-InitialState
-    experiment ExperimentId
-    data ByteString
+Param
+    experiment ExpId
+    name Text
+    minBound ByteString
+    maxBound ByteString
 
-Setup
-    experiment ExperimentId
-    experimentRepetitions Int
-    preparationSteps Int
+ExpSetup
+    experiment ExpId
+    repetitions Int
+    preparationSteps Int Maybe
     evaluationWarmUpSteps Int Maybe
     evaluationSteps Int
     evaluationReplications Int
     maximumParallelEvaluations Int
 
+ExpResult
+    experiment ExpId
+    repetition Int
+    preparationStartTime UTCTime
+    preparationEndTime UTCTime
+    preparationEndState ByteString
 
--- Parameter
---     ExperimentId
---     deriving Show
+PrepInput
+    expResult ExpResultId
+    period Int
 
+PrepInputValue
+    prepInput PrepInputId
+    value ByteString
+
+PrepMeasure
+    expResult ExpResultId
+    period Int
+
+PrepResultStep
+    measure PrepMeasureId
+    name Text
+    xValue  Double
+    yValue  Double
+
+RepResult
+    expResult ExpResultId
+    repNr Int
+    randomGen Text
+    warmUpEndState ByteString
+    warmUpEndTime UTCTime
+    repEndState ByteString
+    repEndTime UTCTime
+
+
+WarmUpInput
+    repResult RepResultId
+    period Int
+
+WarmUpInputValue
+    warmUpInput WarmUpInputId
+    value ByteString
+
+WarmUpMeasure
+    expResult ExpResultId
+    period Int
+
+WarmUpResultStep
+    measure WarmUpMeasureId
+    name Text
+    xValue  Double
+    yValue  Double
+
+RepInput
+    repResult RepResultId
+    period Int
+
+RepInputValue
+    repInput RepInputId
+    value ByteString
+
+RepMeasure
+    expResult ExpResultId
+    period Int
+
+RepResultStep
+    measure RepMeasureId
+    name Text
+    xValue  Double
+    yValue  Double
