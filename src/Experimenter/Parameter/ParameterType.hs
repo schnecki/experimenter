@@ -1,6 +1,6 @@
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE TypeFamilies      #-}
-module Experimenter.ParameterType where
+module Experimenter.Parameter.ParameterType where
 
 import           Data.Serialize
 import           System.Random

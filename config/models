@@ -7,15 +7,14 @@ Exp         -- Adding "json" causes ToJSON and FromJSON instances to be derived.
     deriving Eq Ord
 
 Param
-    experiment ExpId
+    exp ExpId
     name Text
     minBound ByteString
     maxBound ByteString
     deriving Eq Ord
 
-
 ExpSetup
-    experiment ExpId
+    exp ExpId
     repetitions Int
     preparationSteps Int Maybe
     evaluationWarmUpSteps Int Maybe
@@ -24,12 +23,17 @@ ExpSetup
     maximumParallelEvaluations Int
 
 ExpResult
-    experiment ExpId
+    exp ExpId
     repetition Int
     preparationStartTime UTCTime
     preparationEndTime UTCTime
     preparationEndState ByteString
     preparationEndInputState ByteString
+
+ParamSetting
+    expResult ExpId
+    name Text
+    value ByteString
 
 PrepInput
     expResult ExpResultId
