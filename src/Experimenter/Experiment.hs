@@ -10,7 +10,7 @@ import           Experimenter.Parameter
 import           Experimenter.StepResult
 
 import           Data.Serialize          (Get, Putter, Serialize)
-import qualified Data.Text               as T
+import           System.Random
 
 class (Serialize (InputValue a), Serialize (InputState a), Serialize a) => ExperimentDef a where
 
@@ -19,7 +19,7 @@ class (Serialize (InputValue a), Serialize (InputState a), Serialize a) => Exper
   type InputState a :: *
 
   -- ^ Generate some input values.
-  generateInput :: (Monad m) => InputState a -> a -> m (InputState a, InputValue a)
+  generateInput :: (Monad m, RandomGen g) => g -> InputState a -> a -> m (InputValue a, InputState a)
 
   -- ^ Preparation (e.g. Loading from saved state, or training phase in ML applications).
   runPreparationStep :: (Monad m) => Maybe (Either (Get a) (a -> InputValue a -> m ([StepResult], a)))

@@ -19,7 +19,7 @@ import           System.Random
 
 data ReplicationResult a = ReplicationResult
   { _replicationResultKey       :: !(Maybe (Key RepResult))
-  , _replicationNumber          :: !Integer
+  , _replicationNumber          :: !Int
   , _replicationRandomGenerator :: forall g . (Show g, Read g, RandomGen g) => g
   , _warmUpInputValues          :: ![Input a]
   , _warmUpResults              :: ![Measure]
@@ -36,8 +36,8 @@ makeLenses ''ReplicationResult
 
 data ExperimentResult a = ExperimentResult
   { _experimentResultKey      :: !(Maybe (Key ExpResult))
-  , _repetitionNumber         :: !Integer
-  , _parameterSetup           :: ![ParameterSetup a]
+  , _repetitionNumber         :: !Int
+  , _parameterSetup           :: ![ParameterSetting a]
   , _preparationStartTime     :: !UTCTime
   , _preparationEndTime       :: !UTCTime
   , _preparationInputValues   :: ![Input a]

@@ -10,12 +10,12 @@ import           Experimenter.Models
 
 data ExperimentSetup = ExperimentSetup
   { _experimentBaseName         :: T.Text         -- ^ Base name of experiment.
-  , _experimentRepetitions      :: Integer
-  , _preparationSteps           :: Maybe Integer
-  , _evaluationWarmUpSteps      :: Maybe Integer
-  , _evaluationSteps            :: Integer
-  , _evaluationReplications     :: Integer
-  , _maximumParallelEvaluations :: Integer
+  , _experimentRepetitions      :: Int
+  , _preparationSteps           :: Maybe Int
+  , _evaluationWarmUpSteps      :: Maybe Int
+  , _evaluationSteps            :: Int
+  , _evaluationReplications     :: Int
+  , _maximumParallelEvaluations :: Int
   }
 makeLenses ''ExperimentSetup
 

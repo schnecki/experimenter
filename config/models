@@ -21,6 +21,7 @@ ExpSetup
     evaluationSteps Int
     evaluationReplications Int
     maximumParallelEvaluations Int
+    UniqueExpSetup exp
 
 ExpResult
     exp ExpId
@@ -31,7 +32,7 @@ ExpResult
     preparationEndInputState ByteString
 
 ParamSetting
-    expResult ExpId
+    expResult ExpResultId
     name Text
     value ByteString
 
@@ -50,7 +51,7 @@ PrepMeasure
 PrepResultStep
     measure PrepMeasureId
     name Text
-    xValue  Double
+    xValue  Double Maybe
     yValue  Double
 
 RepResult
@@ -74,13 +75,13 @@ WarmUpInputValue
     value ByteString
 
 WarmUpMeasure
-    expResult ExpResultId
+    repResult RepResultId
     period Int
 
 WarmUpResultStep
     measure WarmUpMeasureId
     name Text
-    xValue  Double
+    xValue  Double Maybe
     yValue  Double
 
 RepInput
@@ -92,11 +93,11 @@ RepInputValue
     value ByteString
 
 RepMeasure
-    expResult ExpResultId
+    repResult RepResultId
     period Int
 
 RepResultStep
     measure RepMeasureId
     name Text
-    xValue  Double
+    xValue  Double Maybe
     yValue  Double

@@ -10,7 +10,7 @@ import           Control.Lens
 import           Experimenter.Experiment
 
 data Input a = Input
-  { _inputValuePeriod :: Integer
+  { _inputValuePeriod :: Int
   , _inputValue       :: InputValue a
   }
 
