@@ -19,9 +19,11 @@ queryParamSettings :: (MonadIO m) => Key Exp -> ReaderT SqlBackend m [(Entity Ex
 queryParamSettings kExp =
   select $
   from $ \(expRes, paramSet) -> do
+    where_ (expRes ^. ExpResultId ==. paramSet ^. ParamSettingExpResult)
     where_ (expRes ^. ExpResultExp ==. val kExp)
     orderBy [asc (expRes ^. ExpResultRepetition)]
     return (expRes, paramSet)
+
 
 queryParamSettingsGrouped :: (MonadIO m) => Key Exp -> ReaderT SqlBackend m [(Entity ExpResult, [Entity ParamSetting])]
 queryParamSettingsGrouped kExp = do

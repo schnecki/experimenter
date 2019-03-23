@@ -80,7 +80,9 @@ loadPreparationInput kExpRes = do
   res <-
     E.select $
     E.from $ \(prepI, prepIV) -> do
+      E.where_ (prepI E.^. PrepInputId E.==. prepIV E.^. PrepInputValuePrepInput)
       E.where_ (prepI E.^. PrepInputExpResult E.==. E.val kExpRes)
+
       return (prepI, prepIV)
   sequence <$> mapM mkInput res
   where
@@ -95,6 +97,7 @@ loadPrepartionMeasures kExpRes = do
   res <-
     E.select $
     E.from $ \(prepM, prepRS) -> do
+      E.where_ (prepM E.^. PrepMeasureId E.==. prepRS E.^. PrepResultStepMeasure)
       E.where_ (prepM E.^. PrepMeasureExpResult E.==. E.val kExpRes)
       E.orderBy [E.asc (prepM E.^. PrepMeasurePeriod)]
       return (prepM, prepRS)
@@ -136,6 +139,7 @@ loadReplicationWarmUpInput kExpRes = do
   res <-
     E.select $
     E.from $ \(warmUpI, warmUpIV) -> do
+      E.where_ (warmUpI E.^. WarmUpInputId E.==. warmUpIV E.^. WarmUpInputValueWarmUpInput)
       E.where_ (warmUpI E.^. WarmUpInputRepResult E.==. E.val kExpRes)
       return (warmUpI, warmUpIV)
   sequence <$> mapM mkInput res
@@ -150,6 +154,7 @@ loadReplicationWarmUpMeasures kExpRes = do
   res <-
     E.select $
     E.from $ \(warmUpM, warmUpRS) -> do
+      E.where_ (warmUpM E.^. WarmUpMeasureId E.==. warmUpRS E.^. WarmUpResultStepMeasure)
       E.where_ (warmUpM E.^. WarmUpMeasureRepResult E.==. E.val kExpRes)
       E.orderBy [E.asc (warmUpM E.^. WarmUpMeasurePeriod)]
       return (warmUpM, warmUpRS)
@@ -165,6 +170,7 @@ loadReplicationInput kExpRes = do
   res <-
     E.select $
     E.from $ \(repI, repIV) -> do
+      E.where_ (repI E.^. RepInputId E.==. repIV E.^. RepInputValueRepInput)
       E.where_ (repI E.^. RepInputRepResult E.==. E.val kExpRes)
       return (repI, repIV)
   sequence <$> mapM mkInput res
@@ -179,6 +185,7 @@ loadReplicationMeasures kExpRes = do
   res <-
     E.select $
     E.from $ \(repM, repRS) -> do
+      E.where_ (repM E.^. RepMeasureId E.==. repRS E.^. RepResultStepMeasure)
       E.where_ (repM E.^. RepMeasureRepResult E.==. E.val kExpRes)
       E.orderBy [E.asc (repM E.^. RepMeasurePeriod)]
       return (repM, repRS)
