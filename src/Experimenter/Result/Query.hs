@@ -110,7 +110,7 @@ loadPrepartionMeasures kExpRes = do
 loadReplicationResults :: (ExperimentDef a, MonadLogger m, MonadIO m) => Key ExpResult -> ReaderT SqlBackend m [ReplicationResult a]
 loadReplicationResults kExpRes = do
   xs <- selectList [RepResultExpResult ==. kExpRes] []
-  fromMaybe [] . sequence <$> mapM loadReplicationResult xs
+  maybe [] (L.sortBy (compare `on` view replicationNumber)) . sequence <$> mapM loadReplicationResult xs
 
 
 loadReplicationResult :: (ExperimentDef a, MonadLogger m, MonadIO m) => Entity RepResult -> ReaderT SqlBackend m (Maybe (ReplicationResult a))
