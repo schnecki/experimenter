@@ -16,35 +16,34 @@ import qualified Data.Text               as T
 import           Data.Time
 import           System.Random
 
+data ResultData a = ResultData
+  { _startTime       :: !UTCTime
+  , _endTime         :: !(Maybe UTCTime)
+  , _startRandGen    :: StdGen
+  , _endRandGen      :: Maybe StdGen
+  , _inputValues     :: ![Input a]
+  , _results         :: ![Measure]
+  , _startState      :: !a
+  , _endState        :: !(Maybe a)    -- ^ state at end of warm-up phase
+  , _startInputState :: !(InputState a)
+  , _endInputState   :: !(Maybe (InputState a))
+  }
+makeLenses ''ResultData
 
 data ReplicationResult a = ReplicationResult
-  { _replicationResultKey       :: !(Maybe (Key RepResult))
-  , _replicationNumber          :: !Int
-  , _replicationRandomGenerator :: forall g . (Show g, Read g, RandomGen g) => g
-  , _warmUpInputValues          :: ![Input a]
-  , _warmUpResults              :: ![Measure]
-  , _warmUpEndState             :: !a    -- ^ state at end of warm-up phase
-  , _warmUpEndInputState        :: !(InputState a)
-  , _warmUpEndTime              :: !UTCTime
-  , _replicationInputValues     :: ![Input a]
-  , _replicationResults         :: ![Measure]
-  , _replicationEndState        :: !a    -- ^ state at end of experiment
-  , _replicationEndInputState   :: !(InputState a)
-  , _replicationEndTime         :: !UTCTime
+  { _replicationResultKey :: !(Key RepResult)
+  , _replicationNumber    :: !Int
+  , _warmUpResults        :: Maybe (ResultData a)
+  , _evalResults          :: Maybe (ResultData a)
   }
 makeLenses ''ReplicationResult
 
 data ExperimentResult a = ExperimentResult
-  { _experimentResultKey      :: !(Maybe (Key ExpResult))
-  , _repetitionNumber         :: !Int
-  , _parameterSetup           :: ![ParameterSetting a]
-  , _preparationStartTime     :: !UTCTime
-  , _preparationEndTime       :: !UTCTime
-  , _preparationInputValues   :: ![Input a]
-  , _preparationResults       :: ![Measure]
-  , _preparationEndState      :: !a -- ^ state after preparation phase
-  , _preparationEndInputState :: !(InputState a)
-  , _evaluationResults        :: ![ReplicationResult a]
+  { _experimentResultKey :: !(Key ExpResult)
+  , _repetitionNumber    :: !Int
+  , _parameterSetup      :: ![ParameterSetting a]
+  , _preparationResults  :: Maybe (ResultData a)
+  , _evaluationResults   :: ![ReplicationResult a]
   }
 makeLenses ''ExperimentResult
 

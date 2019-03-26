@@ -26,10 +26,18 @@ ExpSetup
 ExpResult
     exp ExpId
     repetition Int
-    preparationStartTime UTCTime
-    preparationEndTime UTCTime
-    preparationEndState ByteString
-    preparationEndInputState ByteString
+
+ExpResultData
+    expResult                       ExpResultId
+    startTime                       UTCTime
+    endTime                         UTCTime Maybe
+    startRandGen                    Text
+    endRandGen                      Text Maybe
+    startState                      ByteString
+    endState                        ByteString Maybe
+    startInputState                 ByteString
+    endInputState                   ByteString Maybe
+    UniquePrepResultDataExpResult   expResult
 
 ParamSetting
     expResult ExpResultId
@@ -57,13 +65,31 @@ PrepResultStep
 RepResult
     expResult ExpResultId
     repNr Int
-    randomGen Text
-    warmUpEndState ByteString
-    warmUpEndInputState ByteString
-    warmUpEndTime UTCTime
-    repEndState ByteString
-    repEndInputState ByteString
-    repEndTime UTCTime
+
+WarmUpResultData
+    repResult                       RepResultId
+    startTime                       UTCTime
+    endTime                         UTCTime Maybe
+    startRandGen                    Text
+    endRandGen                      Text Maybe
+    startState                      ByteString
+    endState                        ByteString Maybe
+    startInputState                 ByteString
+    endInputState                   ByteString Maybe
+    UniqueWarmUpResultDataRepResult repResult
+
+
+RepResultData
+    repResult                       RepResultId
+    startTime                       UTCTime
+    endTime                         UTCTime Maybe
+    startRandGen                    Text
+    endRandGen                      Text Maybe
+    startState                      ByteString
+    endState                        ByteString Maybe
+    startInputState                 ByteString
+    endInputState                   ByteString Maybe
+    UniqueRepResultDataRepResult    repResult
 
 
 WarmUpInput

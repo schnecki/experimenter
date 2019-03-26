@@ -19,6 +19,7 @@ import           Data.Time                   (getCurrentTime)
 import qualified Database.Esqueleto          as E
 import           Database.Persist
 import           Database.Persist.Postgresql (SqlBackend)
+import           System.Random               (newStdGen)
 
 import           Experimenter.Experiment
 import           Experimenter.Input
@@ -39,6 +40,8 @@ loadExperiment setup initInpSt initSt = do
   expRes <- loadExperimentResults (entityKey eExp)
   return $ Experiment (entityKey eExp) (view expName e) (view expStartTime e) (view expEndTime e) (entityVal eSetup) (parameters initSt) initSt initInpSt expRes
 
+mDeserialise :: (MonadLogger m, Serialize a) => Maybe ByteString -> m (Maybe a)
+mDeserialise mBs = maybe (return Nothing) deserialise mBs
 
 deserialise :: (MonadLogger m, Serialize a) => ByteString -> m (Maybe a)
 deserialise bs =
@@ -55,18 +58,25 @@ loadExperimentResults kExp = do
 
 
 loadExperimentResult :: (ExperimentDef a, MonadLogger m, MonadIO m) => Entity ExpResult -> ReaderT SqlBackend m (Maybe (ExperimentResult a))
-loadExperimentResult (Entity k (ExpResult _ rep prepStartT prepEndT prepEndStBS prepEndInpStBS)) = do
+loadExperimentResult (Entity k (ExpResult _ rep)) = do
+  (ExpResultData _ startT endT startRandGen endRandGen startStBS endStBS startInpStBS endInpStBS) <-
+    maybe (error "Could not get PrepResultData") entityVal <$> getBy (UniquePrepResultDataExpResult k)
   paramSetting <- loadParamSetup k
-  mPrepInputVals <- loadPreparationInput k
-  prepResults <- loadPrepartionMeasures k
+  mInputVals <- loadPreparationInput k
+  results <- loadPrepartionMeasures k
   evalResults <- loadReplicationResults k
-  mPrepEndInpSt <- deserialise prepEndInpStBS
-  mPrepEndSt <- deserialise prepEndStBS
-  return $
-    do prepEndInpSt <- mPrepEndInpSt
-       prepEndSt <- mPrepEndSt
-       prepInputVals <- mPrepInputVals
-       return $ ExperimentResult (Just k) rep paramSetting prepStartT prepEndT prepInputVals prepResults prepEndSt prepEndInpSt evalResults
+  mStartSt <- deserialise startStBS
+  mEndSt <- mDeserialise endStBS
+  mStartInpSt <- deserialise startInpStBS
+  mEndInpSt <- mDeserialise endInpStBS
+  return $ do
+    startSt <- mStartSt
+    endSt <- mEndSt
+    endInpSt <- mEndInpSt
+    startInpSt <- mStartInpSt
+    inputVals <- mInputVals
+    let prepRes = ResultData startT endT (tread startRandGen) (tread <$> endRandGen) inputVals results startSt endSt startInpSt endInpSt
+    return $ ExperimentResult k rep paramSetting (Just prepRes) evalResults
 
 
 loadParamSetup :: (MonadLogger m, MonadIO m) => Key ExpResult -> ReaderT SqlBackend m [ParameterSetting a]
@@ -114,24 +124,47 @@ loadReplicationResults kExpRes = do
 
 
 loadReplicationResult :: (ExperimentDef a, MonadLogger m, MonadIO m) => Entity RepResult -> ReaderT SqlBackend m (Maybe (ReplicationResult a))
-loadReplicationResult (Entity k (RepResult _ repNr randGen wmUpEndStBS wmUpEndInpStBS wmUpEndTime repEndStBS repEndInpStBS repEndTime)) = do
+loadReplicationResult (Entity k (RepResult _ repNr))
+  --  startRG wmUpEndStBS wmUpEndInpStBS wmUpEndTime wmUpEndRG repEndStBS repEndInpStBS repEndTime repEndRG))
+ = do
+  wmUpRes <- maybe (error "Could not get WarmUpResultData. Database corrupted!") entityVal <$> getBy (UniqueWarmUpResultDataRepResult k)
+  repRes <- maybe (error "Could not get WarmUpResultData. Database corrupted!") entityVal <$> getBy (UniqueRepResultDataRepResult k)
+  let wmUpStartTime = view warmUpResultDataStartTime wmUpRes
+  let wmUpEndTime = view warmUpResultDataEndTime wmUpRes
+  let wmUpStartRandGen = tread $ view warmUpResultDataStartRandGen wmUpRes
+  let wmUpEndRandGen = tread <$> view warmUpResultDataEndRandGen wmUpRes
   mWmUpInpVals <- loadReplicationWarmUpInput k
   wmUpMeasures <- loadReplicationWarmUpMeasures k
-  mWmUpEndSt <- deserialise wmUpEndStBS
-  mWmUpEndInpSt <- deserialise wmUpEndInpStBS
+  mWmUpStartSt <- deserialise (view warmUpResultDataStartState wmUpRes)
+  mWmUpEndSt <- mDeserialise (view warmUpResultDataEndState wmUpRes)
+  mWmUpStartInpSt <- deserialise (view warmUpResultDataStartInputState wmUpRes)
+  mWmUpEndInpSt <- mDeserialise (view warmUpResultDataEndInputState wmUpRes)
+  let repStartTime = view repResultDataStartTime repRes
+  let repEndTime = view repResultDataEndTime repRes
+  let repStartRandGen = tread $ view repResultDataStartRandGen repRes
+  let repEndRandGen = tread <$> view repResultDataEndRandGen repRes
   mRepInpVals <- loadReplicationInput k
   repMeasures <- loadReplicationMeasures k
-  mRepEndSt <- deserialise repEndStBS
-  mRepEndInpSt <- deserialise repEndInpStBS
+  mRepStartSt <- deserialise (view repResultDataStartState repRes)
+  mRepEndSt <- mDeserialise (view repResultDataEndState repRes)
+  mRepStartInpSt <- deserialise (view repResultDataStartInputState repRes)
+  mRepEndInpSt <- mDeserialise (view repResultDataEndInputState repRes)
   return $ do
-    wmUpEndSt <- mWmUpEndSt
-    wmUpEndInpSt <- mWmUpEndInpSt
-    wmUpInpVals <- mWmUpInpVals
-    repEndSt <- mRepEndSt
-    repEndInpSt <- mRepEndInpSt
-    repInpVals <- mRepInpVals
-    return $
-      ReplicationResult (Just k) repNr (read $ T.unpack randGen) wmUpInpVals wmUpMeasures wmUpEndSt wmUpEndInpSt wmUpEndTime repInpVals repMeasures repEndSt repEndInpSt repEndTime
+    let wmUp = do
+          wmUpInpVals <- mWmUpInpVals
+          wmUpStartSt <- mWmUpStartSt
+          wmUpEndSt <- mWmUpEndSt
+          wmUpStartInpSt <- mWmUpStartInpSt
+          wmUpEndInpSt <- mWmUpEndInpSt
+          return $ ResultData wmUpStartTime wmUpEndTime wmUpStartRandGen wmUpEndRandGen wmUpInpVals wmUpMeasures wmUpStartSt wmUpEndSt wmUpStartInpSt wmUpEndInpSt
+    let rep = do
+          repInpVals <- mRepInpVals
+          repStartSt <- mRepStartSt
+          repEndSt <- mRepEndSt
+          repStartInpSt <- mRepStartInpSt
+          repEndInpSt <- mRepEndInpSt
+          return $ ResultData repStartTime repEndTime repStartRandGen repEndRandGen repInpVals repMeasures repStartSt repEndSt repStartInpSt repEndInpSt
+    return $ ReplicationResult k repNr wmUp rep
 
 
 loadReplicationWarmUpInput :: (ExperimentDef a, MonadLogger m, MonadIO m) => Key RepResult -> ReaderT SqlBackend m (Maybe [Input a])
