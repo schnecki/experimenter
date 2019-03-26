@@ -49,14 +49,24 @@ makeLenses ''ExperimentResult
 
 
 data Experiment a = Experiment
-  { _experimentKey               :: !(Key Exp)
-  , _experimentName              :: !T.Text
-  , _experimentStartTime         :: !UTCTime
-  , _experimentEndTime           :: !(Maybe UTCTime)
-  , _experimentSetup             :: !ExpSetup
-  , _experimentParameters        :: ![ParameterSetup a]
-  , _experimentInitialState      :: !a -- ^ state at period 0
-  , _experimentInitialInputState :: !(InputState a)
-  , _experimentResults           :: ![ExperimentResult a]
+  { _experimentKey       :: !(Key Exp)
+  , _experimentNumber    :: !Int
+  , _experimentStartTime :: !UTCTime
+  , _experimentEndTime   :: !(Maybe UTCTime)
+  , _experimentResults   :: ![ExperimentResult a]
   }
 makeLenses ''Experiment
+
+
+data Experiments a = Experiments
+  { _experimentsKey               :: !(Key Exps)
+  , _experimentsName              :: !T.Text
+  , _experimentsStartTime         :: !UTCTime
+  , _experimentsEndTime           :: !(Maybe UTCTime)
+  , _experimentsSetup             :: !ExpsSetup
+  , _experimentsParameters        :: ![ParameterSetup a]
+  , _experimentsInitialState      :: !a -- ^ state at period 0
+  , _experimentsInitialInputState :: !(InputState a)
+  , _experiments                  :: [Experiment a]
+  }
+makeLenses ''Experiments

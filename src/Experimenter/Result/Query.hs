@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell   #-}
 module Experimenter.Result.Query
-    ( loadExperiment
+    ( loadExperiments
     ) where
 
 
@@ -32,16 +32,21 @@ import           Experimenter.StepResult
 import           Experimenter.Util
 
 
-loadExperiment :: (ExperimentDef a, MonadLogger m, MonadIO m) => ExperimentSetup -> InputState a -> a -> ReaderT SqlBackend m (Experiment a)
-loadExperiment setup initInpSt initSt = do
-  eExp <- getOrCreateExp setup initInpSt initSt
-  eSetup <- fromMaybe (error "Setup not found. Your DB is corrupted!") <$> getBy (UniqueExpSetup (entityKey eExp))
+loadExperiments :: (ExperimentDef a, MonadLogger m, MonadIO m) => ExperimentSetup -> InputState a -> a -> ReaderT SqlBackend m (Experiments a)
+loadExperiments setup initInpSt initSt = do
+  eExp <- getOrCreateExps setup initInpSt initSt
   let e = entityVal eExp
-  expRes <- loadExperimentResults (entityKey eExp)
-  return $ Experiment (entityKey eExp) (view expName e) (view expStartTime e) (view expEndTime e) (entityVal eSetup) (parameters initSt) initSt initInpSt expRes
+  exps <- L.sortBy (compare `on` view experimentNumber) <$> loadExperimentList (entityKey eExp)
+  eSetup <- fromMaybe (error "Setup not found. Your DB is corrupted!") <$> getBy (UniqueExpsSetup (entityKey eExp))
+  return $ Experiments (entityKey eExp) (view expsName e) (view expsStartTime e) (view expsEndTime e) (entityVal eSetup) (parameters initSt) initSt initInpSt exps
+
+
+loadExperimentList :: (ExperimentDef a, MonadLogger m, MonadIO m) => Key Exps -> ReaderT SqlBackend m [Experiment a]
+loadExperimentList expsKey = selectList [ExpExps ==. expsKey] [] >>= mapM mkExperiment
+    where mkExperiment (Entity k exp) = Experiment k (view expNumber exp) (view expStartTime exp) (view expEndTime exp) <$> loadExperimentResults k
 
 mDeserialise :: (MonadLogger m, Serialize a) => Maybe ByteString -> m (Maybe a)
-mDeserialise mBs = maybe (return Nothing) deserialise mBs
+mDeserialise = maybe (return Nothing) deserialise
 
 deserialise :: (MonadLogger m, Serialize a) => ByteString -> m (Maybe a)
 deserialise bs =
@@ -228,19 +233,18 @@ loadReplicationMeasures kExpRes = do
     combineMeasures xs@(Measure p _:_) = Measure p (concatMap (view measureResults) xs)
     combineMeasures _                  = error "not possible"
 
-
-getOrCreateExp :: (ExperimentDef a, MonadLogger m, MonadIO m) => ExperimentSetup -> InputState a -> a -> ReaderT SqlBackend m (Entity Exp)
-getOrCreateExp setup initInpSt initSt = do
+getOrCreateExps :: (ExperimentDef a, MonadLogger m, MonadIO m) => ExperimentSetup -> InputState a -> a -> ReaderT SqlBackend m (Entity Exps)
+getOrCreateExps setup initInpSt initSt = do
   let name = view experimentBaseName setup
-  exps <- selectList [ExpName ==. name, ExpInitialInputState ==. runPut (put initInpSt), ExpInitialState ==. runPut (put initSt)] []
-  params <- mapM (\e -> selectList [ParamExp ==. entityKey e] []) exps
+  exps <- selectList [ExpsName ==. name, ExpsInitialInputState ==. runPut (put initInpSt), ExpsInitialState ==. runPut (put initSt)] []
+  params <- mapM (\e -> selectList [ParamExps ==. entityKey e] []) exps
   let mkParamTpl (Param _ n minB maxB) = (n, minB, maxB)
   let myParams = map (mkParamTpl . convertParameterSetup (error "Ref not used")) (parameters initSt)
   case L.find ((== myParams) . map (mkParamTpl . entityVal) . snd) (zip exps params) of
     Nothing -> do
       $(logInfo) "Starting new experiment..."
       time <- liftIO getCurrentTime
-      eExp <- insertEntity $ Exp name time Nothing (runPut $ put initSt) (runPut $ put initInpSt)
+      eExp <- insertEntity $ Exps name time Nothing (runPut $ put initSt) (runPut $ put initInpSt)
       void $ insert $ mkExpSetup eExp
       return eExp
     Just (eExp, _) -> do
@@ -248,7 +252,7 @@ getOrCreateExp setup initInpSt initSt = do
       return eExp
   where
     mkExpSetup eExp =
-      ExpSetup
+      ExpsSetup
         (entityKey eExp)
         (view experimentRepetitions setup)
         (view preparationSteps setup)
@@ -256,3 +260,31 @@ getOrCreateExp setup initInpSt initSt = do
         (view evaluationSteps setup)
         (view evaluationReplications setup)
         (view maximumParallelEvaluations setup)
+
+
+-- getOrCreateExp :: (ExperimentDef a, MonadLogger m, MonadIO m) => ExperimentSetup -> InputState a -> a -> ReaderT SqlBackend m (Entity Exp)
+-- getOrCreateExp setup initInpSt initSt = do
+--   exps <- selectList [ExpName ==. name, ExpInitialInputState ==. runPut (put initInpSt), ExpInitialState ==. runPut (put initSt)] []
+--   params <- mapM (\e -> selectList [ParamExp ==. entityKey e] []) exps
+--   let mkParamTpl (Param _ n minB maxB) = (n, minB, maxB)
+--   let myParams = map (mkParamTpl . convertParameterSetup (error "Ref not used")) (parameters initSt)
+--   case L.find ((== myParams) . map (mkParamTpl . entityVal) . snd) (zip exps params) of
+--     Nothing -> do
+--       $(logInfo) "Starting new experiment..."
+--       time <- liftIO getCurrentTime
+--       eExp <- insertEntity $ Exp name time Nothing (runPut $ put initSt) (runPut $ put initInpSt)
+--       void $ insert $ mkExpSetup eExp
+--       return eExp
+--     Just (eExp, _) -> do
+--       $(logInfo) "Found experiment with same name and parameter settings. Continuing experiment ..."
+--       return eExp
+--   where
+--     mkExpSetup eExp =
+--       ExpSetup
+--         (entityKey eExp)
+--         (view experimentRepetitions setup)
+--         (view preparationSteps setup)
+--         (view evaluationWarmUpSteps setup)
+--         (view evaluationSteps setup)
+--         (view evaluationReplications setup)
+--         (view maximumParallelEvaluations setup)

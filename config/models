@@ -1,27 +1,40 @@
-Exp         -- Adding "json" causes ToJSON and FromJSON instances to be derived.
+Exps
     name Text
     startTime UTCTime
     endTime UTCTime Maybe
     initialState ByteString
     initialInputState ByteString
-    deriving Eq Ord
 
-Param
-    exp ExpId
-    name Text
-    minBound ByteString
-    maxBound ByteString
-    deriving Eq Ord
-
-ExpSetup
-    exp ExpId
+ExpsSetup
+    exps ExpsId
     repetitions Int
     preparationSteps Int Maybe
     evaluationWarmUpSteps Int Maybe
     evaluationSteps Int
     evaluationReplications Int
     maximumParallelEvaluations Int
-    UniqueExpSetup exp
+    UniqueExpsSetup exps
+
+Param
+    exps ExpsId
+    name Text
+    minBound ByteString
+    maxBound ByteString
+    deriving Eq Ord
+
+ParamSetting
+    expResult ExpResultId
+    name Text
+    value ByteString
+
+
+Exp         -- Adding "json" causes ToJSON and FromJSON instances to be derived.
+    exps  ExpsId
+    number Int
+    startTime UTCTime
+    endTime UTCTime Maybe
+    deriving Eq Ord
+
 
 ExpResult
     exp ExpId
@@ -39,10 +52,6 @@ ExpResultData
     endInputState                   ByteString Maybe
     UniquePrepResultDataExpResult   expResult
 
-ParamSetting
-    expResult ExpResultId
-    name Text
-    value ByteString
 
 PrepInput
     expResult ExpResultId
