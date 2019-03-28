@@ -22,18 +22,18 @@ Param
     maxBound ByteString
     deriving Eq Ord
 
-ParamSetting
-    expResult ExpResultId
-    name Text
-    value ByteString
-
-
 Exp         -- Adding "json" causes ToJSON and FromJSON instances to be derived.
     exps  ExpsId
     number Int
     startTime UTCTime
     endTime UTCTime Maybe
     deriving Eq Ord
+
+
+ParamSetting
+    exp ExpId
+    name Text
+    value ByteString
 
 
 ExpResult

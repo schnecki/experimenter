@@ -42,8 +42,11 @@ loadExperiments setup initInpSt initSt = do
 
 
 loadExperimentList :: (ExperimentDef a, MonadLogger m, MonadIO m) => Key Exps -> ReaderT SqlBackend m [Experiment a]
-loadExperimentList expsKey = selectList [ExpExps ==. expsKey] [] >>= mapM mkExperiment
-    where mkExperiment (Entity k exp) = Experiment k (view expNumber exp) (view expStartTime exp) (view expEndTime exp) <$> loadExperimentResults k
+loadExperimentList expsKey = do
+  selectList [ExpExps ==. expsKey] [] >>= mapM mkExperiment
+    where mkExperiment (Entity k exp) = do
+            paramSetting <- loadParamSetup k
+            Experiment k (view expNumber exp) (view expStartTime exp) (view expEndTime exp) paramSetting <$> loadExperimentResults k
 
 mDeserialise :: (MonadLogger m, Serialize a) => Maybe ByteString -> m (Maybe a)
 mDeserialise = maybe (return Nothing) deserialise
@@ -66,7 +69,6 @@ loadExperimentResult :: (ExperimentDef a, MonadLogger m, MonadIO m) => Entity Ex
 loadExperimentResult (Entity k (ExpResult _ rep)) = do
   (ExpResultData _ startT endT startRandGen endRandGen startStBS endStBS startInpStBS endInpStBS) <-
     maybe (error "Could not get PrepResultData") entityVal <$> getBy (UniquePrepResultDataExpResult k)
-  paramSetting <- loadParamSetup k
   mInputVals <- loadPreparationInput k
   results <- loadPrepartionMeasures k
   evalResults <- loadReplicationResults k
@@ -81,11 +83,11 @@ loadExperimentResult (Entity k (ExpResult _ rep)) = do
     startInpSt <- mStartInpSt
     inputVals <- mInputVals
     let prepRes = ResultData startT endT (tread startRandGen) (tread <$> endRandGen) inputVals results startSt endSt startInpSt endInpSt
-    return $ ExperimentResult k rep paramSetting (Just prepRes) evalResults
+    return $ ExperimentResult k rep (Just prepRes) evalResults
 
 
-loadParamSetup :: (MonadLogger m, MonadIO m) => Key ExpResult -> ReaderT SqlBackend m [ParameterSetting a]
-loadParamSetup kExp = map (mkParameterSetting' . entityVal) <$> selectList [ParamSettingExpResult ==. kExp] []
+loadParamSetup :: (MonadLogger m, MonadIO m) => Key Exp -> ReaderT SqlBackend m [ParameterSetting a]
+loadParamSetup kExp = map (mkParameterSetting' . entityVal) <$> selectList [ParamSettingExp ==. kExp] []
   where
     mkParameterSetting' (ParamSetting _ n v) = ParameterSetting n v
 

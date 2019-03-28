@@ -41,7 +41,6 @@ makeLenses ''ReplicationResult
 data ExperimentResult a = ExperimentResult
   { _experimentResultKey :: !(Key ExpResult)
   , _repetitionNumber    :: !Int
-  , _parameterSetup      :: ![ParameterSetting a]
   , _preparationResults  :: Maybe (ResultData a)
   , _evaluationResults   :: ![ReplicationResult a]
   }
@@ -53,6 +52,7 @@ data Experiment a = Experiment
   , _experimentNumber    :: !Int
   , _experimentStartTime :: !UTCTime
   , _experimentEndTime   :: !(Maybe UTCTime)
+  , _parameterSetup      :: ![ParameterSetting a]
   , _experimentResults   :: ![ExperimentResult a]
   }
 makeLenses ''Experiment
