@@ -121,15 +121,54 @@ runExperimentResult exps expRes
 runReplicationResult :: (ExperimentDef a, MonadLogger m, MonadIO m) => Experiments a -> ReplicationResult a -> ReaderT SqlBackend m (Updated, ReplicationResult a)
 runReplicationResult exps repRes = do
 
-  (wmUpChange, wmUp) <- getResultData exps (exps ^. experimentsInitialState) (exps ^. experimentsInitialInputState) (repRes ^. warmUpResults) >>= runResultData exps -- warm up
+  (change, wmUpChange, wmUp) <- getResultData exps (exps ^. experimentsInitialState) (exps ^. experimentsInitialInputState) (repRes ^. warmUpResults) >>= runResultData exps -- warm up
   let mEnd = fromMaybe (error "Warm up phase finished with unfinished state")
   (evalChange, eval) <- getResultData exps (mEnd $ wmUp ^. endState) (mEnd $ wmUp ^. endInputState) (repRes ^. evalResults) >>= runResultData exps -- warm up
   undefined
 
-  where getResultData :: (MonadIO m) => Experiments a -> a -> InputState a -> Maybe (ResultData a) -> ReaderT SqlBackend m (ResultData a)
-        getResultData exps st stInp Nothing = liftIO $ newResultData (exps ^. experimentsInitialState) (exps ^. experimentsInitialInputState)
-        getResultData exps st stInp (Just x) | delete eval if warm-up length increased, etc.
-          = return $ set startState st $ set startInputState stInp x
+  where
+        repResId = repRes ^. replicationResultKey
+
+        -- TODO: if something has changed
+        getResultDatas :: (MonadIO m) => Experiments a -> a -> InputState a -> Maybe (ResultData a) -> Maybe (ResultData a) -> ReaderT SqlBackend m (Bool, Maybe (ResultData a), Maybe (ResultData a))
+        getResultDatas exps st stInp Nothing (Just eval) = do
+          (changeWmUp, mWmUp) <- case exps ^. experimentsSetup.expsSetupEvaluationWarmUpSteps of
+            Nothing -> return (False, Nothing)
+            Just nr | nr <= 0 -> return (False, Nothing)
+            _ -> do
+              wmUp <- liftIO $ newResultData (exps ^. experimentsInitialState) (exps ^. experimentsInitialInputState)
+              return (True, Just wmUp)
+          (changeEval, mEval) <- if changeWmUp
+                                 then deleteResultData Eval repResId eval >> return (True, Nothing)
+                                 else return (False, Just eval)
+          return (changeWmUp || changeEval, mWmUp, mEval)
+        getResultDatas exps st stInp (Just wmUp) (Just eval) = do
+          (changeWmUp, mWmUp) <- case exps ^. experimentsSetup.expsSetupEvaluationWarmUpSteps of
+            Nothing -> do deleteResultData WarmUp repResId wmUp
+                          return (True, Nothing)
+            Just nr | nr <= 0 -> do deleteResultData WarmUp repResId wmUp
+                                    return (True, Nothing)
+            -- Just nr | nr <= ... -> do deleteResultData WarmUp repResId wmUp -- TODO nr decreased
+            --                         return (True, Nothing)
+
+            _ -> do
+              wmUp <- liftIO $ newResultData (exps ^. experimentsInitialState) (exps ^. experimentsInitialInputState)
+              return (True, Just wmUp)
+          (changeEval, mEval) <- if changeWmUp
+                                 then deleteResultData Eval repResId eval >> return (True, Nothing)
+                                 else return (False, Just eval)
+          return (changeWmUp || changeEval, mWmUp, mEval)
+
+data RepResultType
+  = Prep (Key ExpResult)
+  | WarmUp (Key RepResult)
+  | Eval (Key RepResult)
+
+deleteResultData :: (ExperimentDef a, MonadLogger m, MonadIO m) => RepResultType -> ResultData a -> ReaderT SqlBackend m ()
+deleteResultData (Prep expResId) resData = do
+  deleteBy (UniquePrepResultDataExpResult expResId)
+  where delResDataChlds table (ResultData _ _ _ _ inpVals measures _ _ _ _) = do
+          undefined
 
 
 runResultData :: (ExperimentDef a, MonadLogger m, MonadIO m) => Experiments a -> ResultData a -> ReaderT SqlBackend m (Updated, ResultData a)
