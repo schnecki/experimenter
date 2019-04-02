@@ -8,8 +8,8 @@ Exps
 ExpsSetup
     exps ExpsId
     repetitions Int
-    preparationSteps Int Maybe
-    evaluationWarmUpSteps Int Maybe
+    preparationSteps Int
+    evaluationWarmUpSteps Int
     evaluationSteps Int
     evaluationReplications Int
     maximumParallelEvaluations Int

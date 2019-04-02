@@ -256,12 +256,12 @@ getOrCreateExps setup initInpSt initSt = do
     mkExpSetup eExp =
       ExpsSetup
         (entityKey eExp)
-        (view experimentRepetitions setup)
-        (view preparationSteps setup)
-        (view evaluationWarmUpSteps setup)
-        (view evaluationSteps setup)
-        (view evaluationReplications setup)
-        (view maximumParallelEvaluations setup)
+        (max 1 $ view experimentRepetitions setup)
+        (max 0 $ view preparationSteps setup)
+        (max 0 $ view evaluationWarmUpSteps setup)
+        (max 0 $ view evaluationSteps setup)
+        (max 1 $ view evaluationReplications setup)
+        (max 1 $ view maximumParallelEvaluations setup)
 
 
 -- getOrCreateExp :: (ExperimentDef a, MonadLogger m, MonadIO m) => ExperimentSetup -> InputState a -> a -> ReaderT SqlBackend m (Entity Exp)
