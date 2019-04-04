@@ -40,7 +40,7 @@ ExpResult
     exp ExpId
     repetition Int
 
-ExpResultData
+PrepResultData
     expResult                       ExpResultId
     startTime                       UTCTime
     endTime                         UTCTime Maybe

@@ -67,7 +67,7 @@ loadExperimentResults kExp = do
 
 loadExperimentResult :: (ExperimentDef a, MonadLogger m, MonadIO m) => Entity ExpResult -> ReaderT SqlBackend m (Maybe (ExperimentResult a))
 loadExperimentResult (Entity k (ExpResult _ rep)) = do
-  (ExpResultData _ startT endT startRandGen endRandGen startStBS endStBS startInpStBS endInpStBS) <-
+  (PrepResultData _ startT endT startRandGen endRandGen startStBS endStBS startInpStBS endInpStBS) <-
     maybe (error "Could not get PrepResultData") entityVal <$> getBy (UniquePrepResultDataExpResult k)
   mInputVals <- loadPreparationInput k
   results <- loadPrepartionMeasures k
