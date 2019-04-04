@@ -16,8 +16,14 @@ import qualified Data.Text               as T
 import           Data.Time
 import           System.Random
 
+data ResultDataKey
+  = ResultDataPrep (Key PrepResultData)
+  | ResultDataWarmUp (Key WarmUpResultData)
+  | ResultDataRep (Key RepResultData)
+
 data ResultData a = ResultData
-  { _startTime       :: !UTCTime
+  { _resultDataKey   :: ResultDataKey
+  , _startTime       :: !UTCTime
   , _endTime         :: !(Maybe UTCTime)
   , _startRandGen    :: StdGen
   , _endRandGen      :: Maybe StdGen

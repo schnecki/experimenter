@@ -1,7 +1,8 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE RankNTypes       #-}
-{-# LANGUAGE TemplateHaskell  #-}
-{-# LANGUAGE TypeFamilies     #-}
+{-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE FlexibleContexts  #-}
+{-# LANGUAGE RankNTypes        #-}
+{-# LANGUAGE TemplateHaskell   #-}
+{-# LANGUAGE TypeFamilies      #-}
 
 module Experimenter.Experiment where
 
@@ -9,7 +10,7 @@ module Experimenter.Experiment where
 import           Experimenter.Parameter
 import           Experimenter.StepResult
 
-import           Data.Serialize          (Get, Putter, Serialize)
+import           Data.Serialize          (Serialize)
 import           System.Random
 
 
@@ -27,14 +28,17 @@ class (Serialize (InputValue a), Serialize (InputState a), Serialize a) => Exper
   -- before `runStep` and its output is used to call `runStep`.
   generateInput :: (Monad m, RandomGen g) => g -> a -> InputState a -> Period -> m (InputValue a, InputState a)
 
-  -- ^ Save state using serialization.
-  serializeState :: Maybe (Putter a)
-
   -- ^ Run a step of the environment and return new state and result.
   runStep :: (Monad m) => a -> InputValue a -> Period -> m ([StepResult], a)
 
   -- ^ Provides the parameter setting.
   parameters :: a -> [ParameterSetup a]
+
+  -- ^ This function defines how to find experiments that can be resumed. Note that the experiments name is always a
+  -- comparison factor, that is, experiments with different names are unequal.
+  equalExperiments :: (a, InputState a) -> (a, InputState a) -> Bool
+  default equalExperiments :: (Eq a, Eq (InputState a)) => (a, InputState a) -> (a, InputState a) -> Bool
+  equalExperiments x y = x == y
 
 
   -- ^ Preparation (e.g. Loading from saved state, or training phase in ML applications).

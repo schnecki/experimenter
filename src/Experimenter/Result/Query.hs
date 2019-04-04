@@ -1,6 +1,8 @@
-{-# LANGUAGE FlexibleContexts  #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell   #-}
+{-# LANGUAGE FlexibleContexts    #-}
+{-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE RankNTypes          #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell     #-}
 module Experimenter.Result.Query
     ( loadExperiments
     ) where
@@ -67,27 +69,28 @@ loadExperimentResults kExp = do
 
 loadExperimentResult :: (ExperimentDef a, MonadLogger m, MonadIO m) => Entity ExpResult -> ReaderT SqlBackend m (Maybe (ExperimentResult a))
 loadExperimentResult (Entity k (ExpResult _ rep)) = do
-  (PrepResultData _ startT endT startRandGen endRandGen startStBS endStBS startInpStBS endInpStBS) <-
-    maybe (error "Could not get PrepResultData") entityVal <$> getBy (UniquePrepResultDataExpResult k)
-  mInputVals <- loadPreparationInput k
-  results <- loadPrepartionMeasures k
-  evalResults <- loadReplicationResults k
-  mStartSt <- deserialise startStBS
-  mEndSt <- mDeserialise endStBS
-  mStartInpSt <- deserialise startInpStBS
-  mEndInpSt <- mDeserialise endInpStBS
-  return $ do
-    startSt <- mStartSt
-    endSt <- mEndSt
-    endInpSt <- mEndInpSt
-    startInpSt <- mStartInpSt
-    inputVals <- mInputVals
-    let prepRes = ResultData startT endT (tread startRandGen) (tread <$> endRandGen) inputVals results startSt endSt startInpSt endInpSt
-    return $ ExperimentResult k rep (Just prepRes) evalResults
-
+  mEResData <- getBy (UniquePrepResultDataExpResult k)
+  case mEResData of
+    Nothing -> return Nothing
+    Just (Entity resDataKey (PrepResultData _ startT endT startRandGen endRandGen startStBS endStBS startInpStBS endInpStBS)) -> do
+      mInputVals <- loadPreparationInput k
+      results <- loadPrepartionMeasures k
+      evalResults <- loadReplicationResults k
+      mStartSt <- deserialise startStBS
+      mEndSt <- mDeserialise endStBS
+      mStartInpSt <- deserialise startInpStBS
+      mEndInpSt <- mDeserialise endInpStBS
+      return $ do
+        startSt <- mStartSt
+        endSt <- mEndSt
+        endInpSt <- mEndInpSt
+        startInpSt <- mStartInpSt
+        inputVals <- mInputVals
+        let prepRes = ResultData (ResultDataPrep resDataKey) startT endT (tread startRandGen) (tread <$> endRandGen) inputVals results startSt endSt startInpSt endInpSt
+        return $ ExperimentResult k rep (Just prepRes) evalResults
 
 loadParamSetup :: (MonadLogger m, MonadIO m) => Key Exp -> ReaderT SqlBackend m [ParameterSetting a]
-loadParamSetup kExp = map (mkParameterSetting' . entityVal) <$> selectList [ParamSettingExp ==. kExp] []
+loadParamSetup kExp = L.sortBy (compare `on` view parameterSettingName) . map (mkParameterSetting' . entityVal) <$> selectList [ParamSettingExp ==. kExp] []
   where
     mkParameterSetting' (ParamSetting _ n v) = ParameterSetting n v
 
@@ -127,51 +130,71 @@ loadPrepartionMeasures kExpRes = do
 loadReplicationResults :: (ExperimentDef a, MonadLogger m, MonadIO m) => Key ExpResult -> ReaderT SqlBackend m [ReplicationResult a]
 loadReplicationResults kExpRes = do
   xs <- selectList [RepResultExpResult ==. kExpRes] []
-  maybe [] (L.sortBy (compare `on` view replicationNumber)) . sequence <$> mapM loadReplicationResult xs
+  L.sortBy (compare `on` view replicationNumber) <$> mapM loadReplicationResult xs
 
 
-loadReplicationResult :: (ExperimentDef a, MonadLogger m, MonadIO m) => Entity RepResult -> ReaderT SqlBackend m (Maybe (ReplicationResult a))
-loadReplicationResult (Entity k (RepResult _ repNr))
-  --  startRG wmUpEndStBS wmUpEndInpStBS wmUpEndTime wmUpEndRG repEndStBS repEndInpStBS repEndTime repEndRG))
- = do
-  wmUpRes <- maybe (error "Could not get WarmUpResultData. Database corrupted!") entityVal <$> getBy (UniqueWarmUpResultDataRepResult k)
-  repRes <- maybe (error "Could not get WarmUpResultData. Database corrupted!") entityVal <$> getBy (UniqueRepResultDataRepResult k)
-  let wmUpStartTime = view warmUpResultDataStartTime wmUpRes
-  let wmUpEndTime = view warmUpResultDataEndTime wmUpRes
-  let wmUpStartRandGen = tread $ view warmUpResultDataStartRandGen wmUpRes
-  let wmUpEndRandGen = tread <$> view warmUpResultDataEndRandGen wmUpRes
-  mWmUpInpVals <- loadReplicationWarmUpInput k
-  wmUpMeasures <- loadReplicationWarmUpMeasures k
-  mWmUpStartSt <- deserialise (view warmUpResultDataStartState wmUpRes)
-  mWmUpEndSt <- mDeserialise (view warmUpResultDataEndState wmUpRes)
-  mWmUpStartInpSt <- deserialise (view warmUpResultDataStartInputState wmUpRes)
-  mWmUpEndInpSt <- mDeserialise (view warmUpResultDataEndInputState wmUpRes)
-  let repStartTime = view repResultDataStartTime repRes
-  let repEndTime = view repResultDataEndTime repRes
-  let repStartRandGen = tread $ view repResultDataStartRandGen repRes
-  let repEndRandGen = tread <$> view repResultDataEndRandGen repRes
-  mRepInpVals <- loadReplicationInput k
-  repMeasures <- loadReplicationMeasures k
-  mRepStartSt <- deserialise (view repResultDataStartState repRes)
-  mRepEndSt <- mDeserialise (view repResultDataEndState repRes)
-  mRepStartInpSt <- deserialise (view repResultDataStartInputState repRes)
-  mRepEndInpSt <- mDeserialise (view repResultDataEndInputState repRes)
-  return $ do
-    let wmUp = do
-          wmUpInpVals <- mWmUpInpVals
-          wmUpStartSt <- mWmUpStartSt
-          wmUpEndSt <- mWmUpEndSt
-          wmUpStartInpSt <- mWmUpStartInpSt
-          wmUpEndInpSt <- mWmUpEndInpSt
-          return $ ResultData wmUpStartTime wmUpEndTime wmUpStartRandGen wmUpEndRandGen wmUpInpVals wmUpMeasures wmUpStartSt wmUpEndSt wmUpStartInpSt wmUpEndInpSt
-    let rep = do
-          repInpVals <- mRepInpVals
-          repStartSt <- mRepStartSt
-          repEndSt <- mRepEndSt
-          repStartInpSt <- mRepStartInpSt
-          repEndInpSt <- mRepEndInpSt
-          return $ ResultData repStartTime repEndTime repStartRandGen repEndRandGen repInpVals repMeasures repStartSt repEndSt repStartInpSt repEndInpSt
-    return $ ReplicationResult k repNr wmUp rep
+loadReplicationResult :: (ExperimentDef a, MonadLogger m, MonadIO m) => Entity RepResult -> ReaderT SqlBackend m (ReplicationResult a)
+loadReplicationResult (Entity k (RepResult _ repNr)) = do
+  mWmUpRes <- getBy (UniqueWarmUpResultDataRepResult k)
+  mRepRes <- getBy (UniqueRepResultDataRepResult k)
+  wmUp <-
+    case mWmUpRes of
+      Nothing    -> return Nothing
+      Just eWmUp -> mkWmUp eWmUp
+  rep <-
+    case mRepRes of
+      Nothing   -> return Nothing
+      Just eRep -> mkRep eRep
+  return $ ReplicationResult k repNr wmUp rep
+  where
+    mkWmUp (Entity wmUpResKey wmUpRes) = do
+      let wmUpStartTime = view warmUpResultDataStartTime wmUpRes
+      let wmUpEndTime = view warmUpResultDataEndTime wmUpRes
+      let wmUpStartRandGen = tread $ view warmUpResultDataStartRandGen wmUpRes
+      let wmUpEndRandGen = tread <$> view warmUpResultDataEndRandGen wmUpRes
+      mWmUpInpVals <- loadReplicationWarmUpInput k
+      wmUpMeasures <- loadReplicationWarmUpMeasures k
+      mWmUpStartSt <- deserialise (view warmUpResultDataStartState wmUpRes)
+      mWmUpEndSt <- mDeserialise (view warmUpResultDataEndState wmUpRes)
+      mWmUpStartInpSt <- deserialise (view warmUpResultDataStartInputState wmUpRes)
+      mWmUpEndInpSt <- mDeserialise (view warmUpResultDataEndInputState wmUpRes)
+      return $ do
+        wmUpInpVals <- mWmUpInpVals
+        wmUpStartSt <- mWmUpStartSt
+        wmUpEndSt <- mWmUpEndSt
+        wmUpStartInpSt <- mWmUpStartInpSt
+        wmUpEndInpSt <- mWmUpEndInpSt
+        return $
+          ResultData
+            (ResultDataWarmUp wmUpResKey)
+            wmUpStartTime
+            wmUpEndTime
+            wmUpStartRandGen
+            wmUpEndRandGen
+            wmUpInpVals
+            wmUpMeasures
+            wmUpStartSt
+            wmUpEndSt
+            wmUpStartInpSt
+            wmUpEndInpSt
+    mkRep (Entity repResKey repRes) = do
+      let repStartTime = view repResultDataStartTime repRes
+      let repEndTime = view repResultDataEndTime repRes
+      let repStartRandGen = tread $ view repResultDataStartRandGen repRes
+      let repEndRandGen = tread <$> view repResultDataEndRandGen repRes
+      mRepInpVals <- loadReplicationInput k
+      repMeasures <- loadReplicationMeasures k
+      mRepStartSt <- deserialise (view repResultDataStartState repRes)
+      mRepEndSt <- mDeserialise (view repResultDataEndState repRes)
+      mRepStartInpSt <- deserialise (view repResultDataStartInputState repRes)
+      mRepEndInpSt <- mDeserialise (view repResultDataEndInputState repRes)
+      return $ do
+        repInpVals <- mRepInpVals
+        repStartSt <- mRepStartSt
+        repEndSt <- mRepEndSt
+        repStartInpSt <- mRepStartInpSt
+        repEndInpSt <- mRepEndInpSt
+        return $ ResultData (ResultDataRep repResKey) repStartTime repEndTime repStartRandGen repEndRandGen repInpVals repMeasures repStartSt repEndSt repStartInpSt repEndInpSt
 
 
 loadReplicationWarmUpInput :: (ExperimentDef a, MonadLogger m, MonadIO m) => Key RepResult -> ReaderT SqlBackend m (Maybe [Input a])
@@ -235,22 +258,31 @@ loadReplicationMeasures kExpRes = do
     combineMeasures xs@(Measure p _:_) = Measure p (concatMap (view measureResults) xs)
     combineMeasures _                  = error "not possible"
 
-getOrCreateExps :: (ExperimentDef a, MonadLogger m, MonadIO m) => ExperimentSetup -> InputState a -> a -> ReaderT SqlBackend m (Entity Exps)
+getOrCreateExps :: forall m a . (ExperimentDef a, MonadLogger m, MonadIO m) => ExperimentSetup -> InputState a -> a -> ReaderT SqlBackend m (Entity Exps)
 getOrCreateExps setup initInpSt initSt = do
   let name = view experimentBaseName setup
-  exps <- selectList [ExpsName ==. name, ExpsInitialInputState ==. runPut (put initInpSt), ExpsInitialState ==. runPut (put initSt)] []
+  -- exps <- selectList [ExpsName ==. name, ExpsInitialInputState ==. runPut (put initInpSt), ExpsInitialState ==. runPut (put initSt)] []
+  expsList <- selectList [ExpsName ==. name] []
+  let exps =
+        filter
+          (\(Entity _ (Exps _ _ _ s iS)) ->
+             let other = (,) <$> runGet S.get s <*> runGet S.get iS
+             in fromEither False (equalExperiments (initSt, initInpSt) <$> other))
+          expsList
   params <- mapM (\e -> selectList [ParamExps ==. entityKey e] []) exps
   let mkParamTpl (Param _ n minB maxB) = (n, minB, maxB)
   let myParams = map (mkParamTpl . convertParameterSetup (error "Ref not used")) (parameters initSt)
   case L.find ((== myParams) . map (mkParamTpl . entityVal) . snd) (zip exps params) of
     Nothing -> do
       $(logInfo) "Starting new experiment..."
+      liftIO $ putStrLn "Starting new experiment..."
       time <- liftIO getCurrentTime
       eExp <- insertEntity $ Exps name time Nothing (runPut $ put initSt) (runPut $ put initInpSt)
       void $ insert $ mkExpSetup eExp
       return eExp
     Just (eExp, _) -> do
       $(logInfo) "Found experiment with same name and parameter settings. Continuing experiment ..."
+      liftIO $ putStrLn "Found experiment with same name and parameter settings. Continuing experiment ..."
       return eExp
   where
     mkExpSetup eExp =
@@ -262,31 +294,3 @@ getOrCreateExps setup initInpSt initSt = do
         (max 0 $ view evaluationSteps setup)
         (max 1 $ view evaluationReplications setup)
         (max 1 $ view maximumParallelEvaluations setup)
-
-
--- getOrCreateExp :: (ExperimentDef a, MonadLogger m, MonadIO m) => ExperimentSetup -> InputState a -> a -> ReaderT SqlBackend m (Entity Exp)
--- getOrCreateExp setup initInpSt initSt = do
---   exps <- selectList [ExpName ==. name, ExpInitialInputState ==. runPut (put initInpSt), ExpInitialState ==. runPut (put initSt)] []
---   params <- mapM (\e -> selectList [ParamExp ==. entityKey e] []) exps
---   let mkParamTpl (Param _ n minB maxB) = (n, minB, maxB)
---   let myParams = map (mkParamTpl . convertParameterSetup (error "Ref not used")) (parameters initSt)
---   case L.find ((== myParams) . map (mkParamTpl . entityVal) . snd) (zip exps params) of
---     Nothing -> do
---       $(logInfo) "Starting new experiment..."
---       time <- liftIO getCurrentTime
---       eExp <- insertEntity $ Exp name time Nothing (runPut $ put initSt) (runPut $ put initInpSt)
---       void $ insert $ mkExpSetup eExp
---       return eExp
---     Just (eExp, _) -> do
---       $(logInfo) "Found experiment with same name and parameter settings. Continuing experiment ..."
---       return eExp
---   where
---     mkExpSetup eExp =
---       ExpSetup
---         (entityKey eExp)
---         (view experimentRepetitions setup)
---         (view preparationSteps setup)
---         (view evaluationWarmUpSteps setup)
---         (view evaluationSteps setup)
---         (view evaluationReplications setup)
---         (view maximumParallelEvaluations setup)
