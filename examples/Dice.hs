@@ -43,5 +43,5 @@ main = do
   let setup = ExperimentSetup "dice" 1 0 0 100 3 2
       databaseSetup = DatabaseSetup "host=localhost dbname=experimenter user=schnecki password= port=5432" 10
   g <- newStdGen
-  (changed, res) <- runExperimentsLogging databaseSetup setup () (Dice g)
+  (changed, res) <- runExperimentsLoggingNoSql databaseSetup setup () (Dice g)
   putStrLn $ "Any change: " ++ show changed

@@ -1,36 +1,40 @@
-{-# LANGUAGE FlexibleContexts    #-}
-{-# LANGUAGE GADTs               #-}
-{-# LANGUAGE OverloadedStrings   #-}
-{-# LANGUAGE RankNTypes          #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TemplateHaskell     #-}
-{-# LANGUAGE TypeFamilies        #-}
-{-# LANGUAGE Unsafe              #-}
+{-# LANGUAGE FlexibleContexts  #-}
+{-# LANGUAGE GADTs             #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell   #-}
+{-# LANGUAGE TypeFamilies      #-}
 
 module Experimenter.Run
     ( DatabaseSetup (..)
     , runExperiments
     , runExperimentsLogging
+    , runExperimentsLoggingNoSql
     ) where
 
-import           Control.Arrow               ((***))
+import           Control.Arrow                ((***))
 import           Control.Lens
-import           Control.Monad               (forM)
+import           Control.Monad                (forM)
 import           Control.Monad.IO.Class
 import           Control.Monad.IO.Unlift
-import           Control.Monad.Logger        (MonadLogger, logDebug, logError,
-                                              runNoLoggingT, runStderrLoggingT)
+import           Control.Monad.Logger         (LogLevel (..), LoggingT, MonadLogger,
+                                               defaultLoc, filterLogger, logDebug,
+                                               logError, logInfo, runFileLoggingT,
+                                               runLoggingT, runNoLoggingT,
+                                               runStderrLoggingT, runStdoutLoggingT)
 
 import           Control.Monad.Reader
-import qualified Data.ByteString             as BS
-import           Data.Function               (on)
-import qualified Data.List                   as L
-import           Data.Maybe                  (fromMaybe)
-import           Data.Serialize              hiding (get)
-import qualified Data.Serialize              as S
-import qualified Data.Text                   as T
-import           Data.Time                   (getCurrentTime)
+import           Control.Monad.Trans.Resource
+import qualified Data.ByteString              as BS
+import           Data.Function                (on)
+import qualified Data.List                    as L
+import           Data.Maybe                   (fromMaybe, isJust)
+import           Data.Pool                    as P
+import           Data.Serialize               hiding (get)
+import qualified Data.Serialize               as S
+import qualified Data.Text                    as T
+import           Data.Time                    (getCurrentTime)
 import           Database.Persist.Postgresql
+import           System.IO
 import           System.Random
 import           System.Random.Shuffle
 
@@ -44,6 +48,8 @@ import           Experimenter.Setup
 import           Experimenter.StepResult
 import           Experimenter.Util
 
+import           Debug.Trace
+
 
 data DatabaseSetup = DatabaseSetup
   { connectionString    :: BS.ByteString -- ^. e.g. "host=localhost dbname=experimenter user=postgres password=postgres port=5432"
@@ -54,24 +60,44 @@ data DatabaseSetup = DatabaseSetup
 type Updated = Bool
 
 
-runExperiments :: forall a . (ExperimentDef a) => DatabaseSetup -> ExperimentSetup -> InputState a -> a -> IO (Bool, Experiments a)
-runExperiments = runner runNoLoggingT
+runExperiments :: (ExperimentDef a) => DatabaseSetup -> ExperimentSetup -> InputState a -> a -> IO (Bool, Experiments a)
+runExperiments = runner runNoLoggingT runNoLoggingT
 
-runExperimentsLogging :: forall a . (ExperimentDef a) => DatabaseSetup -> ExperimentSetup -> InputState a -> a -> IO (Bool, Experiments a)
-runExperimentsLogging = runner runStderrLoggingT
+runExperimentsLogging :: (ExperimentDef a) => DatabaseSetup -> ExperimentSetup -> InputState a -> a -> IO (Bool, Experiments a)
+runExperimentsLogging = runner runStdoutLoggingT runStdoutLoggingT
+
+runExperimentsLoggingNoSql :: (ExperimentDef a) => DatabaseSetup -> ExperimentSetup -> InputState a -> a -> IO (Bool, Experiments a)
+runExperimentsLoggingNoSql = runner (runStdoutLoggingT . filterLogger (\s _ -> s /= "SQL")) runStdoutLoggingT
 
 
-runner :: (MonadLogger m, MonadUnliftIO m, ExperimentDef a) => (m (Bool, Experiments a) -> t) -> DatabaseSetup -> ExperimentSetup -> InputState a -> a -> t
-runner logFun dbSetup setup initInpSt initSt =
-  logFun $
+runSqlPersistMPoolLogging :: (IsSqlBackend backend, MonadUnliftIO m, MonadUnliftIO m1) => (m a -> ResourceT m1 a1) -> ReaderT backend m a -> Pool backend -> m1 a1
+runSqlPersistMPoolLogging logFun x pool = runResourceT $ logFun $ runSqlPool x pool
+
+liftSqlPersistMPoolLogging ::
+     (IsPersistBackend backend, MonadUnliftIO m1, MonadIO m2, BaseBackend backend ~ SqlBackend) => (m1 a1 -> ResourceT IO a2) -> ReaderT backend m1 a1 -> Pool backend -> m2 a2
+liftSqlPersistMPoolLogging logFun x pool = liftIO (runSqlPersistMPoolLogging logFun x pool)
+
+runner ::
+     (MonadUnliftIO m, MonadUnliftIO m1, ExperimentDef a1, MonadLogger m, MonadLogger m1)
+  => (m a2 -> t)
+  -> (m1 (Bool, Experiments a1) -> ResourceT IO a2)
+  -> DatabaseSetup
+  -> ExperimentSetup
+  -> InputState a1
+  -> a1
+  -> t
+runner logFunDb logFunRun dbSetup setup initInpSt initSt =
+  logFunDb $
   withPostgresqlPool (connectionString dbSetup) (parallelConnections dbSetup) $
-  liftSqlPersistMPool $ do
+  liftSqlPersistMPoolLogging logFunRun $ do
     runMigration migrateAll
     loadExperiments setup initInpSt initSt >>= continueExperiments
 
 
-continueExperiments :: forall a m . (ExperimentDef a, MonadLogger m, MonadIO m) => Experiments a -> ReaderT SqlBackend m (Bool, Experiments a)
+continueExperiments :: (ExperimentDef a, MonadLogger m, MonadIO m) => Experiments a -> ReaderT SqlBackend m (Bool, Experiments a)
 continueExperiments exp = do
+  $(logInfo) $ "Processing experiment with ID " <> tshow (exp ^. experimentsKey)
+  liftIO $ hFlush stdout
   let exps = exp ^. experiments
   newExps <- mkNewExps exp exps
   expRes <- mapM (continueExperiment exp) (exps ++ newExps)
@@ -212,6 +238,7 @@ runReplicationResult exps repRes = do
     if wmUpChange
       then deleteResultData (Rep repResId) >> return Nothing
       else return (repRes ^. evalResults)
+  $(logInfo) $ "WarmUp Change: " <> tshow wmUpChange
   (evalChange, mEval') <- runEval exps wmUpChange (repRes ^. replicationResultKey) mEval
   return (wmUpChange || evalChange, set warmUpResults mWmUp $ set evalResults mEval' repRes)
   where
@@ -267,7 +294,11 @@ runEval exps warmUpUpdated repResId mResData = do
       then deleteResultData (Rep repResId) >> return Nothing
       else return mResData
   if runNeeded
-    then maybe new return mResData' >>= run
+    then do
+    $(logInfo) $ "DelNeeded: " <> tshow delNeeded
+    $(logInfo) $  "A run is needed for replication " <> tshow repResId
+    $(logInfo) $ "mResData': " <> tshow (isJust mResData')
+    maybe new return mResData' >>= run
     else do
     when delNeeded $ $(logDebug) "Updating Eval (delNeeded)"
     return (delNeeded, mResData')
@@ -307,6 +338,7 @@ runResultData len repResType resData = do
   let stInp = fromMaybe (resData ^. startInputState) (resData ^. endInputState)
   let g = fromMaybe (resData ^. startRandGen) (resData ^. endRandGen)
   let periodsToRun = [1 + length (resData ^. results) .. len]
+  $(logDebug) $ "PeriodsToRun : " <> tshow periodsToRun
   let updated = not (null periodsToRun)
   sTime <- liftIO getCurrentTime
   (g', st', stInp', inputs, measures) <- foldM run (g, st, stInp, [], []) periodsToRun

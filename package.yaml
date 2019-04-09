@@ -28,6 +28,8 @@ dependencies:
 - text
 - cereal
 - monad-logger
+- resource-pool
+- resourcet
 - mtl
 - time
 - random
