@@ -221,10 +221,11 @@ runExperimentResult exps expRes = do
   return (prepUpdated || updated, set preparationResults prepRes $ set evaluationResults res expRes)
   where
     expResId = expRes ^. experimentResultKey
-    getRepRes :: (MonadIO m) => Experiments a -> [ReplicationResult a] -> ReaderT SqlBackend m [ReplicationResult a]
-    getRepRes exps repsDone =
-      (repsDone ++) <$>
-      forM
+    getRepRes :: (MonadLogger m, MonadIO m) => Experiments a -> [ReplicationResult a] -> ReaderT SqlBackend m [ReplicationResult a]
+    getRepRes exps repsDone = do
+      $(logInfo) $ "Reps: " <> tshow ([length repsDone + 1 .. exps ^. experimentsSetup . expsSetupEvaluationReplications])
+      $(logInfo) $ "RepsDone: " <> tshow (length repsDone)
+      (repsDone ++) <$> forM
         [length repsDone + 1 .. exps ^. experimentsSetup . expsSetupEvaluationReplications]
         (\nr -> do
            kRepRes <- insert $ RepResult (expRes ^. experimentResultKey) nr
@@ -239,6 +240,7 @@ runReplicationResult exps repRes = do
       then deleteResultData (Rep repResId) >> return Nothing
       else return (repRes ^. evalResults)
   $(logInfo) $ "WarmUp Change: " <> tshow wmUpChange
+  $(logInfo) $ "repRes: " <> tshow (isJust $ repRes ^. evalResults)
   (evalChange, mEval') <- runEval exps wmUpChange (repRes ^. replicationResultKey) mEval
   return (wmUpChange || evalChange, set warmUpResults mWmUp $ set evalResults mEval' repRes)
   where
@@ -298,6 +300,7 @@ runEval exps warmUpUpdated repResId mResData = do
     $(logInfo) $ "DelNeeded: " <> tshow delNeeded
     $(logInfo) $  "A run is needed for replication " <> tshow repResId
     $(logInfo) $ "mResData': " <> tshow (isJust mResData')
+    $(logInfo) $ "mResData: " <> tshow (isJust mResData)
     maybe new return mResData' >>= run
     else do
     when delNeeded $ $(logDebug) "Updating Eval (delNeeded)"
@@ -322,7 +325,7 @@ data RepResultType
   | Rep (Key RepResult)
 
 
-deleteResultData :: (MonadLogger m, MonadIO m) => RepResultType -> ReaderT SqlBackend m ()
+deleteResultData :: (MonadIO m) => RepResultType -> ReaderT SqlBackend m ()
 deleteResultData repResType =
   case repResType of
     Prep expResId   -> del (UniquePrepResultDataExpResult expResId)

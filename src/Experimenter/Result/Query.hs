@@ -14,7 +14,7 @@ import           Control.Monad.Reader
 import           Data.ByteString             (ByteString)
 import           Data.Function               (on)
 import qualified Data.List                   as L
-import           Data.Maybe                  (fromMaybe)
+import           Data.Maybe                  (fromMaybe, isJust)
 import           Data.Serialize              as S (Serialize, get, put, runGet, runPut)
 import qualified Data.Text                   as T
 import           Data.Time                   (getCurrentTime)
@@ -57,25 +57,24 @@ deserialise :: (MonadLogger m, Serialize a) => ByteString -> m (Maybe a)
 deserialise bs =
   let res = runGet S.get bs
   in case res of
-    Left err  -> $(logError) ("Could not deserialise data! Regarding saved experiment result." <> tshow err) >> return Nothing
+    Left err  -> $(logError) ("Could not deserialise data! Discarding saved experiment result. Error Message: " <> tshow err) >> return Nothing
     Right r -> return $ Just r
 
 
 loadExperimentResults :: (ExperimentDef a, MonadLogger m, MonadIO m) => Key Exp -> ReaderT SqlBackend m [ExperimentResult a]
 loadExperimentResults kExp = do
   xs <- selectList [ExpResultExp ==. kExp] []
-  fromMaybe [] . sequence <$> mapM loadExperimentResult xs
+  mapM loadExperimentResult xs
 
 
-loadExperimentResult :: (ExperimentDef a, MonadLogger m, MonadIO m) => Entity ExpResult -> ReaderT SqlBackend m (Maybe (ExperimentResult a))
+loadExperimentResult :: (ExperimentDef a, MonadLogger m, MonadIO m) => Entity ExpResult -> ReaderT SqlBackend m (ExperimentResult a)
 loadExperimentResult (Entity k (ExpResult _ rep)) = do
-  mEResData <- getBy (UniquePrepResultDataExpResult k)
-  case mEResData of
+  mEPrepResData <- getBy (UniquePrepResultDataExpResult k)
+  prepRes <- case mEPrepResData of
     Nothing -> return Nothing
     Just (Entity resDataKey (PrepResultData _ startT endT startRandGen endRandGen startStBS endStBS startInpStBS endInpStBS)) -> do
       mInputVals <- loadPreparationInput k
       results <- loadPrepartionMeasures k
-      evalResults <- loadReplicationResults k
       mStartSt <- deserialise startStBS
       mEndSt <- mDeserialise endStBS
       mStartInpSt <- deserialise startInpStBS
@@ -86,8 +85,9 @@ loadExperimentResult (Entity k (ExpResult _ rep)) = do
         endInpSt <- mEndInpSt
         startInpSt <- mStartInpSt
         inputVals <- mInputVals
-        let prepRes = ResultData (ResultDataPrep resDataKey) startT endT (tread startRandGen) (tread <$> endRandGen) inputVals results startSt endSt startInpSt endInpSt
-        return $ ExperimentResult k rep (Just prepRes) evalResults
+        return $ ResultData (ResultDataPrep resDataKey) startT endT (tread startRandGen) (tread <$> endRandGen) inputVals results startSt endSt startInpSt endInpSt
+  evalResults <- loadReplicationResults k
+  return $ ExperimentResult k rep prepRes evalResults
 
 loadParamSetup :: (MonadLogger m, MonadIO m) => Key Exp -> ReaderT SqlBackend m [ParameterSetting a]
 loadParamSetup kExp = L.sortBy (compare `on` view parameterSettingName) . map (mkParameterSetting' . entityVal) <$> selectList [ParamSettingExp ==. kExp] []
