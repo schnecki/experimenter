@@ -38,10 +38,21 @@ instance ExperimentDef Dice where
   equalExperiments _ _ = True   -- Do not compare random generators!
 
 
+setup :: ExperimentSetup
+setup = ExperimentSetup
+  { _experimentBaseName         = "dice"
+  , _experimentRepetitions      =  3
+  , _preparationSteps           =  20
+  , _evaluationWarmUpSteps      =  11
+  , _evaluationSteps            =  1000
+  , _evaluationReplications     =  5
+  , _maximumParallelEvaluations =  2
+  }
+
+
 main :: IO ()
 main = do
-  let setup = ExperimentSetup "dice" 1 10 0 100 3 2
-      databaseSetup = DatabaseSetup "host=localhost dbname=experimenter user=schnecki password= port=5432" 10
+  let databaseSetup = DatabaseSetup "host=localhost dbname=experimenter user=schnecki password= port=5432" 10
   g <- newStdGen
   (changed, res) <- runExperimentsLoggingNoSql databaseSetup setup () (Dice g)
   putStrLn $ "Any change: " ++ show changed

@@ -41,7 +41,9 @@ loadExperiments setup initInpSt initSt = do
   eExp <- getOrCreateExps setup initInpSt initSt
   let e = entityVal eExp
   exps <- L.sortBy (compare `on` view experimentNumber) <$> loadExperimentList (entityKey eExp)
+
   eSetup <- fromMaybe (error "Setup not found. Your DB is corrupted!") <$> getBy (UniqueExpsSetup (entityKey eExp))
+
   return $ Experiments (entityKey eExp) (view expsName e) (view expsStartTime e) (view expsEndTime e) (entityVal eSetup) (parameters initSt) initSt initInpSt exps
 
 
@@ -287,6 +289,7 @@ getOrCreateExps setup initInpSt initSt = do
       return eExp
     Just (eExp, _) -> do
       $(logInfo) "Found experiment with same name and parameter settings. Continuing experiment ..."
+      putMany [mkExpSetup eExp]
       return eExp
   where
     mkExpSetup eExp =
