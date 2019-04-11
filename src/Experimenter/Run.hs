@@ -197,7 +197,9 @@ continueExperiment :: (ExperimentDef a, MonadLogger m, MonadIO m) => Rands -> Ex
 continueExperiment rands exps exp = do
   -- TODO: parallelisation
   exps' <- loadParameters exps exp -- loads parameters into the init state
-  expRes <- getExpRes exps' (exp ^. experimentResults) >>= truncateExperiments repetits >>= mapM (runExperimentResult rands exps')
+  expResList <- getExpRes exps' (exp ^. experimentResults) >>= truncateExperiments repetits
+  $(logInfo) $ "Number of experiment results loaded: " <> tshow (length expResList)
+  expRes <- mapM (runExperimentResult rands exps') expResList
   let updated = any fst expRes
       res = map snd expRes
   if updated

@@ -2,7 +2,7 @@ module Experimenter
     ( module E
     ) where
 
-import           Experimenter.Evaluation as E
+import           Experimenter.Eval       as E
 import           Experimenter.Experiment as E
 import           Experimenter.Input      as E
 import           Experimenter.Measure    as E

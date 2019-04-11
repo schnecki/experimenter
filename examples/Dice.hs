@@ -19,11 +19,8 @@ data Dice = Dice StdGen
   deriving (Show, Generic)
 
 instance Serialize Dice where
-  put (Dice g) = do
-    put (show g)
-  get = do
-    gS <- get
-    return $ Dice (read gS)
+  put (Dice g) = put (show g)
+  get = Dice . read <$> get
 
 
 instance ExperimentDef Dice where
@@ -41,10 +38,10 @@ instance ExperimentDef Dice where
 setup :: ExperimentSetup
 setup = ExperimentSetup
   { _experimentBaseName         = "dice"
-  , _experimentRepetitions      =  3
-  , _preparationSteps           =  20
-  , _evaluationWarmUpSteps      =  11
-  , _evaluationSteps            =  1000
+  , _experimentRepetitions      =  1
+  , _preparationSteps           =  0
+  , _evaluationWarmUpSteps      =  0
+  , _evaluationSteps            =  100
   , _evaluationReplications     =  5
   , _maximumParallelEvaluations =  2
   }

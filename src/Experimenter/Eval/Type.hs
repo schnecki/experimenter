@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Experimenter.Evaluation where
+module Experimenter.Eval.Type where
 
 import qualified Data.Text as T
 
