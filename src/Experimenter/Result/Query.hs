@@ -12,6 +12,7 @@ import           Control.Lens                (view)
 import           Control.Monad.Logger
 import           Control.Monad.Reader
 import           Data.ByteString             (ByteString)
+import qualified Data.ByteString             as B
 import           Data.Function               (on)
 import qualified Data.List                   as L
 import           Data.Maybe                  (fromMaybe, isJust)
@@ -21,6 +22,7 @@ import           Data.Time                   (getCurrentTime)
 import qualified Database.Esqueleto          as E
 import           Database.Persist
 import           Database.Persist.Postgresql (SqlBackend)
+import           GHC.Stack
 import           System.Random               (newStdGen)
 
 import           Experimenter.Experiment
@@ -50,15 +52,19 @@ loadExperimentList expsKey = do
             paramSetting <- loadParamSetup k
             Experiment k (view expNumber exp) (view expStartTime exp) (view expEndTime exp) paramSetting <$> loadExperimentResults k
 
-mDeserialise :: (MonadLogger m, Serialize a) => Maybe ByteString -> m (Maybe a)
-mDeserialise = maybe (return Nothing) deserialise
+mDeserialise :: (MonadIO m, MonadLogger m ,Serialize a) => T.Text -> Maybe ByteString -> m (Maybe (Maybe a))
+mDeserialise n mBs = sequence (deserialise n <$> mBs)
 
-deserialise :: (MonadLogger m, Serialize a) => ByteString -> m (Maybe a)
-deserialise bs =
+deserialise :: (MonadIO m, MonadLogger m, Serialize a) => T.Text -> ByteString -> m (Maybe a)
+deserialise n bs =
   let res = runGet S.get bs
-  in case res of
-    Left err  -> $(logError) ("Could not deserialise data! Discarding saved experiment result. Error Message: " <> tshow err) >> return Nothing
-    Right r -> return $ Just r
+   in case res of
+        Left err -> do
+          $(logError) $ "Could not deserialise " <> n <> "! Discarding saved experiment result. Data length: " <> tshow (B.length bs) <> ". Error Message: " <> tshow err
+          return Nothing
+        Right r -> do
+          --  $(logInfo) $ "Deserialised " <> n <> ". Data length " <> tshow (B.length bs)
+          return $ Just r
 
 
 loadExperimentResults :: (ExperimentDef a, MonadLogger m, MonadIO m) => Key Exp -> ReaderT SqlBackend m [ExperimentResult a]
@@ -75,10 +81,10 @@ loadExperimentResult (Entity k (ExpResult _ rep)) = do
     Just (Entity resDataKey (PrepResultData _ startT endT startRandGen endRandGen startStBS endStBS startInpStBS endInpStBS)) -> do
       mInputVals <- loadPreparationInput k
       results <- loadPrepartionMeasures k
-      mStartSt <- deserialise startStBS
-      mEndSt <- mDeserialise endStBS
-      mStartInpSt <- deserialise startInpStBS
-      mEndInpSt <- mDeserialise endInpStBS
+      mStartSt <- deserialise "prep start state" startStBS
+      mEndSt <- mDeserialise "prep end state" endStBS
+      mStartInpSt <- deserialise "prep start input state" startInpStBS
+      mEndInpSt <- mDeserialise "prep end input state" endInpStBS
       return $ do
         startSt <- mStartSt
         endSt <- mEndSt
@@ -106,9 +112,9 @@ loadPreparationInput kExpRes = do
       return (prepI, prepIV)
   sequence <$> mapM mkInput res
   where
-    mkInput :: (MonadLogger m, ExperimentDef a) => (Entity PrepInput, Entity PrepInputValue) -> m (Maybe (Input a))
+    mkInput :: (MonadIO m, MonadLogger m, ExperimentDef a) => (Entity PrepInput, Entity PrepInputValue) -> m (Maybe (Input a))
     mkInput (Entity _ (PrepInput _ p), Entity _ (PrepInputValue _ v)) = do
-      v' <- deserialise v
+      v' <- deserialise "prep input value" v
       return $ Input p <$> v'
 
 
@@ -154,10 +160,10 @@ loadReplicationResult (Entity k (RepResult _ repNr)) = do
       let wmUpEndRandGen = tread <$> view warmUpResultDataEndRandGen wmUpRes
       mWmUpInpVals <- loadReplicationWarmUpInput k
       wmUpMeasures <- loadReplicationWarmUpMeasures k
-      mWmUpStartSt <- deserialise (view warmUpResultDataStartState wmUpRes)
-      mWmUpEndSt <- mDeserialise (view warmUpResultDataEndState wmUpRes)
-      mWmUpStartInpSt <- deserialise (view warmUpResultDataStartInputState wmUpRes)
-      mWmUpEndInpSt <- mDeserialise (view warmUpResultDataEndInputState wmUpRes)
+      mWmUpStartSt <- deserialise "warm up start state" (view warmUpResultDataStartState wmUpRes)
+      mWmUpEndSt <- mDeserialise "warm up end state" (view warmUpResultDataEndState wmUpRes)
+      mWmUpStartInpSt <- deserialise "warm up start input state" (view warmUpResultDataStartInputState wmUpRes)
+      mWmUpEndInpSt <- mDeserialise "warm up end input state" (view warmUpResultDataEndInputState wmUpRes)
       return $ do
         wmUpInpVals <- mWmUpInpVals
         wmUpStartSt <- mWmUpStartSt
@@ -184,10 +190,10 @@ loadReplicationResult (Entity k (RepResult _ repNr)) = do
       let repEndRandGen = tread <$> view repResultDataEndRandGen repRes
       mRepInpVals <- loadReplicationInput k
       repMeasures <- loadReplicationMeasures k
-      mRepStartSt <- deserialise (view repResultDataStartState repRes)
-      mRepEndSt <- mDeserialise (view repResultDataEndState repRes)
-      mRepStartInpSt <- deserialise (view repResultDataStartInputState repRes)
-      mRepEndInpSt <- mDeserialise (view repResultDataEndInputState repRes)
+      mRepStartSt <- deserialise "rep start state" (view repResultDataStartState repRes)
+      mRepEndSt <- mDeserialise "rep end state" (view repResultDataEndState repRes)
+      mRepStartInpSt <- deserialise "rep start input state" (view repResultDataStartInputState repRes)
+      mRepEndInpSt <- mDeserialise "rep end input state" (view repResultDataEndInputState repRes)
       return $ do
         repInpVals <- mRepInpVals
         repStartSt <- mRepStartSt
@@ -208,7 +214,7 @@ loadReplicationWarmUpInput kExpRes = do
   sequence <$> mapM mkInput res
   where
     mkInput (Entity _ (WarmUpInput _ p), Entity _ (WarmUpInputValue _ v)) = do
-      v' <- deserialise v
+      v' <- deserialise "warm up input value" v
       return $ Input p <$> v'
 
 
@@ -239,7 +245,7 @@ loadReplicationInput kExpRes = do
   sequence <$> mapM mkInput res
   where
     mkInput (Entity _ (RepInput _ p), Entity _ (RepInputValue _ v)) = do
-      v' <- deserialise v
+      v' <- deserialise "eval input value" v
       return $ Input p <$> v'
 
 
@@ -275,14 +281,12 @@ getOrCreateExps setup initInpSt initSt = do
   case L.find ((== myParams) . map (mkParamTpl . entityVal) . snd) (zip exps params) of
     Nothing -> do
       $(logInfo) "Starting new experiment..."
-      liftIO $ putStrLn "Starting new experiment..."
       time <- liftIO getCurrentTime
       eExp <- insertEntity $ Exps name time Nothing (runPut $ put initSt) (runPut $ put initInpSt)
       void $ insert $ mkExpSetup eExp
       return eExp
     Just (eExp, _) -> do
       $(logInfo) "Found experiment with same name and parameter settings. Continuing experiment ..."
-      liftIO $ putStrLn "Found experiment with same name and parameter settings. Continuing experiment ..."
       return eExp
   where
     mkExpSetup eExp =

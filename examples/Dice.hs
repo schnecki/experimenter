@@ -40,7 +40,7 @@ instance ExperimentDef Dice where
 
 main :: IO ()
 main = do
-  let setup = ExperimentSetup "dice" 1 0 0 100 3 2
+  let setup = ExperimentSetup "dice" 1 10 0 100 3 2
       databaseSetup = DatabaseSetup "host=localhost dbname=experimenter user=schnecki password= port=5432" 10
   g <- newStdGen
   (changed, res) <- runExperimentsLoggingNoSql databaseSetup setup () (Dice g)
