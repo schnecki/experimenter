@@ -6,6 +6,7 @@
 
 module Experimenter.Run
     ( DatabaseSetup (..)
+    , execExperiments
     , runExperiments
     , runExperimentsLogging
     , runExperimentsLoggingNoSql
@@ -59,6 +60,8 @@ data DatabaseSetup = DatabaseSetup
 
 type Updated = Bool
 
+execExperiments :: (ExperimentDef a) => DatabaseSetup -> ExperimentSetup -> InputState a -> a -> IO (Experiments a)
+execExperiments db setup inpSt st = snd <$> runExperiments db setup inpSt st
 
 runExperiments :: (ExperimentDef a) => DatabaseSetup -> ExperimentSetup -> InputState a -> a -> IO (Bool, Experiments a)
 runExperiments = runner runNoLoggingT runNoLoggingT
