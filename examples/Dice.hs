@@ -6,7 +6,7 @@
 
 module Main where
 
-
+import           Control.Lens   (view)
 import           Data.Serialize
 import qualified Data.Text      as T
 import           GHC.Generics
@@ -38,10 +38,10 @@ instance ExperimentDef Dice where
 setup :: ExperimentSetup
 setup = ExperimentSetup
   { _experimentBaseName         = "dice"
-  , _experimentRepetitions      =  1
+  , _experimentRepetitions      =  3
   , _preparationSteps           =  0
   , _evaluationWarmUpSteps      =  0
-  , _evaluationSteps            =  100
+  , _evaluationSteps            =  1000
   , _evaluationReplications     =  5
   , _maximumParallelEvaluations =  2
   }
@@ -53,3 +53,8 @@ main = do
   g <- newStdGen
   (changed, res) <- runExperimentsLoggingNoSql databaseSetup setup () (Dice g)
   putStrLn $ "Any change: " ++ show changed
+
+  let evals = [Mean OverReplications (Of "draw"), StdDev OverReplications (Of "draw")]
+  evalRes <- genEvals res evals
+
+  print (view evalsResults evalRes)

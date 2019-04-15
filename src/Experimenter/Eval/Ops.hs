@@ -4,14 +4,15 @@ module Experimenter.Eval.Ops
     ( genEvals
     ) where
 
-import           Control.Lens             hiding (Cons, over)
+import           Control.Lens             hiding (Cons, Over, over)
+import           Control.Monad            (unless)
 import           Data.Function            (on)
 import           Data.List                (find, sortBy)
 import           Data.Maybe               (fromMaybe)
 import qualified Data.Text                as T
 
 import           Experimenter.Eval.Reduce
-import           Experimenter.Eval.Type
+import           Experimenter.Eval.Type   as E
 import           Experimenter.Measure
 import           Experimenter.Result.Type
 import           Experimenter.StepResult
@@ -19,50 +20,68 @@ import           Experimenter.StepResult
 -- writeEval :: EvalTable a -> IO ()
 -- writeEval = undefined
 
-genEvals :: Experiments a -> [Evaluation a] -> IO (Evals a)
+genEvals :: Experiments a -> [StatsDef a] -> IO (Evals a)
 genEvals exps evals = do
-  res <- mapM (\e -> mapM (genExperiment e) evals >>= return . ExperimentEval (e ^. experimentNumber)) (exps ^. experiments)
+  res <- mapM mkEval (exps ^. experiments)
   return $ Evals exps res
-
-
-genExperiment :: Experiment a -> Evaluation a -> IO (EvalResults a)
-genExperiment exp eval = case eval of
-    MeanOver (BestXExperimentEvaluations nr cmp) eval' -> reduceUnary eval . EvalVector UnitExperiments <$> genExpRes (take nr . sortBy (cmp `on` id)) eval'
-    SumOver (BestXExperimentEvaluations nr cmp) eval' ->  reduceUnary eval . EvalVector UnitExperiments <$> genExpRes (take nr . sortBy (cmp `on` id)) eval'
-    StdDevOver (BestXExperimentEvaluations nr cmp) eval' ->  reduceUnary eval . EvalVector UnitExperiments <$> genExpRes (take nr . sortBy (cmp `on` id)) eval'
-    _ -> EvalVector UnitExperiments <$> genExpRes id eval
-  where genExpRes f e = mapM (genExperimentResult e) (f $ exp ^. experimentResults)
-
-
-genExperimentResult :: (Evaluation a) -> ExperimentResult a -> IO (EvalResults a)
-genExperimentResult eval expRes =
-  case eval of
-    MeanOver Replications eval' -> map (reduceOver eval) <$> genRepl eval'
-    StdDevOver Replications eval' -> map (reduceOver eval) <$> genRepl eval'
-    SumOver Replications eval' -> map (reduceOver eval) <$> genRepl eval'
-    _ -> concat <$> mapM (genReplication eval) (expRes ^. evaluationResults)
   where
-    genRepl e = mapM (genReplication e) (expRes ^. evaluationResults)
+    mkEval e = do
+      xs <- mapM (genExperiment e) evals
+      return $ ExperimentEval (e ^. experimentNumber) xs
+
+genExperiment :: Experiment a -> StatsDef a -> IO (EvalResults a)
+genExperiment exp eval =
+  case eval of
+    Mean OverExperiments eval' -> reduce eval' <$> genExpRes id (Id eval')
+    Sum OverExperiments eval' -> reduce eval' <$> genExpRes id (Id eval')
+    StdDev OverExperiments eval' -> reduce eval' <$> genExpRes id (Id eval')
+    Mean (OverBestXExperimentEvaluations nr cmp) eval' -> reduce eval' <$> genExpRes (take nr . sortBy (cmp `on` id)) (Id eval')
+    Sum (OverBestXExperimentEvaluations nr cmp) eval' -> reduce eval' <$> genExpRes (take nr . sortBy (cmp `on` id)) (Id eval')
+    StdDev (OverBestXExperimentEvaluations nr cmp) eval' -> reduce eval' <$> genExpRes (take nr . sortBy (cmp `on` id)) (Id eval')
+    _ -> EvalVector eval UnitExperiments <$> genExpRes id eval
+  where
+    genExpRes f e = mapM (genExperimentResult exp e) (f $ exp ^. experimentResults)
+    reduce eval' = reduceUnary eval . EvalVector (Id eval') UnitExperiments
 
 
-genReplication :: Evaluation a -> ReplicationResult a -> IO (EvalResults a)
-genReplication eval repl = fromMaybe (error "Evaluation data is incomplete!") <$> sequence (genResultData eval <$> (repl ^. evalResults))
+genExperimentResult :: Experiment a -> StatsDef a -> ExperimentResult a -> IO (EvalResults a)
+genExperimentResult exp eval expRes =
+  case eval of
+    Mean OverReplications eval'   -> reduce eval' <$> genRepl (Id eval')
+    StdDev OverReplications eval' -> reduce eval' <$> genRepl (Id eval')
+    Sum OverReplications eval'    -> reduce eval' <$> genRepl (Id eval')
+    _                             -> EvalVector eval UnitExperiments <$> genRepl eval
+  where
+    genRepl e = mapM (genReplication exp e) (expRes ^. evaluationResults)
+    reduce eval' = reduceUnary eval . EvalVector (Id eval') UnitReplications
 
 
-genResultData :: Evaluation a -> ResultData a -> IO (EvalResults a)
-genResultData eval repl = case eval of
-  MeanOver Periods eval'   -> reduceUnary eval <$> genResultData eval' repl
-  StdDevOver Periods eval' -> reduceUnary eval <$> genResultData eval' repl
-  SumOver Periods eval'    -> reduceUnary eval <$> genResultData eval' repl
-  Div eval1 eval2          -> do
-    e1 <- genResultData eval1 repl
-    e2 <- genResultData eval2 repl
-    return $ reduceBinary eval e1 e2
-  Of valName               -> return $ EvalVector Periods (map (fromMeasure valName) (repl ^. results))
+genReplication :: Experiment a -> StatsDef a -> ReplicationResult a -> IO (EvalResults a)
+genReplication exp eval repl = fromMaybe (error "Evaluation data is incomplete!") <$> sequence (genResultData exp eval <$> (repl ^. evalResults))
+
+genResultData :: Experiment a -> StatsDef a -> ResultData a -> IO (EvalResults a)
+genResultData exp eval repl =
+  case eval of
+    Mean OverPeriods eval'   -> reduceUnary eval <$> genResultData exp (Id eval') repl
+    StdDev OverPeriods eval' -> reduceUnary eval <$> genResultData exp (Id eval') repl
+    Sum OverPeriods eval'    -> reduceUnary eval <$> genResultData exp (Id eval') repl
+    Id eval'                 -> evalOf exp eval' repl
+    _                        -> genExperiment exp eval
 
 
-fromMeasure :: T.Text -> Measure -> (EvalResults a)
+evalOf :: Experiment a -> Of a -> ResultData a -> IO (EvalResults a )
+evalOf exp eval resData =
+  case eval of
+    Of name -> return $ EvalVector (Id $ Of name) UnitPeriods $ map (fromMeasure name) (resData ^. results)
+    Stats def -> genExperiment exp def
+    Div eval1 eval2 -> reduceBinary eval <$> evalOf exp eval1 resData <*> evalOf exp eval2 resData
+    Add eval1 eval2 -> reduceBinary eval <$> evalOf exp eval1 resData <*> evalOf exp eval2 resData
+    Sub eval1 eval2 -> reduceBinary eval <$> evalOf exp eval1 resData <*> evalOf exp eval2 resData
+    Mult eval1 eval2 -> reduceBinary eval <$> evalOf exp eval1 resData <*> evalOf exp eval2 resData
+
+
+fromMeasure :: T.Text -> Measure -> EvalResults a
 fromMeasure name (Measure p res) = case find ((==name) . view resultName) res of
   Nothing -> error $ "Variable with name " <> T.unpack name <> " could not be found!"
-  Just (StepResult n mX y) -> EvalValue (Of n) n (maybe (Left p) Right mX) y
+  Just (StepResult n mX y) -> EvalValue (Id $ Of n) n (maybe (Left p) Right mX) y
 
