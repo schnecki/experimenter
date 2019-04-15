@@ -38,6 +38,10 @@ dependencies:
 - esqueleto
 - unliftio-core
 - random-shuffle
+- HaTeX
+- directory
+- process
+- matrix
 
 library:
   source-dirs: src

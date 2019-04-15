@@ -29,7 +29,7 @@ instance ExperimentDef Dice where
   generateInput _ _ _ _ = return ((), ())
   runStep (Dice g) _ p =
     let (nr, g') = next g
-        result = StepResult "draw" (Just $ fromIntegral p) (fromIntegral $ 1 + nr `mod` 6)
+        result = StepResult "draw" Nothing (fromIntegral $ 1 + nr `mod` 6)
     in return ([result], Dice g')
   parameters _ = []
   equalExperiments _ _ = True   -- Do not compare random generators!
@@ -41,8 +41,8 @@ setup = ExperimentSetup
   , _experimentRepetitions      =  3
   , _preparationSteps           =  0
   , _evaluationWarmUpSteps      =  0
-  , _evaluationSteps            =  1000
-  , _evaluationReplications     =  5
+  , _evaluationSteps            =  100
+  , _evaluationReplications     =  3
   , _maximumParallelEvaluations =  2
   }
 
@@ -54,7 +54,11 @@ main = do
   (changed, res) <- runExperimentsLoggingNoSql databaseSetup setup () (Dice g)
   putStrLn $ "Any change: " ++ show changed
 
-  let evals = [Mean OverReplications (Of "draw"), StdDev OverReplications (Of "draw")]
+  let evals = [Mean OverReplications (Of "draw"), StdDev OverReplications (Of "draw")
+              , Id (Of "draw")
+              ]
   evalRes <- genEvals res evals
 
   print (view evalsResults evalRes)
+
+  writeAndCompileLatex evalRes

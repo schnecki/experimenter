@@ -2,3 +2,5 @@
 experimenter.cabal
 *~
 /TAGS
+/results/dice/main.aux
+/results/
