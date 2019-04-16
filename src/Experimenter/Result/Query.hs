@@ -276,13 +276,14 @@ getOrCreateExps setup initInpSt initSt = do
           expsList
   params <- mapM (\e -> selectList [ParamExps ==. entityKey e] [Asc ParamName]) exps
   let mkParamTpl (Param _ n minB maxB) = (n, minB, maxB)
-  let myParams = L.sortBy (compare `on` (\(x, _, _) -> x)) $ map (mkParamTpl . convertParameterSetup (error "Ref not used")) (parameters initSt)
+  let myParams = L.sortBy (compare `on` (\(x, _, _) -> x)) $ map (mkParamTpl . convertParameterSetup (entityKey (head exps))) (parameters initSt)
   case L.find ((== myParams) . map (mkParamTpl . entityVal) . snd) (zip exps params) of
     Nothing -> do
       $(logInfo) "Starting new experiment..."
       time <- liftIO getCurrentTime
       eExp <- insertEntity $ Exps name time Nothing (runPut $ put initSt) (runPut $ put initInpSt)
       void $ insert $ mkExpSetup eExp
+      mapM_ (insertParam (entityKey eExp)) (parameters initSt)
       return eExp
     Just (eExp, _) -> do
       $(logInfo) "Found experiment with same name and parameter settings. Continuing experiment ..."
@@ -298,3 +299,6 @@ getOrCreateExps setup initInpSt initSt = do
         (max 0 $ view evaluationSteps setup)
         (max 1 $ view evaluationReplications setup)
         (max 1 $ view maximumParallelEvaluations setup)
+    insertParam :: Key Exps -> ParameterSetup a -> ReaderT SqlBackend m (Key Param)
+    insertParam eExp (ParameterSetup n _ _ _ (minVal,maxVal)) =
+      insert $ Param eExp n (runPut $ put minVal) (runPut $ put maxVal)

@@ -139,6 +139,7 @@ continueExperiments exp = do
           let settings = map (\x -> L.sortBy (compare `on` view parameterSettingName) (x : otherParams)) paramSettings
           let nrs = [1 + length expsDone .. length expsDone + length settings]
           kExps <- mapM (\nr -> insert $ Exp (exp ^. experimentsKey) nr startTime Nothing) nrs
+
           zipWithM_ saveParamSettings kExps settings
           let exps = zipWith3 (\key nr params -> Experiment key nr startTime Nothing params []) kExps nrs settings
           return exps

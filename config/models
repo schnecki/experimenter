@@ -20,7 +20,7 @@ Param
     name Text
     minBound ByteString
     maxBound ByteString
-    deriving Eq Ord
+    deriving Show Eq Ord
 
 Exp         -- Adding "json" causes ToJSON and FromJSON instances to be derived.
     exps  ExpsId
