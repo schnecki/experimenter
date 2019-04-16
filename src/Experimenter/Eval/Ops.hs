@@ -27,17 +27,17 @@ genEvals exps evals = do
   where
     mkEval e = do
       xs <- mapM (genExperiment e) evals
-      return $ ExperimentEval (e ^. experimentNumber) xs
+      return $ ExperimentEval (e ^. experimentNumber) xs e
 
 genExperiment :: Experiment a -> StatsDef a -> IO (EvalResults a)
 genExperiment exp eval =
   case eval of
-    Mean OverExperiments eval' -> reduce eval' <$> genExpRes id (Id eval')
-    Sum OverExperiments eval' -> reduce eval' <$> genExpRes id (Id eval')
-    StdDev OverExperiments eval' -> reduce eval' <$> genExpRes id (Id eval')
-    Mean (OverBestXExperimentEvaluations nr cmp) eval' -> reduce eval' <$> genExpRes (take nr . sortBy (cmp `on` id)) (Id eval')
-    Sum (OverBestXExperimentEvaluations nr cmp) eval' -> reduce eval' <$> genExpRes (take nr . sortBy (cmp `on` id)) (Id eval')
-    StdDev (OverBestXExperimentEvaluations nr cmp) eval' -> reduce eval' <$> genExpRes (take nr . sortBy (cmp `on` id)) (Id eval')
+    Mean OverExperimentRepetitions eval' -> reduce eval' <$> genExpRes id (Id eval')
+    Sum OverExperimentRepetitions eval' -> reduce eval' <$> genExpRes id (Id eval')
+    StdDev OverExperimentRepetitions eval' -> reduce eval' <$> genExpRes id (Id eval')
+    Mean (OverBestXExperimentRepetitions nr cmp) eval' -> reduce eval' <$> genExpRes (take nr . sortBy (cmp `on` id)) (Id eval')
+    Sum (OverBestXExperimentRepetitions nr cmp) eval' -> reduce eval' <$> genExpRes (take nr . sortBy (cmp `on` id)) (Id eval')
+    StdDev (OverBestXExperimentRepetitions nr cmp) eval' -> reduce eval' <$> genExpRes (take nr . sortBy (cmp `on` id)) (Id eval')
     _ -> EvalVector eval UnitExperiments <$> genExpRes id eval
   where
     genExpRes f e = mapM (genExperimentResult exp e) (f $ exp ^. experimentResults)
@@ -58,6 +58,7 @@ genExperimentResult exp eval expRes =
 
 genReplication :: Experiment a -> StatsDef a -> ReplicationResult a -> IO (EvalResults a)
 genReplication exp eval repl = fromMaybe (error "Evaluation data is incomplete!") <$> sequence (genResultData exp eval <$> (repl ^. evalResults))
+
 
 genResultData :: Experiment a -> StatsDef a -> ResultData a -> IO (EvalResults a)
 genResultData exp eval repl =

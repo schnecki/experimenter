@@ -106,6 +106,7 @@ continueExperiments exp = do
   newExps <- mkNewExps exp exps
   let expsList = exps ++ newExps
   $(logInfo) $ "Number of experiments loaded: " <> tshow (length expsList)
+  $(logInfo) $ "Number of new experiments: " <> tshow (length newExps)
   expRes <- mapM (continueExperiment rands exp) expsList
   let updated = any fst expRes
       res = map snd expRes
@@ -119,13 +120,15 @@ continueExperiments exp = do
     mkParamSetting :: Experiments a -> ParameterSetup a -> ParameterSetting a
     mkParamSetting exp (ParameterSetup name setter getter mod bnds) = ParameterSetting name (runPut $ put $ getter (exp ^. experimentsInitialState))
     initParams exp = map (mkParamSetting exp) (view experimentsParameters exp)
-    mkNewExps :: (ExperimentDef a, MonadIO m) => Experiments a -> [Experiment a] -> ReaderT SqlBackend m [Experiment a]
+    mkNewExps :: (MonadLogger m, ExperimentDef a, MonadIO m) => Experiments a -> [Experiment a] -> ReaderT SqlBackend m [Experiment a]
     mkNewExps exp [] = do
+      $(logDebug) $ "Initializing new experiments"
       startTime <- liftIO getCurrentTime
       kExp <- insert $ Exp (exp ^. experimentsKey) 1 startTime Nothing
       saveParamSettings kExp (initParams exp)
       return [Experiment kExp 1 startTime Nothing (initParams exp) []]
     mkNewExps exp expsDone = do
+      $(logDebug) $ "Adding further experiments"
       params <- liftIO $ shuffleM $ parameters (exp ^. experimentsInitialState)
       if null params
         then return []
@@ -187,6 +190,7 @@ loadParameters exps exp = foldM setParam exps (exp ^. parameterSetup)
           case runGet S.get bs of
             Left err -> error $ "Could not read value of parameter " <> T.unpack n <> ". Aborting! Serializtion error was: " ++ err
             Right val -> do
+              $(logDebug) $ "Loaded parameter '" <> n <> "' value: " <> tshow val
               let st' = setter val (e ^. experimentsInitialState)
               return $ set experimentsInitialState st' e
 

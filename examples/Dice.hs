@@ -31,8 +31,11 @@ instance ExperimentDef Dice where
     let (nr, g') = next g
         result = StepResult "draw" Nothing (fromIntegral $ 1 + nr `mod` 6)
     in return ([result], Dice g')
-  parameters _ = []
+  parameters _ = [fakeParam]
   equalExperiments _ _ = True   -- Do not compare random generators!
+
+fakeParam :: ParameterSetup a
+fakeParam = ParameterSetup "fake" (flip const) (const (0.3::Double)) Nothing (0,1)
 
 
 setup :: ExperimentSetup
@@ -59,6 +62,6 @@ main = do
               ]
   evalRes <- genEvals res evals
 
-  print (view evalsResults evalRes)
+  -- print (view evalsResults evalRes)
 
   writeAndCompileLatex evalRes

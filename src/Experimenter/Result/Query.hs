@@ -41,21 +41,20 @@ loadExperiments setup initInpSt initSt = do
   eExp <- getOrCreateExps setup initInpSt initSt
   let e = entityVal eExp
   exps <- L.sortBy (compare `on` view experimentNumber) <$> loadExperimentList (entityKey eExp)
-
   eSetup <- fromMaybe (error "Setup not found. Your DB is corrupted!") <$> getBy (UniqueExpsSetup (entityKey eExp))
-
   return $ Experiments (entityKey eExp) (view expsName e) (view expsStartTime e) (view expsEndTime e) (entityVal eSetup) (parameters initSt) initSt initInpSt exps
 
 
 loadExperimentList :: (ExperimentDef a, MonadLogger m, MonadIO m) => Key Exps -> ReaderT SqlBackend m [Experiment a]
-loadExperimentList expsKey = do
-  selectList [ExpExps ==. expsKey] [] >>= mapM mkExperiment
+loadExperimentList expsKey = selectList [ExpExps ==. expsKey] [] >>= mapM mkExperiment
     where mkExperiment (Entity k exp) = do
             paramSetting <- loadParamSetup k
             Experiment k (view expNumber exp) (view expStartTime exp) (view expEndTime exp) paramSetting <$> loadExperimentResults k
 
+
 mDeserialise :: (MonadIO m, MonadLogger m ,Serialize a) => T.Text -> Maybe ByteString -> m (Maybe (Maybe a))
 mDeserialise n mBs = sequence (deserialise n <$> mBs)
+
 
 deserialise :: (MonadIO m, MonadLogger m, Serialize a) => T.Text -> ByteString -> m (Maybe a)
 deserialise n bs =
@@ -64,9 +63,7 @@ deserialise n bs =
         Left err -> do
           $(logError) $ "Could not deserialise " <> n <> "! Discarding saved experiment result. Data length: " <> tshow (B.length bs) <> ". Error Message: " <> tshow err
           return Nothing
-        Right r -> do
-          --  $(logInfo) $ "Deserialised " <> n <> ". Data length " <> tshow (B.length bs)
-          return $ Just r
+        Right r -> return $ Just r
 
 
 loadExperimentResults :: (ExperimentDef a, MonadLogger m, MonadIO m) => Key Exp -> ReaderT SqlBackend m [ExperimentResult a]
@@ -269,7 +266,7 @@ loadReplicationMeasures kExpRes = do
 getOrCreateExps :: forall m a . (ExperimentDef a, MonadLogger m, MonadIO m) => ExperimentSetup -> InputState a -> a -> ReaderT SqlBackend m (Entity Exps)
 getOrCreateExps setup initInpSt initSt = do
   let name = view experimentBaseName setup
-  -- exps <- selectList [ExpsName ==. name, ExpsInitialInputState ==. runPut (put initInpSt), ExpsInitialState ==. runPut (put initSt)] []
+  -- expsList <- selectList [ExpsName ==. name, ExpsInitialInputState ==. runPut (put initInpSt), ExpsInitialState ==. runPut (put initSt)] []
   expsList <- selectList [ExpsName ==. name] []
   let exps =
         filter
@@ -277,9 +274,9 @@ getOrCreateExps setup initInpSt initSt = do
              let other = (,) <$> runGet S.get s <*> runGet S.get iS
              in fromEither False (equalExperiments (initSt, initInpSt) <$> other))
           expsList
-  params <- mapM (\e -> selectList [ParamExps ==. entityKey e] []) exps
+  params <- mapM (\e -> selectList [ParamExps ==. entityKey e] [Asc ParamName]) exps
   let mkParamTpl (Param _ n minB maxB) = (n, minB, maxB)
-  let myParams = map (mkParamTpl . convertParameterSetup (error "Ref not used")) (parameters initSt)
+  let myParams = L.sortBy (compare `on` (\(x, _, _) -> x)) $ map (mkParamTpl . convertParameterSetup (error "Ref not used")) (parameters initSt)
   case L.find ((== myParams) . map (mkParamTpl . entityVal) . snd) (zip exps params) of
     Nothing -> do
       $(logInfo) "Starting new experiment..."

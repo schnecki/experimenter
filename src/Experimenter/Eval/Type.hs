@@ -17,20 +17,20 @@ import qualified Experimenter.Result.Type as R
 data Over a
   = OverReplications
   | OverPeriods
-  | OverExperiments
-  | OverBestXExperimentEvaluations Int (ExperimentResult a -> ExperimentResult a -> Ordering)
+  | OverExperimentRepetitions
+  | OverBestXExperimentRepetitions Int (ExperimentResult a -> ExperimentResult a -> Ordering)
 
 instance Eq (Over a) where
   OverReplications == OverReplications = True
   OverPeriods == OverPeriods = True
-  OverBestXExperimentEvaluations _ _ == OverBestXExperimentEvaluations _ _ = True
+  OverBestXExperimentRepetitions _ _ == OverBestXExperimentRepetitions _ _ = True
   _ == _ = False
 
 instance Show (Over a) where
   show OverReplications                      = "Replications"
   show OverPeriods                           = "Periods"
-  show OverExperiments     = "Experiments"
-  show (OverBestXExperimentEvaluations nr _) = "(BestXExperimentEvaluations " <> show nr <> ")"
+  show OverExperimentRepetitions     = "Experiments"
+  show (OverBestXExperimentRepetitions nr _) = "(BestXExperimentEvaluations " <> show nr <> ")"
 
 -- | Definition of statisics. Is used to define the desired output.
 
@@ -108,23 +108,25 @@ getEvalType :: (Over a -> Of a -> StatsDef a) -> EvalResults a -> StatsDef a
 getEvalType f (EvalVector tp unit _)     = f (fromUnit unit) (Stats tp)
   where fromUnit UnitPeriods = OverPeriods
         fromUnit UnitReplications = OverReplications
-        fromUnit UnitExperiments = OverExperiments
-        fromUnit (UnitBestExperiments nr) = OverBestXExperimentEvaluations nr (error "compare function in BestXExperimentEvaluations may not be used")
+        fromUnit UnitExperiments = OverExperimentRepetitions
+        fromUnit (UnitBestExperiments nr) = OverBestXExperimentRepetitions nr (error "compare function in BestXExperimentEvaluations may not be used")
 getEvalType _ (EvalValue t _ _ _)      = t
 getEvalType _ (EvalReducedValue t _) = t
 
 
-data ExperimentEvals a = ExperimentEval
+data ExperimentEval a = ExperimentEval
   { _evalExperimentNumber  :: Int
   , _evalExperimentResults :: [EvalResults a]
+  , _evalExperiment        :: Experiment a
   }
-  deriving (Show)
-makeLenses ''ExperimentEvals
+makeLenses ''ExperimentEval
+
+instance Show (ExperimentEval a) where
+  show x = show (x ^. evalExperimentResults)
 
 data Evals a = Evals
   { _evalsExperiment :: R.Experiments a
-  , _evalsResults    :: [ExperimentEvals a] -- ^ Each result corresponds to one experiment, except if the data is reduced
-                                          -- over the experiments.
+  , _evalsResults    :: [ExperimentEval a]
   }
 makeLenses ''Evals
 
