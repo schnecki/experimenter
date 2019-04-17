@@ -1,8 +1,9 @@
-{-# LANGUAGE FlexibleContexts  #-}
-{-# LANGUAGE GADTs             #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell   #-}
-{-# LANGUAGE TypeFamilies      #-}
+{-# LANGUAGE FlexibleContexts    #-}
+{-# LANGUAGE GADTs               #-}
+{-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell     #-}
+{-# LANGUAGE TypeFamilies        #-}
 
 module Experimenter.Run
     ( DatabaseSetup (..)
@@ -12,7 +13,7 @@ module Experimenter.Run
     , runExperimentsLoggingNoSql
     ) where
 
-import           Control.Arrow                ((***))
+import           Control.Arrow                (first, (***))
 import           Control.Lens
 import           Control.Monad                (forM)
 import           Control.Monad.IO.Class
@@ -34,6 +35,7 @@ import           Data.Serialize               hiding (get)
 import qualified Data.Serialize               as S
 import qualified Data.Text                    as T
 import           Data.Time                    (getCurrentTime)
+import qualified Database.Esqueleto           as E
 import           Database.Persist.Postgresql
 import           System.IO
 import           System.Random
@@ -94,7 +96,12 @@ runner logFunDb logFunRun dbSetup setup initInpSt initSt =
   withPostgresqlPool (connectionString dbSetup) (parallelConnections dbSetup) $
   liftSqlPersistMPoolLogging logFunRun $ do
     runMigration migrateAll
-    loadExperiments setup initInpSt initSt >>= continueExperiments
+    loadExperiments setup initInpSt initSt >>= runExperiment
+  where runExperiment exps = do
+          (anyChange, exps') <- continueExperiments exps
+          if anyChange
+            then first (const True) <$> runExperiment exps'
+            else return (anyChange, exps')
 
 
 continueExperiments :: (ExperimentDef a, MonadLogger m, MonadIO m) => Experiments a -> ReaderT SqlBackend m (Bool, Experiments a)
@@ -122,36 +129,62 @@ continueExperiments exp = do
     initParams exp = map (mkParamSetting exp) (view experimentsParameters exp)
     mkNewExps :: (MonadLogger m, ExperimentDef a, MonadIO m) => Experiments a -> [Experiment a] -> ReaderT SqlBackend m [Experiment a]
     mkNewExps exp [] = do
-      $(logDebug) $ "Initializing new experiments"
+      $(logDebug) $ "Initializing new experiments..."
       startTime <- liftIO getCurrentTime
       kExp <- insert $ Exp (exp ^. experimentsKey) 1 startTime Nothing
       saveParamSettings kExp (initParams exp)
       return [Experiment kExp 1 startTime Nothing (initParams exp) []]
     mkNewExps exp expsDone = do
-      $(logDebug) $ "Adding further experiments"
+      $(logDebug) $ "Checking whether adding further experiments is necessary..."
       params <- liftIO $ shuffleM $ parameters (exp ^. experimentsInitialState)
       if null params
         then return []
         else do
           startTime <- liftIO getCurrentTime
-          paramSettings <- liftIO $ modifyParam exp (head params)
+          let p = head params
           let otherParams = map (`mkParameterSetting` st) (tail params)
-          let settings = map (\x -> L.sortBy (compare `on` view parameterSettingName) (x : otherParams)) paramSettings
+          paramSettings <- modifyParam exp p
+          paramSettings' <- filterParamSettings exp p otherParams paramSettings
+          let settings = map (\x -> L.sortBy (compare `on` view parameterSettingName) (x : otherParams)) paramSettings'
           let nrs = [1 + length expsDone .. length expsDone + length settings]
           kExps <- mapM (\nr -> insert $ Exp (exp ^. experimentsKey) nr startTime Nothing) nrs
-
           zipWithM_ saveParamSettings kExps settings
           let exps = zipWith3 (\key nr params -> Experiment key nr startTime Nothing params []) kExps nrs settings
+          unless (null exps) $ $(logDebug) $ "Created " <> tshow (length exps) <> " new experiments variations!"
           return exps
       where
         st = exp ^. experimentsInitialState
-    modifyParam :: Experiments a -> ParameterSetup a -> IO [ParameterSetting a]
-    modifyParam exp (ParameterSetup _ _ _ Nothing _) = return []
-    modifyParam exp (ParameterSetup n setter getter (Just modifier) (minBound, maxBound)) = do
-      bss <- fmap (runPut . put) . filter (\x -> x <= maxBound && x >= minBound) <$> modifier (getter st)
+    filterParamSettings exp p otherParams paramSettings = do
+      expIds <- map entityKey <$> selectList [ExpExps ==. exp ^. experimentsKey] []
+      pExists <-
+        map (map (view paramSettingExp . entityVal)) <$>
+        mapM (\v -> selectList [ParamSettingExp <-. expIds, ParamSettingName ==. parameterName p, ParamSettingValue ==. view parameterSettingValue v] []) paramSettings
+      paramSettingExits <-
+        map or <$>
+        mapM
+          (\pValsIds ->
+             mapM
+               (\k -> do
+                  ps <- map entityVal <$> selectList [ParamSettingExp ==. k] []
+                  return $ all (\(ParameterSetting n vBs) -> maybe False ((vBs ==) . view paramSettingValue) $ L.find ((== n) . view paramSettingName) ps) otherParams)
+               (L.nub pValsIds))
+          pExists
+      return $ map fst $ filter (not . snd) $ zip paramSettings paramSettingExits
+    modifyParam :: (MonadLogger m, MonadIO m) => Experiments a -> ParameterSetup a -> ReaderT SqlBackend m [ParameterSetting a]
+    modifyParam exps (ParameterSetup _ _ _ Nothing _) = return []
+    modifyParam exps (ParameterSetup n setter getter (Just modifier) (minBound, maxBound)) = do
+      pairs <-
+        E.select $ E.from $ \(exp, par) -> do
+          E.where_ (exp E.^. ExpExps E.==. E.val (view experimentsKey exps))
+          E.where_ (par E.^. ParamSettingExp E.==. exp E.^. ExpId)
+          return (exp, par)
+      let concatRight Left {}   = []
+          concatRight (Right x) = [x]
+      let vals = concatMap (concatRight . S.runGet S.get . view paramSettingValue . entityVal . snd) pairs
+      bss <- liftIO $ concat <$> mapM (\val -> fmap (runPut . put) . filter (\x -> x <= maxBound && x >= minBound) <$> modifier (getter $ setter val st)) vals
       return $ map (ParameterSetting n) bss
       where
-        st = exp ^. experimentsInitialState
+        st = exps ^. experimentsInitialState
     saveParamSettings kExp = mapM_ (\(ParameterSetting n bs) -> insert $ ParamSetting kExp n bs)
     mkRands :: [Experiment a] -> IO ([StdGen], [StdGen], [StdGen])
     mkRands [] = do

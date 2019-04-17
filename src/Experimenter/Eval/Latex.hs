@@ -38,9 +38,12 @@ mainFilePdf = T.unpack (T.dropWhileEnd (/= '.') (T.pack mainFile)) <> "pdf"
 writeAndCompileLatex :: Evals a -> IO ()
 writeAndCompileLatex evals = writeLatex evals >> compileLatex evals
 
+getExpsName :: Evals a -> String
+getExpsName evals  = T.unpack $ T.replace " " "_" $ evals ^. evalsExperiment.experimentsName
+
 compileLatex :: Evals a -> IO ()
 compileLatex evals = do
-  let n = T.unpack $ evals ^. evalsExperiment.experimentsName
+  let n = getExpsName evals
       dir = rootPath <> "/" <> n
   void $ runProcess "pdflatex" [mainFile] (Just dir) Nothing Nothing Nothing Nothing >>= waitForProcess
   pwd <- getCurrentDirectory
@@ -49,7 +52,7 @@ compileLatex evals = do
 
 writeLatex :: Evals a -> IO ()
 writeLatex evals = do
-  let n = T.unpack $ evals ^. evalsExperiment.experimentsName
+  let n = getExpsName evals
       dir = rootPath <> "/" <> n
       file = dir <> "/" <> mainFile
   createDirectoryIfMissing True dir
@@ -99,10 +102,11 @@ refTblParamSetting nr = "tbl:paramSetting:" <> raw (tshow nr)
 experimentsInfo :: Experiments a -> LaTeXT IO ()
 experimentsInfo exps = do
   part "General Information"
-  table (Just Top) $ center $ do
-    tabular Nothing [LeftColumn, LeftColumn] $ do
+  -- table (Just Bottom) $
+  center $ do
+    tabular Nothing [VerticalLine, LeftColumn, LeftColumn, VerticalLine] $ do
       hline
-      textbf "Parameter Name" & textbf "Parameter Value" <> lnbk
+      textbf "Parameter" & textbf "Value" <> lnbk
       hline <> line "Experiment Name: " (exps ^. experimentsName) <> line "Start time:" (tshow $ exps ^. experimentsStartTime)
       line "End time:" (maybe "" tshow (exps ^. experimentsEndTime))
       line "Number of conducted Experiments: " (tshow $ length (exps ^. experiments))
@@ -112,8 +116,8 @@ experimentsInfo exps = do
       line "Experiment Evaluation Steps:" (tshow $ exps ^. experimentsSetup . expsSetupEvaluationSteps)
       line "Experiment Evaluation Replications:" (tshow $ exps ^. experimentsSetup . expsSetupEvaluationReplications)
       hline
-    label refTblGenInfo
-    caption "General information for all conducted experiments."
+    -- label refTblGenInfo
+    -- caption "General information for all conducted experiments."
   where
     line name value = raw name & raw value <> lnbk
 
@@ -130,9 +134,9 @@ paramSetting evals (ExperimentEval nr _ exp) = do
   subsection $ "Parameter Setting of Experiment No. " <> raw (tshow nr)
   if null (exp ^. parameterSetup)
     then "There are no configured parameters!"
-    else center $ tabular Nothing [LeftColumn, LeftColumn] $ do
+    else center $ tabular Nothing [VerticalLine ,LeftColumn, LeftColumn, VerticalLine] $ do
            hline
-           textbf "Parameter Name" & textbf "Parameter Value" <> lnbk
+           textbf "Parameter" & textbf "Value" <> lnbk
            hline
            mapM_ mkLine (exp ^. parameterSetup)
            hline
@@ -145,9 +149,9 @@ paramSetting evals (ExperimentEval nr _ exp) = do
     mkLine (ParameterSetting n bsV) =
       case find ((== n) . parameterName) (evals ^. evalsExperiment . experimentsParameters) of
         Nothing -> line n (raw "was not modified as it is not listed in the parameter setting")
-        Just (ParameterSetup _ setter getter _ (minVal, maxVal)) ->
+        Just (ParameterSetup _ setter _ _ (minVal, maxVal)) ->
           case S.runGet S.get bsV of
             Left err -> raw (T.pack err)
             Right val ->
               let _ = setter val (evals ^. evalsExperiment . experimentsInitialState) -- only needed for type inference
-              in line n (raw (tshow val) <> math (text " " `in_` autoParens (raw (tshow minVal <> ", " <> tshow maxVal))))
+              in line n (raw (tshow val) <> math (text " " `in_` autoParens (text (raw (tshow minVal)) <> ", " <> text (raw (tshow maxVal)))))
