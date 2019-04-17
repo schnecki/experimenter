@@ -3,15 +3,12 @@
 module Experimenter.Parameter.Type where
 
 import           Control.Lens
-import qualified Data.ByteString                      as BS
+import qualified Data.ByteString as BS
 import           Data.Serialize
-import qualified Data.Text                            as T
-
-import           Experimenter.Parameter.ParameterType
-
+import qualified Data.Text       as T
 
 data ParameterSetup a =
-  forall b . (Show b, Ord b, Serialize b, ParameterType b) =>
+  forall b . (Show b, Ord b, Serialize b) =>
   ParameterSetup
   { parameterName   :: T.Text              -- ^ Name of parameter.
   , setParameter    :: b -> a -> a         -- ^ Set the parameter.

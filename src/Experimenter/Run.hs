@@ -29,7 +29,7 @@ import           Control.Monad.Trans.Resource
 import qualified Data.ByteString              as BS
 import           Data.Function                (on)
 import qualified Data.List                    as L
-import           Data.Maybe                   (fromMaybe, isJust)
+import           Data.Maybe                   (fromMaybe, isJust, isNothing)
 import           Data.Pool                    as P
 import           Data.Serialize               hiding (get)
 import qualified Data.Serialize               as S
@@ -96,12 +96,16 @@ runner logFunDb logFunRun dbSetup setup initInpSt initSt =
   withPostgresqlPool (connectionString dbSetup) (parallelConnections dbSetup) $
   liftSqlPersistMPoolLogging logFunRun $ do
     runMigration migrateAll
-    loadExperiments setup initInpSt initSt >>= runExperiment
+    loadExperiments setup initInpSt initSt >>= checkUniqueParamNames >>= runExperiment
   where runExperiment exps = do
           (anyChange, exps') <- continueExperiments exps
           if anyChange
             then first (const True) <$> runExperiment exps'
             else return (anyChange, exps')
+        checkUniqueParamNames exps = do
+          let paramNames = map parameterName (view experimentsParameters exps)
+          when (any ((>1) . length) (L.group $ L.sort paramNames)) $ error "Parameter names must be unique!"
+          return exps
 
 
 continueExperiments :: (ExperimentDef a, MonadLogger m, MonadIO m) => Experiments a -> ReaderT SqlBackend m (Bool, Experiments a)
@@ -135,7 +139,7 @@ continueExperiments exp = do
       saveParamSettings kExp (initParams exp)
       return [Experiment kExp 1 startTime Nothing (initParams exp) []]
     mkNewExps exp expsDone = do
-      $(logDebug) $ "Checking whether adding further experiments is necessary..."
+      $(logDebug) "Checking whether adding further experiments is necessary..."
       params <- liftIO $ shuffleM $ parameters (exp ^. experimentsInitialState)
       if null params
         then return []

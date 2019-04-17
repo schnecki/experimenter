@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell   #-}
 module Experimenter.Eval.Latex
     ( writeLatex
     , writeAndCompileLatex
@@ -7,7 +8,10 @@ module Experimenter.Eval.Latex
 
 import           Control.Lens                 hiding ((&))
 import           Control.Monad                (void)
-import           Data.List                    (find)
+import           Control.Monad.Logger
+import           Data.Either
+import           Data.Function                (on)
+import           Data.List                    as L (find, groupBy, nub, sortBy)
 import           Data.Matrix
 import           Data.Maybe                   (fromMaybe)
 import qualified Data.Serialize               as S
@@ -26,6 +30,9 @@ import           Experimenter.Parameter.Type
 import           Experimenter.Result.Type
 import           Experimenter.Util
 
+instance (MonadLogger m) => MonadLogger (LaTeXT m) where
+
+
 rootPath :: FilePath
 rootPath = "results"
 
@@ -39,7 +46,7 @@ writeAndCompileLatex :: Evals a -> IO ()
 writeAndCompileLatex evals = writeLatex evals >> compileLatex evals
 
 getExpsName :: Evals a -> String
-getExpsName evals  = T.unpack $ T.replace " " "_" $ evals ^. evalsExperiment.experimentsName
+getExpsName evals  = T.unpack $ T.replace " " "_" $ evals ^. evalsExperiments.experimentsName
 
 compileLatex :: Evals a -> IO ()
 compileLatex evals = do
@@ -56,17 +63,17 @@ writeLatex evals = do
       dir = rootPath <> "/" <> n
       file = dir <> "/" <> mainFile
   createDirectoryIfMissing True dir
-  execLaTeXT (root evals) >>= renderFile file
+  runStdoutLoggingT (execLaTeXT (root evals)) >>= renderFile file
 
-root :: Evals a -> LaTeXT IO ()
+root :: (MonadLogger m) => Evals a -> LaTeXT m ()
 root evals = do
   thePreamble evals
   document $ theBody evals
 
 -- Preamble with some basic info.
-thePreamble :: Evals a -> LaTeXT IO ()
+thePreamble :: (MonadLogger m) => Evals a -> LaTeXT m ()
 thePreamble evals = do
-  let n = evals ^. evalsExperiment.experimentsName
+  let n = evals ^. evalsExperiments.experimentsName
   documentclass [] article
   author "Manuel Schneckenreither"
   title $ "Evaluation for ``" <> raw n <> "''"
@@ -76,10 +83,10 @@ thePreamble evals = do
   usepackage [] amsmath
 
 -- Body with a section.
-theBody :: Evals a -> LaTeXT IO ()
+theBody :: (MonadLogger m) => Evals a -> LaTeXT m ()
 theBody evals = do
   maketitle
-  experimentsInfo (evals ^. evalsExperiment)
+  experimentsInfo (evals ^. evalsExperiments)
   part "Evaluations"
   mapM_ (experimentsEval evals) (evals ^. evalsResults)
 
@@ -99,7 +106,7 @@ refTblGenInfo = "tbl:genInfo"
 refTblParamSetting :: Int -> LaTeXT IO ()
 refTblParamSetting nr = "tbl:paramSetting:" <> raw (tshow nr)
 
-experimentsInfo :: Experiments a -> LaTeXT IO ()
+experimentsInfo :: (MonadLogger m) => Experiments a -> LaTeXT m ()
 experimentsInfo exps = do
   part "General Information"
   -- table (Just Bottom) $
@@ -121,15 +128,44 @@ experimentsInfo exps = do
   where
     line name value = raw name & raw value <> lnbk
 
-experimentsEval :: Evals a -> ExperimentEval a -> LaTeXT IO ()
+experimentsEval :: (MonadLogger m) => Evals a -> ExperimentEval a -> LaTeXT m ()
 experimentsEval evals eval@(ExperimentEval nr res _) = do
   pagebreak "4"
   section $ "Experiment " <> raw (tshow nr)
   paramSetting evals eval
-  return ()
+  experimentResult evals eval
 
 
-paramSetting :: Evals a -> ExperimentEval a -> LaTeXT IO ()
+experimentResult :: (MonadLogger m) => Evals a -> ExperimentEval a -> LaTeXT m ()
+experimentResult evals eval@(ExperimentEval nr res _) = do
+  subsection $ "Evaluation of Experiment No. " <> raw (tshow nr)
+  let exps = evals ^. evalsExperiments
+      paramSetups = view experimentsParameters exps
+
+  mapM_ (experimentResultForParam evals eval) paramSetups
+
+
+experimentResultForParam :: (MonadLogger m) => Evals a -> ExperimentEval a -> ParameterSetup a -> LaTeXT m ()
+experimentResultForParam evals eval@(ExperimentEval nr res _) (ParameterSetup paramName setter getter _ (minV, maxV)) = do
+  let paramValuesBS = L.nub $ eval ^.. evalExperiment . parameterSetup . traversed . filtered ((== paramName) . view parameterSettingName) . parameterSettingValue
+      fromRight (Right x) = x
+      fromRight _ = error $ "Could not deserialise parameter values of parameter " <> T.unpack paramName
+      eiParamValues = map (S.runGet S.get) paramValuesBS
+      otherParams = eval ^.. evalExperiment . parameterSetup . traversed . filtered ((/= paramName) . view parameterSettingName)
+      unused = setter (fromRight $ head eiParamValues) (evals ^. evalsExperiments . experimentsInitialState)
+
+  case find isLeft eiParamValues of
+    Just (Left err) -> $(logDebug) $ "Could not deserialise parameter values of parameter " <> paramName <> ". Skipping this evaluation. Error was: " <> T.pack err
+    Nothing -> do
+      -- let paramValues = map fromRight eiParamValues
+      -- let cmp (ExperimentEval )
+      -- let ress = L.groupBy ((==) `on` cmp) $ L.sortBy (compare `on` cmp) res
+      -- undefined
+
+      return ()
+
+
+paramSetting :: (MonadLogger m) => Evals a -> ExperimentEval a -> LaTeXT m ()
 paramSetting evals (ExperimentEval nr _ exp) = do
   subsection $ "Parameter Setting of Experiment No. " <> raw (tshow nr)
   if null (exp ^. parameterSetup)
@@ -147,11 +183,11 @@ paramSetting evals (ExperimentEval nr _ exp) = do
     line name value = raw name & value <> lnbk
     mkLine :: LaTeXC l => ParameterSetting a -> l
     mkLine (ParameterSetting n bsV) =
-      case find ((== n) . parameterName) (evals ^. evalsExperiment . experimentsParameters) of
+      case find ((== n) . parameterName) (evals ^. evalsExperiments . experimentsParameters) of
         Nothing -> line n (raw "was not modified as it is not listed in the parameter setting")
         Just (ParameterSetup _ setter _ _ (minVal, maxVal)) ->
           case S.runGet S.get bsV of
             Left err -> raw (T.pack err)
             Right val ->
-              let _ = setter val (evals ^. evalsExperiment . experimentsInitialState) -- only needed for type inference
+              let _ = setter val (evals ^. evalsExperiments . experimentsInitialState) -- only needed for type inference
               in line n (raw (tshow val) <> math (text " " `in_` autoParens (text (raw (tshow minVal)) <> ", " <> text (raw (tshow maxVal)))))

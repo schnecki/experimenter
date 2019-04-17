@@ -34,6 +34,7 @@ instance Show (Over a) where
 
 -- | Definition of statisics. Is used to define the desired output.
 
+
 data StatsDef a
   = Mean (Over a) (Of a)
   | StdDev (Over a) (Of a)
@@ -125,8 +126,8 @@ instance Show (ExperimentEval a) where
   show x = show (x ^. evalExperimentResults)
 
 data Evals a = Evals
-  { _evalsExperiment :: R.Experiments a
-  , _evalsResults    :: [ExperimentEval a]
+  { _evalsExperiments :: R.Experiments a
+  , _evalsResults     :: [ExperimentEval a]
   }
 makeLenses ''Evals
 

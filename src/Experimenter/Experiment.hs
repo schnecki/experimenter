@@ -40,9 +40,27 @@ class (Serialize (InputValue a), Serialize (InputState a), Serialize a) => Exper
   default equalExperiments :: (Eq a, Eq (InputState a)) => (a, InputState a) -> (a, InputState a) -> Bool
   equalExperiments x y = x == y
 
+  -- -- ^ Calculate the objective
+  -- objective :: Maybe (Objective a)
+  -- default objective :: Maybe (Objective a)
+  -- objective = Nothing
 
-  -- ^ Preparation (e.g. Loading from saved state, or training phase in ML applications).
-  -- runPreparationStep :: (Monad m) => Maybe (Either (Get a) (a -> InputValue a -> m ([StepResult], a)))
-  -- ^ Maybe TODO: Load preparation phase?
 
+-- data Objective a
+--   = MaxMean (Over a) (Of a)
+--   | MaxStdDev (Over a) (Of a)
+--   | MaxSum (Over a) (Of a)
+--   | MinMean (Over a) (Of a)
+--   | MinStdDev (Over a) (Of a)
+--   | MinSum (Over a) (Of a)
+--   deriving (Show)
+
+
+-- fromObjective :: Objective a -> StatsDef a
+-- fromObjective (MaxMean   ov o) = Mean ov o
+-- fromObjective (MaxStdDev ov o) = StdDev ov o
+-- fromObjective (MaxSum    ov o) = Sum ov o
+-- fromObjective (MinMean   ov o) = Mean ov o
+-- fromObjective (MinStdDev ov o) = StdDev ov o
+-- fromObjective (MinSum    ov o) = Sum ov o
 
