@@ -37,7 +37,7 @@ instance IsString Cell where
 
 
 printTable :: (MonadLogger m) => Table -> LaTeXT m ()
-printTable tbl = forM_ (splitTable tbl) printTable'
+printTable tbl = printTable' tbl -- forM_ (splitTable tbl) printTable'
   where
     printTable' (Table headerInput rowsInput) =
       center $

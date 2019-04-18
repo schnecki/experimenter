@@ -72,4 +72,4 @@ main = do
               , Id (Of "draw")]
   evalRes <- genEvals res evals
   print (view evalsResults evalRes)
-  writeAndCompileLatex evalRes
+  -- writeAndCompileLatex evalRes

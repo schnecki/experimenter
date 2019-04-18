@@ -98,7 +98,7 @@ data Unit
   | UnitReplications
   | UnitExperimentRepetition
   | UnitBestExperimentRepetitions Int
-  deriving (Show)
+  deriving (Eq, Ord, Show)
 
 data EvalResults a
   = EvalVector { _evalType   :: StatsDef a
