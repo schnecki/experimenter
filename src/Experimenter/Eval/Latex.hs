@@ -133,34 +133,50 @@ experimentsEval evals eval@(ExperimentEval nr res _) = do
   pagebreak "4"
   section $ "Experiment " <> raw (tshow nr)
   paramSetting evals eval
-  experimentResult evals eval
+  -- experimentsResult evals
+  overReplicationResults evals
 
 
-experimentResult :: (MonadLogger m) => Evals a -> ExperimentEval a -> LaTeXT m ()
-experimentResult evals eval@(ExperimentEval nr res _) = do
-  subsection $ "Evaluation of Experiment No. " <> raw (tshow nr)
+overReplicationResults :: (MonadLogger m) => Evals a -> LaTeXT m ()
+overReplicationResults evals = do
+  let isOverReplication (EvalVector _ UnitReplications _) = True
+      isOverReplication _                                 = False
+  let evals' = over (evalsResults.traversed.evalExperimentResults) (sortBy (compare `on` view evalType) . filter isOverReplication) evals
+  mapM_ mkExperimentTable (evals' ^. evalsResults)
+
+
+mkExperimentTable :: (MonadLogger m) => ExperimentEval a -> LaTeXT m ()
+mkExperimentTable (ExperimentEval nr res exp) = do
+
+  return ()
+
+
+experimentsResult :: (MonadLogger m) => Evals a -> LaTeXT m ()
+experimentsResult evals = do
+  subsection $ "Evaluation over Experiments" -- " No. " <> raw (tshow nr)
   let exps = evals ^. evalsExperiments
       paramSetups = view experimentsParameters exps
+  mapM_ (experimentResultForParam evals) paramSetups
 
-  mapM_ (experimentResultForParam evals eval) paramSetups
 
+experimentResultForParam :: (MonadLogger m) => Evals a -> ParameterSetup a -> LaTeXT m ()
+experimentResultForParam evals (ParameterSetup paramName setter getter _ (minV, maxV)) = do
+  -- let paramValuesBS = L.nub $ eval ^.. evalExperiment . parameterSetup . traversed . filtered ((== paramName) . view parameterSettingName) . parameterSettingValue
+  --     fromRight (Right x) = x
+  --     fromRight _ = error $ "Could not deserialise parameter values of parameter " <> T.unpack paramName
+  --     eiParamValues = map (S.runGet S.get) paramValuesBS
+  --     otherParams = eval ^.. evalExperiment . parameterSetup . traversed . filtered ((/= paramName) . view parameterSettingName)
+  --     unused = setter (fromRight $ head eiParamValues) (evals ^. evalsExperiments . experimentsInitialState)
 
-experimentResultForParam :: (MonadLogger m) => Evals a -> ExperimentEval a -> ParameterSetup a -> LaTeXT m ()
-experimentResultForParam evals eval@(ExperimentEval nr res _) (ParameterSetup paramName setter getter _ (minV, maxV)) = do
-  let paramValuesBS = L.nub $ eval ^.. evalExperiment . parameterSetup . traversed . filtered ((== paramName) . view parameterSettingName) . parameterSettingValue
-      fromRight (Right x) = x
-      fromRight _ = error $ "Could not deserialise parameter values of parameter " <> T.unpack paramName
-      eiParamValues = map (S.runGet S.get) paramValuesBS
-      otherParams = eval ^.. evalExperiment . parameterSetup . traversed . filtered ((/= paramName) . view parameterSettingName)
-      unused = setter (fromRight $ head eiParamValues) (evals ^. evalsExperiments . experimentsInitialState)
+  -- case find isLeft eiParamValues of
+  --   Just (Left err) -> $(logDebug) $ "Could not deserialise parameter values of parameter " <> paramName <> ". Skipping this evaluation. Error was: " <> T.pack err
+  --   Nothing -> do
+  --     let paramValues = map fromRight eiParamValues
+  --     -- let otherParamGrouped =
 
-  case find isLeft eiParamValues of
-    Just (Left err) -> $(logDebug) $ "Could not deserialise parameter values of parameter " <> paramName <> ". Skipping this evaluation. Error was: " <> T.pack err
-    Nothing -> do
-      -- let paramValues = map fromRight eiParamValues
-      -- let cmp (ExperimentEval )
-      -- let ress = L.groupBy ((==) `on` cmp) $ L.sortBy (compare `on` cmp) res
-      -- undefined
+  --     -- let cmp (ExperimentEval )
+  --     -- let ress = L.groupBy ((==) `on` cmp) $ L.sortBy (compare `on` cmp) res
+  --     -- undefined
 
       return ()
 

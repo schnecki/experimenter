@@ -23,6 +23,7 @@ data Over a
 instance Eq (Over a) where
   OverReplications == OverReplications = True
   OverPeriods == OverPeriods = True
+  OverExperimentRepetitions == OverExperimentRepetitions = True
   OverBestXExperimentRepetitions _ _ == OverBestXExperimentRepetitions _ _ = True
   _ == _ = False
 
@@ -32,6 +33,20 @@ instance Show (Over a) where
   show OverExperimentRepetitions     = "Experiments"
   show (OverBestXExperimentRepetitions nr _) = "(BestXExperimentEvaluations " <> show nr <> ")"
 
+instance Ord (Over a) where
+  compare OverReplications OverReplications                                 = EQ
+  compare OverReplications _                                                = LT
+  compare OverPeriods OverReplications                                      = GT
+  compare OverPeriods OverPeriods                                           = EQ
+  compare OverPeriods _                                                     = LT
+  compare OverExperimentRepetitions OverReplications                        = GT
+  compare OverExperimentRepetitions OverPeriods                             = GT
+  compare OverExperimentRepetitions OverExperimentRepetitions               = EQ
+  compare OverExperimentRepetitions _                                       = LT
+  compare OverBestXExperimentRepetitions{} OverBestXExperimentRepetitions{} = EQ
+  compare OverBestXExperimentRepetitions{} _                                = GT
+
+
 -- | Definition of statisics. Is used to define the desired output.
 
 
@@ -40,7 +55,7 @@ data StatsDef a
   | StdDev (Over a) (Of a)
   | Sum (Over a) (Of a)
   | Id (Of a)
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 data Of a
   = Of T.Text
@@ -49,7 +64,7 @@ data Of a
   | Add (Of a) (Of a)
   | Sub (Of a) (Of a)
   | Mult (Of a) (Of a)
-  deriving (Show)
+  deriving (Show, Eq, Ord)
 
 -- Helper functions for demoting StatsDefs to Ofs.
 
@@ -100,21 +115,6 @@ data EvalResults a
   deriving (Show)
 makeLenses ''EvalResults
 
-getEvalValue :: EvalResults a -> [Double]
-getEvalValue (EvalVector _ _ xs)    = concatMap getEvalValue xs
-getEvalValue (EvalValue _ _ _ y)    = [y]
-getEvalValue (EvalReducedValue _ y) = [y]
-
-getEvalType :: (Over a -> Of a -> StatsDef a) -> EvalResults a -> StatsDef a
-getEvalType f (EvalVector tp unit _)     = f (fromUnit unit) (Stats tp)
-  where fromUnit UnitPeriods = OverPeriods
-        fromUnit UnitReplications = OverReplications
-        fromUnit UnitExperiments = OverExperimentRepetitions
-        fromUnit (UnitBestExperiments nr) = OverBestXExperimentRepetitions nr (error "compare function in BestXExperimentEvaluations may not be used")
-getEvalType _ (EvalValue t _ _ _)      = t
-getEvalType _ (EvalReducedValue t _) = t
-
-
 data ExperimentEval a = ExperimentEval
   { _evalExperimentNumber  :: Int
   , _evalExperimentResults :: [EvalResults a]
@@ -132,3 +132,18 @@ data Evals a = Evals
 makeLenses ''Evals
 
 
+-- Helper Functions
+
+getEvalValue :: EvalResults a -> [Double]
+getEvalValue (EvalVector _ _ xs)    = concatMap getEvalValue xs
+getEvalValue (EvalValue _ _ _ y)    = [y]
+getEvalValue (EvalReducedValue _ y) = [y]
+
+getEvalType :: (Over a -> Of a -> StatsDef a) -> EvalResults a -> StatsDef a
+getEvalType f (EvalVector tp unit _)     = f (fromUnit unit) (Stats tp)
+  where fromUnit UnitPeriods = OverPeriods
+        fromUnit UnitReplications = OverReplications
+        fromUnit UnitExperiments = OverExperimentRepetitions
+        fromUnit (UnitBestExperiments nr) = OverBestXExperimentRepetitions nr (error "compare function in BestXExperimentEvaluations may not be used")
+getEvalType _ (EvalValue t _ _ _)      = t
+getEvalType _ (EvalReducedValue t _) = t
