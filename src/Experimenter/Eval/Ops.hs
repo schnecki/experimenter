@@ -38,10 +38,10 @@ genExperiment exp eval =
     Mean (OverBestXExperimentRepetitions nr cmp) eval' -> reduce eval' <$> genExpRes (take nr . sortBy (cmp `on` id)) (Id eval')
     Sum (OverBestXExperimentRepetitions nr cmp) eval' -> reduce eval' <$> genExpRes (take nr . sortBy (cmp `on` id)) (Id eval')
     StdDev (OverBestXExperimentRepetitions nr cmp) eval' -> reduce eval' <$> genExpRes (take nr . sortBy (cmp `on` id)) (Id eval')
-    _ -> EvalVector eval UnitExperiments <$> genExpRes id eval
+    _ -> EvalVector eval UnitExperimentRepetition <$> genExpRes id eval
   where
     genExpRes f e = mapM (genExperimentResult exp e) (f $ exp ^. experimentResults)
-    reduce eval' = reduceUnary eval . EvalVector (Id eval') UnitExperiments
+    reduce eval' = reduceUnary eval . EvalVector (Id eval') UnitExperimentRepetition
 
 
 genExperimentResult :: Experiment a -> StatsDef a -> ExperimentResult a -> IO (EvalResults a)
@@ -50,7 +50,7 @@ genExperimentResult exp eval expRes =
     Mean OverReplications eval'   -> reduce eval' <$> genRepl (Id eval')
     StdDev OverReplications eval' -> reduce eval' <$> genRepl (Id eval')
     Sum OverReplications eval'    -> reduce eval' <$> genRepl (Id eval')
-    _                             -> EvalVector eval UnitExperiments <$> genRepl eval
+    _                             -> EvalVector eval UnitExperimentRepetition <$> genRepl eval
   where
     genRepl e = mapM (genReplication exp e) (expRes ^. evaluationResults)
     reduce eval' = reduceUnary eval . EvalVector (Id eval') UnitReplications

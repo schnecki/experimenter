@@ -56,7 +56,7 @@ setup = ExperimentSetup
   , _experimentRepetitions      =  3
   , _preparationSteps           =  0
   , _evaluationWarmUpSteps      =  0
-  , _evaluationSteps            =  100
+  , _evaluationSteps            =  10
   , _evaluationReplications     =  3
   , _maximumParallelEvaluations =  2
   }
@@ -68,13 +68,8 @@ main = do
   g <- newStdGen
   (changed, res) <- runExperimentsLoggingNoSql databaseSetup setup () (Dice g (Just 0.2))
   putStrLn $ "Any change: " ++ show changed
-
   let evals = [Mean OverReplications (Of "draw"), StdDev OverReplications (Of "draw")
-              -- ,
-               -- Id (Of "draw")
-              ]
+              , Id (Of "draw")]
   evalRes <- genEvals res evals
-
   print (view evalsResults evalRes)
-
   writeAndCompileLatex evalRes

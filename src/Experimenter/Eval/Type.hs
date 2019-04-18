@@ -96,8 +96,8 @@ example3 = Mean OverReplications (Of "X")
 data Unit
   = UnitPeriods
   | UnitReplications
-  | UnitExperiments
-  | UnitBestExperiments Int
+  | UnitExperimentRepetition
+  | UnitBestExperimentRepetitions Int
   deriving (Show)
 
 data EvalResults a
@@ -144,7 +144,7 @@ getEvalType :: (Over a -> Of a -> StatsDef a) -> EvalResults a -> StatsDef a
 getEvalType f (EvalVector tp unit _)     = f (fromUnit unit) (Stats tp)
   where fromUnit UnitPeriods = OverPeriods
         fromUnit UnitReplications = OverReplications
-        fromUnit UnitExperiments = OverExperimentRepetitions
-        fromUnit (UnitBestExperiments nr) = OverBestXExperimentRepetitions nr (error "compare function in BestXExperimentEvaluations may not be used")
+        fromUnit UnitExperimentRepetition = OverExperimentRepetitions
+        fromUnit (UnitBestExperimentRepetitions nr) = OverBestXExperimentRepetitions nr (error "compare function in BestXExperimentEvaluations may not be used")
 getEvalType _ (EvalValue t _ _ _)      = t
 getEvalType _ (EvalReducedValue t _) = t

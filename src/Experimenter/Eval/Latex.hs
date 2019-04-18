@@ -7,7 +7,7 @@ module Experimenter.Eval.Latex
     ) where
 
 import           Control.Lens                 hiding ((&))
-import           Control.Monad                (void)
+import           Control.Monad                (void, zipWithM_)
 import           Control.Monad.Logger
 import           Data.Either
 import           Data.Function                (on)
@@ -144,37 +144,39 @@ experimentsEvals evals = do
 
 overReplicationResults :: (MonadLogger m) => Evals a -> LaTeXT m ()
 overReplicationResults evals = do
-  let isOverReplication (EvalVector _ UnitReplications _) = True
-      isOverReplication _                                 = False
-  let evals' = over (evalsResults.traversed.evalExperimentResults) (sortBy (compare `on` view evalType) . filter isOverReplication) evals
-
-  let tbls =
-        trace ("evals' : " ++ show (evals ^. evalsResults))
-        map (mkExperimentTableExp evals) (evals ^. evalsResults)
-  mapM_ (\(mPs, vs) -> do
-           maybe "There are no configured parameters!" printTable mPs
-           printTable vs) (take 1 tbls)
+  let isOverReplication (EvalVector _ UnitExperimentRepetition _) = True
+      isOverReplication _                                         = False
+  let evals' = over (evalsResults . traversed . evalExperimentResults) (sortBy (compare `on` view evalType) . filter isOverReplication) evals
+  let tbls = trace ("evals' : " ++ show (evals' ^. evalsResults)) map (mkExperimentTableExp evals') (evals' ^. evalsResults)
+  zipWithM_
+    (\(ExperimentEval nr res _) (mPs, vs) -> do
+        section $ "Experiment No. " <> raw (tshow nr)
+        maybe "There are no configured parameters!" printTable mPs
+        printTable vs)
+    (evals ^. evalsResults) tbls
   return ()
 
 
 mkExperimentTableExp :: Evals a -> ExperimentEval a -> (Maybe Table, Table)
 mkExperimentTableExp evals eval@(ExperimentEval nr res exp) =
   let params = paramSettingTable evals eval
-  in trace ("res: " ++ show res) (params, Table (Row ["asdf", "asdf"]) (concatMap mkEvalResult res))
+      (first:other) = map mkEvalResult res
+  in (params, Table (head first) (concatMap tail (first : other)))
 
 
 mkEvalResult :: EvalResults a -> [Row]
 mkEvalResult (EvalVector _ unit []) = []
-mkEvalResult (EvalVector _ unit vals) = case unit of
-  UnitPeriods -> Row (CellT "Period:" : map (CellT . tshow) [1..length vals]) : map Row
-                 (foldl' mkRows (map return names) rowVals)
-    where rowVals = map mkEvalResult vals
-          names = map (CellT . tshow . view evalType) (vals ^. _head.evalValues)
-          mkRows :: [[Cell]] -> [Row] -> [[Cell]]
-          mkRows accs vs = zipWith (++) accs (map fromRow vs)
-          fromRow (Row xs) = xs
-  _ -> error "not yet implemented"
-
+mkEvalResult (EvalVector _ unit vals) = Row (CellT (unitName unit) : map (CellT . tshow) [1 .. length vals]) : map Row (foldl' mkRows (map return names) rowVals)
+  where
+    rowVals = map mkEvalResult vals
+    names = map (CellT . tshow . view evalType) (vals ++ vals ^. _head . evalValues)
+    mkRows :: [[Cell]] -> [Row] -> [[Cell]]
+    mkRows accs vs = zipWith (++) accs (map fromRow vs)
+    fromRow (Row xs) = xs
+    unitName UnitPeriods = "Period:"
+    unitName UnitReplications = "Replication:"
+    unitName UnitExperimentRepetition = "Experiment Repetition:"
+    unitName (UnitBestExperimentRepetitions bestNr) = "Best " <> tshow bestNr <> " Experiment Repetitions:"
 mkEvalResult (EvalValue _ n x y) = [Row [CellT n, CellT (tshow x), CellD y]]
 mkEvalResult (EvalReducedValue _ y) = [Row [CellD y]]
 
