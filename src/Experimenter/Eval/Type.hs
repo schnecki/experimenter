@@ -117,6 +117,7 @@ makeLenses ''EvalResults
 
 data ExperimentEval a = ExperimentEval
   { _evalExperimentNumber  :: Int
+  -- , _evalExperimentRepetition :: Int
   , _evalExperimentResults :: [EvalResults a]
   , _evalExperiment        :: Experiment a
   }

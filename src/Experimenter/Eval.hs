@@ -6,4 +6,5 @@ module Experimenter.Eval
 import           Experimenter.Eval.Latex  as E
 import           Experimenter.Eval.Ops    as E
 import           Experimenter.Eval.Reduce as E
+import           Experimenter.Eval.Table  as E
 import           Experimenter.Eval.Type   as E

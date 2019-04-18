@@ -70,10 +70,11 @@ main = do
   putStrLn $ "Any change: " ++ show changed
 
   let evals = [Mean OverReplications (Of "draw"), StdDev OverReplications (Of "draw")
-              , Id (Of "draw")
+              -- ,
+               -- Id (Of "draw")
               ]
   evalRes <- genEvals res evals
 
-  -- print (view evalsResults evalRes)
+  print (view evalsResults evalRes)
 
   writeAndCompileLatex evalRes

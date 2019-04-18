@@ -11,8 +11,8 @@ import           Control.Monad                (void)
 import           Control.Monad.Logger
 import           Data.Either
 import           Data.Function                (on)
-import           Data.List                    as L (find, groupBy, nub, sortBy)
-import           Data.Matrix
+import           Data.List                    as L (find, foldl', groupBy, nub, sortBy)
+-- import           Data.Matrix hiding (trace)
 import           Data.Maybe                   (fromMaybe)
 import qualified Data.Serialize               as S
 import qualified Data.Text                    as T
@@ -23,12 +23,15 @@ import           Text.LaTeX.Base.Class
 import           Text.LaTeX.Packages.AMSMath
 import           Text.LaTeX.Packages.Inputenc
 
+import           Experimenter.Eval.Table
 import           Experimenter.Eval.Type
 import           Experimenter.Experiment
 import           Experimenter.Models
 import           Experimenter.Parameter.Type
 import           Experimenter.Result.Type
 import           Experimenter.Util
+
+import           Debug.Trace
 
 instance (MonadLogger m) => MonadLogger (LaTeXT m) where
 
@@ -87,8 +90,9 @@ theBody :: (MonadLogger m) => Evals a -> LaTeXT m ()
 theBody evals = do
   maketitle
   experimentsInfo (evals ^. evalsExperiments)
-  part "Evaluations"
-  mapM_ (experimentsEval evals) (evals ^. evalsResults)
+  experimentsEvals evals
+
+  -- mapM_ (experimentsEval evals) (evals ^. evalsResults)
 
   -- section "Hello"
  --  "This is a simple example using the "
@@ -109,30 +113,31 @@ refTblParamSetting nr = "tbl:paramSetting:" <> raw (tshow nr)
 experimentsInfo :: (MonadLogger m) => Experiments a -> LaTeXT m ()
 experimentsInfo exps = do
   part "General Information"
-  -- table (Just Bottom) $
-  center $ do
-    tabular Nothing [VerticalLine, LeftColumn, LeftColumn, VerticalLine] $ do
-      hline
-      textbf "Parameter" & textbf "Value" <> lnbk
-      hline <> line "Experiment Name: " (exps ^. experimentsName) <> line "Start time:" (tshow $ exps ^. experimentsStartTime)
-      line "End time:" (maybe "" tshow (exps ^. experimentsEndTime))
-      line "Number of conducted Experiments: " (tshow $ length (exps ^. experiments))
-      line "Experiment Repetitions (complete restarts):" (tshow $ exps ^. experimentsSetup . expsSetupRepetitions)
-      line "Experiment Preparation Steps:" (tshow $ exps ^. experimentsSetup . expsSetupPreparationSteps)
-      line "Experiment Evaluation Warm Up Steps:" (tshow $ exps ^. experimentsSetup . expsSetupEvaluationWarmUpSteps)
-      line "Experiment Evaluation Steps:" (tshow $ exps ^. experimentsSetup . expsSetupEvaluationSteps)
-      line "Experiment Evaluation Replications:" (tshow $ exps ^. experimentsSetup . expsSetupEvaluationReplications)
-      hline
-    -- label refTblGenInfo
-    -- caption "General information for all conducted experiments."
-  where
-    line name value = raw name & raw value <> lnbk
+  printTable $ Table (Row ["Parameter", "Value"])
+    [ Row ["Experiment Name: ",                           CellT (exps ^. experimentsName)]
+    , Row ["Start time:",                                 CellT (tshow $ exps ^. experimentsStartTime)]
+    , Row ["End time:",                                   CellT (maybe "" tshow (exps ^. experimentsEndTime))]
+    , Row ["Number of conducted Experiments: ",           CellT (tshow $ length (exps ^. experiments))]
+    , Row ["Experiment Repetitions (complete restarts):", CellT (tshow $ exps ^. experimentsSetup . expsSetupRepetitions)]
+    , Row ["Experiment Preparation Steps:",               CellT (tshow $ exps ^. experimentsSetup . expsSetupPreparationSteps)]
+    , Row ["Experiment Evaluation Warm Up Steps:",        CellT (tshow $ exps ^. experimentsSetup . expsSetupEvaluationWarmUpSteps)]
+    , Row ["Experiment Evaluation Steps:",                CellT (tshow $ exps ^. experimentsSetup . expsSetupEvaluationSteps)]
+    , Row ["Experiment Evaluation Replications:",         CellT (tshow $ exps ^. experimentsSetup . expsSetupEvaluationReplications)]
+    ]
 
-experimentsEval :: (MonadLogger m) => Evals a -> ExperimentEval a -> LaTeXT m ()
-experimentsEval evals eval@(ExperimentEval nr res _) = do
+-- experimentsEval :: (MonadLogger m) => Evals a -> ExperimentEval a -> LaTeXT m ()
+-- experimentsEval evals eval@(ExperimentEval nr res _) = do
+--   pagebreak "4"
+--   section $ "Experiment " <> raw (tshow nr)
+--   -- paramSetting evals eval
+--   -- experimentsResult evals
+--   overReplicationResults evals
+
+experimentsEvals :: (MonadLogger m) => Evals a -> LaTeXT m ()
+experimentsEvals evals = do
   pagebreak "4"
-  section $ "Experiment " <> raw (tshow nr)
-  paramSetting evals eval
+  part "Experiment Evaluations"
+  -- paramSetting evals eval
   -- experimentsResult evals
   overReplicationResults evals
 
@@ -142,18 +147,41 @@ overReplicationResults evals = do
   let isOverReplication (EvalVector _ UnitReplications _) = True
       isOverReplication _                                 = False
   let evals' = over (evalsResults.traversed.evalExperimentResults) (sortBy (compare `on` view evalType) . filter isOverReplication) evals
-  mapM_ mkExperimentTable (evals' ^. evalsResults)
 
-
-mkExperimentTable :: (MonadLogger m) => ExperimentEval a -> LaTeXT m ()
-mkExperimentTable (ExperimentEval nr res exp) = do
-
+  let tbls =
+        trace ("evals' : " ++ show (evals ^. evalsResults))
+        map (mkExperimentTableExp evals) (evals ^. evalsResults)
+  mapM_ (\(mPs, vs) -> do
+           maybe "There are no configured parameters!" printTable mPs
+           printTable vs) (take 1 tbls)
   return ()
+
+
+mkExperimentTableExp :: Evals a -> ExperimentEval a -> (Maybe Table, Table)
+mkExperimentTableExp evals eval@(ExperimentEval nr res exp) =
+  let params = paramSettingTable evals eval
+  in trace ("res: " ++ show res) (params, Table (Row ["asdf", "asdf"]) (concatMap mkEvalResult res))
+
+
+mkEvalResult :: EvalResults a -> [Row]
+mkEvalResult (EvalVector _ unit []) = []
+mkEvalResult (EvalVector _ unit vals) = case unit of
+  UnitPeriods -> Row (CellT "Period:" : map (CellT . tshow) [1..length vals]) : map Row
+                 (foldl' mkRows (map return names) rowVals)
+    where rowVals = map mkEvalResult vals
+          names = map (CellT . tshow . view evalType) (vals ^. _head.evalValues)
+          mkRows :: [[Cell]] -> [Row] -> [[Cell]]
+          mkRows accs vs = zipWith (++) accs (map fromRow vs)
+          fromRow (Row xs) = xs
+  _ -> error "not yet implemented"
+
+mkEvalResult (EvalValue _ n x y) = [Row [CellT n, CellT (tshow x), CellD y]]
+mkEvalResult (EvalReducedValue _ y) = [Row [CellD y]]
 
 
 experimentsResult :: (MonadLogger m) => Evals a -> LaTeXT m ()
 experimentsResult evals = do
-  subsection $ "Evaluation over Experiments" -- " No. " <> raw (tshow nr)
+  subsection $ "Evaluation over Experiments"
   let exps = evals ^. evalsExperiments
       paramSetups = view experimentsParameters exps
   mapM_ (experimentResultForParam evals) paramSetups
@@ -182,28 +210,22 @@ experimentResultForParam evals (ParameterSetup paramName setter getter _ (minV, 
 
 
 paramSetting :: (MonadLogger m) => Evals a -> ExperimentEval a -> LaTeXT m ()
-paramSetting evals (ExperimentEval nr _ exp) = do
+paramSetting evals expEval@(ExperimentEval nr _ exp) = do
   subsection $ "Parameter Setting of Experiment No. " <> raw (tshow nr)
-  if null (exp ^. parameterSetup)
-    then "There are no configured parameters!"
-    else center $ tabular Nothing [VerticalLine ,LeftColumn, LeftColumn, VerticalLine] $ do
-           hline
-           textbf "Parameter" & textbf "Value" <> lnbk
-           hline
-           mapM_ mkLine (exp ^. parameterSetup)
-           hline
-           -- label (refTblParamSetting nr)
-           -- caption $ "Parameter Setup for experiment nr " <> raw (tshow nr)
+  maybe "There are no configured parameters!" printTable (paramSettingTable evals expEval)
+
+paramSettingTable :: Evals a -> ExperimentEval a -> Maybe Table
+paramSettingTable evals (ExperimentEval nr _ exp)
+  | null (exp ^. parameterSetup) = Nothing
+  | otherwise = Just $ Table (Row ["Parameter", "Value"]) (map mkRow (exp ^. parameterSetup))
   where
-    line :: LaTeXC l => Text -> l -> l
-    line name value = raw name & value <> lnbk
-    mkLine :: LaTeXC l => ParameterSetting a -> l
-    mkLine (ParameterSetting n bsV) =
+    mkRow :: ParameterSetting a -> Row
+    mkRow (ParameterSetting n bsV) =
       case find ((== n) . parameterName) (evals ^. evalsExperiments . experimentsParameters) of
-        Nothing -> line n (raw "was not modified as it is not listed in the parameter setting")
+        Nothing -> Row [CellT n, "was not modified as it is not listed in the parameter setting"]
         Just (ParameterSetup _ setter _ _ (minVal, maxVal)) ->
           case S.runGet S.get bsV of
-            Left err -> raw (T.pack err)
+            Left err -> Row [CellT n, CellT (T.pack err)]
             Right val ->
               let _ = setter val (evals ^. evalsExperiments . experimentsInitialState) -- only needed for type inference
-              in line n (raw (tshow val) <> math (text " " `in_` autoParens (text (raw (tshow minVal)) <> ", " <> text (raw (tshow maxVal)))))
+              in Row [CellT n, CellL $ raw (tshow val) <> math (text " " `in_` autoParens (text (raw (tshow minVal)) <> ", " <> text (raw (tshow maxVal))))]
