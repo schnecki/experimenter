@@ -15,8 +15,8 @@ import qualified Experimenter.Result.Type as R
 -- | Over datatype to reduce data vectors.
 
 data Over a
-  = OverReplications
-  | OverPeriods
+  = OverPeriods
+  | OverReplications
   | OverExperimentRepetitions
   | OverBestXExperimentRepetitions Int (ExperimentResult a -> ExperimentResult a -> Ordering)
 
@@ -102,15 +102,16 @@ data Unit
 
 data EvalResults a
   = EvalVector { _evalType   :: StatsDef a
-               , _evalUnit   :: Unit -- ^ For each X
+               , _evalUnit   :: Unit -- ^ Over which the vector runs.
                , _evalValues :: [EvalResults a]
                }
   | EvalValue { _evalType         :: StatsDef a
+              , _evalUnit         :: Unit -- ^ Is always periods.
               , _evalVariableName :: T.Text
               , _evalX            :: Either Int Double -- ^ Either period or xValue.
               , _evalY            :: Double }
   | EvalReducedValue { _evalType  :: StatsDef a
-                     -- , _evalVariableName :: T.Text
+                     , _evalUnit  :: Unit -- ^ Over which was reduced.
                      , _evalValue :: Double }
   deriving (Show)
 makeLenses ''EvalResults
@@ -136,9 +137,9 @@ makeLenses ''Evals
 -- Helper Functions
 
 getEvalValue :: EvalResults a -> [Double]
-getEvalValue (EvalVector _ _ xs)    = concatMap getEvalValue xs
-getEvalValue (EvalValue _ _ _ y)    = [y]
-getEvalValue (EvalReducedValue _ y) = [y]
+getEvalValue (EvalVector _ _ xs)      = concatMap getEvalValue xs
+getEvalValue (EvalValue _ _ _ _ y)    = [y]
+getEvalValue (EvalReducedValue _ _ y) = [y]
 
 getEvalType :: (Over a -> Of a -> StatsDef a) -> EvalResults a -> StatsDef a
 getEvalType f (EvalVector tp unit _)     = f (fromUnit unit) (Stats tp)
@@ -146,5 +147,18 @@ getEvalType f (EvalVector tp unit _)     = f (fromUnit unit) (Stats tp)
         fromUnit UnitReplications = OverReplications
         fromUnit UnitExperimentRepetition = OverExperimentRepetitions
         fromUnit (UnitBestExperimentRepetitions nr) = OverBestXExperimentRepetitions nr (error "compare function in BestXExperimentEvaluations may not be used")
-getEvalType _ (EvalValue t _ _ _)      = t
-getEvalType _ (EvalReducedValue t _) = t
+getEvalType _ (EvalValue t _ _ _ _)      = t
+getEvalType _ (EvalReducedValue t _ _) = t
+
+fromOver :: Over a -> Unit
+fromOver OverPeriods                           = UnitPeriods
+fromOver OverReplications                      = UnitReplications
+fromOver OverExperimentRepetitions             = UnitExperimentRepetition
+fromOver (OverBestXExperimentRepetitions nr _) = UnitBestExperimentRepetitions nr
+
+-- | Demotes the unit by 1 degree. Thus this calculates the unit of a vector over which it was reduced.
+demoteUnit :: Unit -> Maybe Unit
+demoteUnit UnitPeriods                     = Nothing
+demoteUnit UnitReplications                = Just UnitPeriods
+demoteUnit UnitExperimentRepetition        = Just UnitReplications
+demoteUnit UnitBestExperimentRepetitions{} = Just UnitReplications

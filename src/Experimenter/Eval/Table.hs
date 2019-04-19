@@ -37,7 +37,7 @@ instance IsString Cell where
 
 
 printTable :: (MonadLogger m) => Table -> LaTeXT m ()
-printTable tbl = printTable' tbl -- forM_ (splitTable tbl) printTable'
+printTable tbl = forM_ (splitTable tbl) printTable'
   where
     printTable' (Table headerInput rowsInput) =
       center $
@@ -65,7 +65,7 @@ splitTable tbl@(Table headerInput rowsInput)
     colLen = maximum $ map cellCount (headerInput : rowsInput)
     cellCount (Row xs) = length xs
     takeCols n (Table (Row hs) rs) = Table (Row $ take n hs) (map (\(Row rs) -> Row (take n rs)) rs)
-    dropCols n (Table (Row hs) rs) = Table (Row $ drop n hs) (map (\(Row rs) -> Row (drop n rs)) rs)
+    dropCols n (Table (Row hs) rs) = Table (Row $ take 1 hs ++ drop n hs) (map (\(Row rs) -> Row (take 1 rs ++ drop n rs)) rs)
 
 maxColLen :: Int
 maxColLen = 10

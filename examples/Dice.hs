@@ -35,7 +35,7 @@ instance ExperimentDef Dice where
     let (nr, g') = next g
         result = StepResult "draw" Nothing (fromIntegral $ 1 + nr `mod` 6)
     in return ([result], Dice g' mD)
-  parameters _ = [fakeParam]
+  parameters _ = [] -- [fakeParam]
 
   -- Either compare params or do not compare them, but for sure do not compare random generators! As they are never
   -- equal!
@@ -53,11 +53,11 @@ fakeParam = ParameterSetup "fake" (\mD (Dice g _) -> Dice g mD) (\(Dice _ mD) ->
 setup :: ExperimentSetup
 setup = ExperimentSetup
   { _experimentBaseName         = "dice param 9"
-  , _experimentRepetitions      =  3
+  , _experimentRepetitions      =  2
   , _preparationSteps           =  0
   , _evaluationWarmUpSteps      =  0
   , _evaluationSteps            =  10
-  , _evaluationReplications     =  3
+  , _evaluationReplications     =  1
   , _maximumParallelEvaluations =  2
   }
 
@@ -68,8 +68,8 @@ main = do
   g <- newStdGen
   (changed, res) <- runExperimentsLoggingNoSql databaseSetup setup () (Dice g (Just 0.2))
   putStrLn $ "Any change: " ++ show changed
-  let evals = [Mean OverReplications (Of "draw"), StdDev OverReplications (Of "draw")
-              , Id (Of "draw")]
+  let evals = [-- Mean OverReplications (Of "draw"), StdDev OverReplications (Of "draw"),
+               Id (Of "draw")]
   evalRes <- genEvals res evals
   print (view evalsResults evalRes)
-  -- writeAndCompileLatex evalRes
+  writeAndCompileLatex evalRes

@@ -88,5 +88,5 @@ evalOf exp eval resData =
 fromMeasure :: T.Text -> Measure -> EvalResults a
 fromMeasure name (Measure p res) = case find ((==name) . view resultName) res of
   Nothing -> error $ "Variable with name " <> T.unpack name <> " could not be found!"
-  Just (StepResult n mX y) -> EvalValue (Id $ Of n) n (maybe (Left p) Right mX) y
+  Just (StepResult n mX y) -> EvalValue (Id $ Of n) UnitPeriods n (maybe (Left p) Right mX) y
 
