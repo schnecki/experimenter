@@ -57,7 +57,7 @@ setup = ExperimentSetup
   , _preparationSteps           =  0
   , _evaluationWarmUpSteps      =  0
   , _evaluationSteps            =  10
-  , _evaluationReplications     =  1
+  , _evaluationReplications     =  2
   , _maximumParallelEvaluations =  2
   }
 

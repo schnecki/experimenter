@@ -2,6 +2,7 @@
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell     #-}
+{-# LANGUAGE TupleSections       #-}
 module Experimenter.Eval.Latex
     ( writeLatex
     , writeAndCompileLatex
@@ -163,9 +164,6 @@ overReplicationResults evals = do
   let tbls = map (map (mkExperimentTable evals)) groupedEvals
 
 
-  $(logDebug) $ "XX: "  <> tshow tbls
-
-
   section $ "Periodic Evaluations"
   mapM_
     (mapM_
@@ -209,17 +207,41 @@ unpackUntil unit res | res ^. evalUnit == unit = [res]
                          EvalVector{} -> concatMap (unpackUntil unit) (res ^. evalValues)
                          _            -> error $ "cannot unpack res: " <> show res
 
+mkNamesUntil :: Unit -> EvalResults a -> [Text]
+mkNamesUntil unit res
+  | res ^. evalUnit == unit = [mempty]
+  | otherwise =
+    case res of
+      EvalVector _ u vals ->
+        case u of
+          UnitPeriods -> [mempty]
+          UnitReplications -> map (\x -> "Rep " <> tshow x <> ": ") [1 .. length vals]
+          _ ->
+            let sub = head $ map (mkNamesUntil unit) vals
+             in concatMap (\x -> map (\s -> "Exp " <> tshow x <> ": " <> s) sub) [1 .. length vals]
+      _ -> error $ "cannot unpack res: " <> show res
+
 
 mkExperimentTable :: Evals a -> (Unit, Unit, ExperimentEval a, [EvalResults a]) -> (Maybe Table, [Table])
-mkExperimentTable evals (UnitExperimentRepetition, UnitPeriods, eval, res) =
+mkExperimentTable evals (topUnit, UnitPeriods, eval, res) =
   let params = paramSettingTable evals eval
-      periodRes = map ((\xs -> (map return (mkNames xs), xs)) . unpackUntil UnitPeriods) res
-      tableRes = map (\(ns, xs) -> zipWith mkEvalResult ns xs) periodRes
+      periodRes = map ((names,) . unpackUntil UnitPeriods) res
+      tableRes = map (uncurry (zipWith mkEvalResult)) periodRes
       tbls = map toTables tableRes
-      mkNames xs = zipWith (\nr e -> CellT $ ((("Rep " <> tshow nr) <> ": ") <>) $ tshow $ view evalType e) [1..] xs
+      names = (map (map CellT . return) . mkNamesUntil UnitPeriods) (head res)
+      -- mkNames xs = case topUnit of
+      --   UnitPeriods -> map (CellT . tshow . view evalType) xs
+      --   UnitReplications -> zipWith (\(nr :: Int) e -> CellT $ ((("Replic. " <> tshow nr) <> ": ") <>) $ tshow $ view evalType e) [1..] xs
+      --   UnitExperimentRepetition -> expRepNames xs
+      --   UnitBestExperimentRepetitions _ -> expRepNames xs
+      -- expRepNames xs =
+      --   trace ("res: " ++ show res) $
+      --   zipWith (\(nr :: Int) e -> CellT $ ((("Exp. " <> tshow nr) <> ": ") <>) $ tshow $ view evalType e) [1..] xs
+
   in
-    -- trace ("names: " ++ show (map mkNames periodRes))
+    trace ("names: " ++ show names)
     trace ("tbls: " ++ show tbls)
+    trace ("names :" ++ show (map (mkNamesUntil UnitPeriods) res))
     (params, tbls)
 mkExperimentTable evals (UnitExperimentRepetition, UnitReplications, eval, res) = undefined
 mkExperimentTable evals (UnitExperimentRepetition, UnitExperimentRepetition, eval, res) = undefined

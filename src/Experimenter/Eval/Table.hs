@@ -71,7 +71,7 @@ maxColLen :: Int
 maxColLen = 10
 
 commas :: Int
-commas = 4
+commas = 3
 
 printDouble :: Double -> T.Text
 printDouble x = T.pack $ printf ("%." ++ show commas ++ "f") x
