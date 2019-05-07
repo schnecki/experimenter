@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveAnyClass    #-}
 {-# LANGUAGE DeriveGeneric     #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes        #-}
 {-# LANGUAGE TypeFamilies      #-}
 
 
@@ -16,35 +17,33 @@ import           System.Random
 import           Experimenter
 
 
-data Dice = Dice StdGen (Maybe Double)
+data Dice = Dice (Maybe Double)
   deriving (Show, Generic)
 
 instance Serialize Dice where
-  put (Dice g mD) = put (show g) >> put mD
+  put (Dice mD) = put mD
   get = do
-    g <- read <$> get
     mD <- get
-    return $ Dice g mD
-
+    return $ Dice mD
 
 instance ExperimentDef Dice where
-  type InputValue Dice = ()
+  type InputValue Dice = StdGen
   type InputState Dice = ()
-  generateInput _ _ _ _ = return ((), ())
-  runStep (Dice g mD) _ p =
-    let (nr, g') = next g
+  generateInput g _ _ _ = return (g, ())
+  runStep (Dice mD) g _ =
+    let (nr, _) = next g
         result = StepResult "draw" Nothing (fromIntegral $ 1 + nr `mod` 6)
-    in return ([result], Dice g' mD)
-  parameters _ = [] -- [fakeParam]
+    in return ([result], Dice mD)
+  parameters _ = [fakeParam]
 
   -- Either compare params or do not compare them, but for sure do not compare random generators! As they are never
   -- equal!
-  equalExperiments (Dice _ f1,_) (Dice _ f2,_) = f1 == f2
-  equalExperiments _ _                         = True
+  equalExperiments (Dice f1,_) (Dice f2,_) = f1 == f2
+  equalExperiments _ _                     = True
 
 
 fakeParam :: ParameterSetup Dice
-fakeParam = ParameterSetup "fake" (\mD (Dice g _) -> Dice g mD) (\(Dice _ mD) -> mD) (Just (\(Just b) -> return [Just (fromR $ toR b - 0.2), Just (fromR $ toR b + 0.2)])) (Just 0, Just 1)
+fakeParam = ParameterSetup "fake" (\mD (Dice _) -> Dice mD) (\(Dice mD) -> mD) (Just (\(Just b) -> return [Just (fromR $ toR b - 0.2), Just (fromR $ toR b + 0.2)])) (Just 0, Just 0.4)
   where
     toR x = approxRational x 0.0001
     fromR = fromRational
@@ -52,21 +51,20 @@ fakeParam = ParameterSetup "fake" (\mD (Dice g _) -> Dice g mD) (\(Dice _ mD) ->
 
 setup :: ExperimentSetup
 setup = ExperimentSetup
-  { _experimentBaseName         = "dice param 10"
+  { _experimentBaseName         = "dice param 1"
   , _experimentRepetitions      =  2
   , _preparationSteps           =  0
   , _evaluationWarmUpSteps      =  0
   , _evaluationSteps            =  10
-  , _evaluationReplications     =  2
-  , _maximumParallelEvaluations =  2
+  , _evaluationReplications     =  3
+  , _maximumParallelEvaluations =  1
   }
 
 
 main :: IO ()
 main = do
   let databaseSetup = DatabaseSetup "host=localhost dbname=experimenter user=schnecki password= port=5432" 10
-  g <- newStdGen
-  (changed, res) <- runExperimentsLoggingNoSql databaseSetup setup () (Dice g (Just 0.2))
+  (changed, res) <- runExperimentsLoggingNoSql databaseSetup setup () (Dice (Just 0.2))
   putStrLn $ "Any change: " ++ show changed
   let evals = [-- Mean OverReplications (Of "draw"), StdDev OverReplications (Of "draw"),
                Id (Of "draw")]

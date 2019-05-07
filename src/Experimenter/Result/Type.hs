@@ -12,6 +12,7 @@ import           Experimenter.Parameter
 import           Experimenter.Setup
 
 import           Control.Lens
+import           Data.Serialize
 import qualified Data.Text               as T
 import           Data.Time
 import           System.Random
@@ -76,4 +77,12 @@ data Experiments a = Experiments
   , _experiments                  :: [Experiment a]
   }
 makeLenses ''Experiments
+
+
+instance Serialize StdGen where
+  put g = put (show g)
+  get = do
+    gTxt <- get
+    return (read gTxt)
+
 

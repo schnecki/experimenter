@@ -197,9 +197,9 @@ continueExperiments exp = do
       repl <- replicateM (repetits * replicats) newStdGen
       return (prep, wmUp, repl)
     mkRands (x:_) = do
-      let currentPrep = x ^.. experimentResults . traversed . filtered (\e -> e ^. repetitionNumber == 1) . preparationResults . traversed . startRandGen
-          currentWmUp = x ^.. experimentResults . traversed . filtered (\e -> e ^. repetitionNumber == 1) . evaluationResults . traversed . warmUpResults . traversed . startRandGen
-          currentRepl = x ^.. experimentResults . traversed . filtered (\e -> e ^. repetitionNumber == 1) . evaluationResults . traversed . evalResults . traversed . startRandGen
+      let currentPrep = x ^.. experimentResults . traversed . preparationResults . traversed . startRandGen
+          currentWmUp = x ^.. experimentResults . traversed . evaluationResults . traversed . warmUpResults . traversed . startRandGen
+          currentRepl = x ^.. experimentResults . traversed . evaluationResults . traversed . evalResults . traversed . startRandGen
       prepNew <- replicateM (repetits - length currentPrep) newStdGen
       wmUpNew <- replicateM (repetits * replicats - length currentWmUp) newStdGen
       replNew <- replicateM (repetits * replicats - length currentRepl) newStdGen
@@ -476,10 +476,10 @@ runResultData len repResType resData = do
     upd _ _ = error "Unexpected update combination. This is a bug, please report it!"
 
 
-run :: (RandomGen g, ExperimentDef a, MonadLogger m)
-  => (g, a, InputState a, [Input a], [Measure])
+run :: (ExperimentDef a, MonadLogger m)
+  => (StdGen, a, InputState a, [Input a], [Measure])
   -> Int
-  -> ReaderT SqlBackend m (g, a, InputState a, [Input a], [Measure])
+  -> ReaderT SqlBackend m (StdGen, a, InputState a, [Input a], [Measure])
 run (g, st, stInp, inpVals, res) period = do
   let (randGen, g') = split g
   (inpVal', inpSt') <- lift $ generateInput randGen st stInp period

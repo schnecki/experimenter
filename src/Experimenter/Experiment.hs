@@ -26,7 +26,7 @@ class (Serialize (InputValue a), Serialize (InputState a), Serialize a) => Exper
 
   -- ^ Generate some input values and possibly modify state. This function can be used to change the state. It is called
   -- before `runStep` and its output is used to call `runStep`.
-  generateInput :: (Monad m, RandomGen g) => g -> a -> InputState a -> Period -> m (InputValue a, InputState a)
+  generateInput :: (Monad m) => StdGen -> a -> InputState a -> Period -> m (InputValue a, InputState a)
 
   -- ^ Run a step of the environment and return new state and result.
   runStep :: (Monad m) => a -> InputValue a -> Period -> m ([StepResult], a)
