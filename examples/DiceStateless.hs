@@ -66,8 +66,10 @@ main = do
   let databaseSetup = DatabaseSetup "host=localhost dbname=experimenter user=schnecki password= port=5432" 10
   (changed, res) <- runExperimentsLoggingNoSql databaseSetup setup () (Dice (Just 0.2))
   putStrLn $ "Any change: " ++ show changed
-  let evals = [-- Mean OverReplications (Of "draw"), StdDev OverReplications (Of "draw"),
-               Id (Of "draw")]
+  let evals = [ Mean OverExperimentRepetitions (Of "draw"), StdDev OverExperimentRepetitions (Of "draw")
+              , Mean OverReplications (Of "draw"), StdDev OverReplications (Of "draw")
+              , Id (Of "draw"), Id (Of "draw")
+              ]
   evalRes <- genEvals res evals
   print (view evalsResults evalRes)
   writeAndCompileLatex evalRes

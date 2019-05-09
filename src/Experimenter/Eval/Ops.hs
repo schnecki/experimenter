@@ -17,8 +17,6 @@ import           Experimenter.Measure
 import           Experimenter.Result.Type
 import           Experimenter.StepResult
 
--- writeEval :: EvalTable a -> IO ()
--- writeEval = undefined
 
 genEvals :: Experiments a -> [StatsDef a] -> IO (Evals a)
 genEvals exps evals = do
@@ -40,7 +38,7 @@ genExperiment exp eval =
     StdDev (OverBestXExperimentRepetitions nr cmp) eval' -> reduce eval' <$> genExpRes (take nr . sortBy (cmp `on` id)) (Id eval')
     _ -> packGenRes <$> genExpRes id eval
   where
-    packGenRes [x] = x
+    -- packGenRes [x] = x
     packGenRes xs  = EvalVector eval UnitExperimentRepetition xs
     genExpRes f e = mapM (genExperimentResult exp e) (f $ exp ^. experimentResults)
     reduce eval' = reduceUnary eval . EvalVector (Id eval') UnitExperimentRepetition
@@ -54,7 +52,7 @@ genExperimentResult exp eval expRes =
     Sum OverReplications eval'    -> reduce eval' <$> genRepl (Id eval')
     _                             -> packGenRes <$> genRepl eval
   where
-    packGenRes [x] = x
+    -- packGenRes [x] = x
     packGenRes xs  = EvalVector eval UnitReplications xs
     genRepl e = mapM (genReplication exp e) (expRes ^. evaluationResults)
     reduce eval' = reduceUnary eval . EvalVector (Id eval') UnitReplications
