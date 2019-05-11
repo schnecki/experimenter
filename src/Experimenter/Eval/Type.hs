@@ -57,6 +57,7 @@ data StatsDef a
   | Id (Of a)
   deriving (Show, Eq, Ord)
 
+
 data Of a
   = Of T.Text
   | Stats (StatsDef a)
@@ -65,6 +66,30 @@ data Of a
   | Sub (Of a) (Of a)
   | Mult (Of a) (Of a)
   deriving (Show, Eq, Ord)
+
+prettyStatsDef :: StatsDef a -> T.Text
+prettyStatsDef statsDef = case statsDef of
+  Mean over of'   -> "Mean " <> prettyOver over <> " " <> prettyOf of'
+  StdDev over of' -> "StdDev " <> prettyOver over <> " " <> prettyOf of'
+  Sum over of'    -> "Sum " <> prettyOver over <> " " <> prettyOf of'
+  Id of'          -> prettyOf of'
+
+prettyOf :: Of a -> T.Text
+prettyOf of' = case of' of
+  Of name        -> "of " <> name
+  Stats statsDef -> "(" <> prettyStatsDef statsDef <> ")"
+  Div x y        -> "( " <> prettyOf x <> ") / (" <> prettyOf y <> ")"
+  Add x y        -> "( " <> prettyOf x <> ") + (" <> prettyOf y <> ")"
+  Sub x y        -> "( " <> prettyOf x <> ") - (" <> prettyOf y <> ")"
+  Mult x y       -> "( " <> prettyOf x <> ") * (" <> prettyOf y <> ")"
+
+prettyOver :: Over a -> T.Text
+prettyOver ov = "over " <> case ov of
+  OverPeriods -> "periods"
+  OverReplications -> "replications"
+  OverExperimentRepetitions -> "experiment repetitions"
+  OverBestXExperimentRepetitions nr _ -> "best " <> T.pack (show nr) <> " experiment repetitions"
+
 
 -- Helper functions for demoting StatsDefs to Ofs.
 

@@ -205,7 +205,7 @@ overReplicationResults evals = do
 
 printTableWithName :: (Monad m, MonadLogger m) => (StatsDef a, Table) -> LaTeXT m ()
 printTableWithName (nm, tbl) = do
-  paragraph (raw $ tshow nm)
+  paragraph (raw $ prettyStatsDef nm)
   printTable tbl
 
 groupEvaluations :: ExperimentEval a -> [(Unit, ExperimentEval a, [EvalResults a])]
@@ -290,7 +290,7 @@ mkEvalResult names@(n1:_) (EvalValue _ u n x y) = TableResult Nothing (Row [Cell
   where getXValue (Left x)  = CellT $ tshow x
         getXValue (Right d) = CellD d
 mkEvalResult [] (EvalReducedValue statsDef u y) = TableResult (Just u) (Row [CellT $ tshow statsDef]) [Row [CellD y]]
-mkEvalResult names@(n:_) (EvalReducedValue statsDef u y) = TableResult (Just u) (Row [CellEmpty , CellT $ tshow statsDef]) [Row [n, CellD y]]
+mkEvalResult names@(n:_) (EvalReducedValue statsDef u y) = TableResult (Just u) (Row [CellEmpty , CellT $ prettyStatsDef statsDef]) [Row [n, CellD y]]
 
 
 -- experimentsResult :: (MonadLogger m) => Evals a -> LaTeXT m ()
