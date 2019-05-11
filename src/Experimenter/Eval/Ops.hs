@@ -28,6 +28,8 @@ genEvals exps evals = do
       return $ ExperimentEval (e ^. experimentNumber) xs e
 
 genExperiment :: Experiment a -> StatsDef a -> IO (EvalResults a)
+genExperiment exp (Named eval name) = addName <$> genExperiment exp eval
+  where addName res = res { _evalType = Named (res ^. evalType) name }
 genExperiment exp eval =
   case eval of
     Mean OverExperimentRepetitions eval' -> reduce eval' <$> genExpRes id (Id eval')
@@ -45,6 +47,7 @@ genExperiment exp eval =
 
 
 genExperimentResult :: Experiment a -> StatsDef a -> ExperimentResult a -> IO (EvalResults a)
+genExperimentResult _ (Named _ n) _ = error $ "An evaluation may only be named on the outermost function in evaluation " <> T.unpack n
 genExperimentResult exp eval expRes =
   case eval of
     Mean OverReplications eval'   -> reduce eval' <$> genRepl (Id eval')
@@ -63,6 +66,7 @@ genReplication exp eval repl = fromMaybe (error "Evaluation data is incomplete!"
 
 
 genResultData :: Experiment a -> StatsDef a -> ResultData a -> IO (EvalResults a)
+genResultData _ (Named _ n) _ = error $ "An evaluation may only be named on the outermost function in evaluation " <> T.unpack n
 genResultData exp eval repl =
   case eval of
     Mean OverPeriods eval'   -> reduceUnary eval <$> genResultData exp (Id eval') repl

@@ -55,6 +55,7 @@ data StatsDef a
   | StdDev (Over a) (Of a)
   | Sum (Over a) (Of a)
   | Id (Of a)
+  | Named (StatsDef a) T.Text
   deriving (Show, Eq, Ord)
 
 
@@ -69,9 +70,11 @@ data Of a
 
 prettyStatsDef :: StatsDef a -> T.Text
 prettyStatsDef statsDef = case statsDef of
+  Named _ txt     -> txt
   Mean over of'   -> "Mean " <> prettyOver over <> " " <> prettyOf of'
   StdDev over of' -> "StdDev " <> prettyOver over <> " " <> prettyOf of'
   Sum over of'    -> "Sum " <> prettyOver over <> " " <> prettyOf of'
+  Id (Of name)    -> name <> "s"
   Id of'          -> prettyOf of'
 
 prettyOf :: Of a -> T.Text

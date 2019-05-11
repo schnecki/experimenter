@@ -68,8 +68,13 @@ main = do
   g <- newStdGen
   (changed, res) <- runExperimentsLoggingNoSql databaseSetup setup () (Dice g (Just 0.2))
   putStrLn $ "Any change: " ++ show changed
-  let evals = [-- Mean OverReplications (Of "draw"), StdDev OverReplications (Of "draw"),
-               Id (Of "draw")]
+  let evals = [ Mean OverExperimentRepetitions (Of "draw") `Named` "Mean Repetitions"
+              , StdDev OverExperimentRepetitions (Of "draw") `Named` "StdDev Repetitions"
+              , Mean OverReplications (Of "draw") `Named` "Mean Repls"
+              , StdDev OverReplications (Of "draw") `Named` "StdDev Repls"
+              , Id (Of "draw") `Named` "draws 1"
+              , Id (Of "draw") `Named` "draws 2"
+              ]
   evalRes <- genEvals res evals
   print (view evalsResults evalRes)
   writeAndCompileLatex evalRes
