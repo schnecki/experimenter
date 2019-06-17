@@ -80,8 +80,8 @@ loadExperimentResult (Entity k (ExpResult _ rep)) = do
     Just (Entity resDataKey (PrepResultData _ startT endT startRandGen endRandGen startStBS endStBS startInpStBS endInpStBS)) -> do
       mInputVals <- loadPreparationInput k
       results <- loadPrepartionMeasures k
-      mStartSt <- deserialise "prep start state" startStBS
-      mEndSt <- mDeserialise "prep end state" endStBS
+      mStartSt <- fmap deserialisable <$> deserialise "prep start state" startStBS
+      mEndSt <- fmap (fmap deserialisable) <$> mDeserialise "prep end state" endStBS
       mStartInpSt <- deserialise "prep start input state" startInpStBS
       mEndInpSt <- mDeserialise "prep end input state" endInpStBS
       return $ do
@@ -159,8 +159,8 @@ loadReplicationResult (Entity k (RepResult _ repNr)) = do
       let wmUpEndRandGen = tread <$> view warmUpResultDataEndRandGen wmUpRes
       mWmUpInpVals <- loadReplicationWarmUpInput k
       wmUpMeasures <- loadReplicationWarmUpMeasures k
-      mWmUpStartSt <- deserialise "warm up start state" (view warmUpResultDataStartState wmUpRes)
-      mWmUpEndSt <- mDeserialise "warm up end state" (view warmUpResultDataEndState wmUpRes)
+      mWmUpStartSt <- fmap deserialisable <$> deserialise "warm up start state" (view warmUpResultDataStartState wmUpRes)
+      mWmUpEndSt <- fmap (fmap deserialisable) <$> mDeserialise "warm up end state" (view warmUpResultDataEndState wmUpRes)
       mWmUpStartInpSt <- deserialise "warm up start input state" (view warmUpResultDataStartInputState wmUpRes)
       mWmUpEndInpSt <- mDeserialise "warm up end input state" (view warmUpResultDataEndInputState wmUpRes)
       return $ do
@@ -189,8 +189,8 @@ loadReplicationResult (Entity k (RepResult _ repNr)) = do
       let repEndRandGen = tread <$> view repResultDataEndRandGen repRes
       mRepInpVals <- loadReplicationInput k
       repMeasures <- loadReplicationMeasures k
-      mRepStartSt <- deserialise "rep start state" (view repResultDataStartState repRes)
-      mRepEndSt <- mDeserialise "rep end state" (view repResultDataEndState repRes)
+      mRepStartSt <- fmap deserialisable <$> deserialise "rep start state" (view repResultDataStartState repRes)
+      mRepEndSt <- fmap (fmap deserialisable) <$> mDeserialise "rep end state" (view repResultDataEndState repRes)
       mRepStartInpSt <- deserialise "rep start input state" (view repResultDataStartInputState repRes)
       mRepEndInpSt <- mDeserialise "rep end input state" (view repResultDataEndInputState repRes)
       return $ do
@@ -271,7 +271,7 @@ getOrCreateExps setup initInpSt initSt = do
   let exps =
         filter
           (\(Entity _ (Exps _ _ _ s iS)) ->
-             let other = (,) <$> runGet S.get s <*> runGet S.get iS
+             let other = (,) <$> deserialisable <$> (runGet S.get s) <*> runGet S.get iS
               in fromEither False (equalExperiments (initSt, initInpSt) <$> other))
           expsList
   params <- mapM (\e -> selectList [ParamExps ==. entityKey e] [Asc ParamName]) exps
@@ -281,7 +281,7 @@ getOrCreateExps setup initInpSt initSt = do
     Nothing -> do
       $(logInfo) "Starting new experiment..."
       time <- liftIO getCurrentTime
-      eExp <- insertEntity $ Exps name time Nothing (runPut $ put initSt) (runPut $ put initInpSt)
+      eExp <- insertEntity $ Exps name time Nothing (runPut $ put $ serialisable initSt) (runPut $ put initInpSt)
       void $ insert $ mkExpSetup eExp
       mapM_ (insertParam (entityKey eExp)) (parameters initSt)
       return eExp

@@ -17,7 +17,16 @@ import           System.Random
 type Period = Int
 
 
-class (Serialize (InputValue a), Serialize (InputState a), Serialize a) => ExperimentDef a where
+class (Serialize (InputValue a), Serialize (InputState a), Serialize (Serializable a)) => ExperimentDef a where
+
+  type Serializable a :: *      -- ^ Type that is used to serialize the current state.
+
+  -- ^ Function to convert to a serializable object
+  serialisable :: a -> Serializable a
+
+  -- ^ Function to convert from a serializable object
+  deserialisable :: Serializable a -> a
+
 
   -- ^ Type of input values to the experiment.
   type InputValue a :: *        -- ^ The input to the system for running a step.

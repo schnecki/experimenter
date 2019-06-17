@@ -29,6 +29,10 @@ instance Serialize Dice where
 instance ExperimentDef Dice where
   type InputValue Dice = StdGen
   type InputState Dice = ()
+  type Serializable Dice = Dice
+  serialisable = id
+  deserialisable = id
+
   generateInput g _ _ _ = return (g, ())
   runStep (Dice mD) g _ =
     let (nr, _) = next g
@@ -51,7 +55,7 @@ fakeParam = ParameterSetup "fake" (\mD (Dice _) -> Dice mD) (\(Dice mD) -> mD) (
 
 setup :: ExperimentSetup
 setup = ExperimentSetup
-  { _experimentBaseName         = "dice param 1"
+  { _experimentBaseName         = "dice param 3"
   , _experimentRepetitions      =  2
   , _preparationSteps           =  0
   , _evaluationWarmUpSteps      =  0

@@ -30,6 +30,10 @@ instance Serialize Dice where
 instance ExperimentDef Dice where
   type InputValue Dice = ()
   type InputState Dice = ()
+  type Serializable Dice = Dice
+  serialisable = id
+  deserialisable = id
+
   generateInput _ _ _ _ = return ((), ())
   runStep (Dice g mD) _ p =
     let (nr, g') = next g

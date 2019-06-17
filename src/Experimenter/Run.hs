@@ -273,13 +273,13 @@ continueExperiment rands exps exp = do
       return $ take nr xs
 
 
-newResultData :: (Serialize a, Serialize (InputState a), MonadIO m) => StdGen -> RepResultType -> a -> InputState a -> ReaderT SqlBackend m (ResultData a)
+newResultData :: (ExperimentDef a, Serialize (InputState a), MonadIO m) => StdGen -> RepResultType -> a -> InputState a -> ReaderT SqlBackend m (ResultData a)
 newResultData g repResType st inpSt = do
   time <- liftIO getCurrentTime
   k <- case repResType of
-          Prep expResId   -> ResultDataPrep <$> insert (PrepResultData expResId time Nothing (tshow g) Nothing (runPut $ put st) Nothing (runPut $ put inpSt) Nothing)
-          WarmUp repResId -> ResultDataWarmUp <$> insert (WarmUpResultData repResId time Nothing (tshow g) Nothing  (runPut $ put st) Nothing (runPut $ put inpSt) Nothing)
-          Rep repResId    -> ResultDataRep <$> insert (RepResultData repResId time Nothing (tshow g) Nothing (runPut $ put st) Nothing (runPut $ put inpSt) Nothing)
+          Prep expResId   -> ResultDataPrep <$> insert (PrepResultData expResId time Nothing (tshow g) Nothing (runPut $ put $ serialisable st) Nothing (runPut $ put inpSt) Nothing)
+          WarmUp repResId -> ResultDataWarmUp <$> insert (WarmUpResultData repResId time Nothing (tshow g) Nothing  (runPut $ put $ serialisable st) Nothing (runPut $ put inpSt) Nothing)
+          Rep repResId    -> ResultDataRep <$> insert (RepResultData repResId time Nothing (tshow g) Nothing (runPut $ put $ serialisable st) Nothing (runPut $ put inpSt) Nothing)
   return $ ResultData k time Nothing g Nothing [] [] st Nothing inpSt Nothing
 
 
@@ -460,19 +460,19 @@ runResultData len repResType resData = do
       zipWithM_ (\k v -> insert $ PrepInputValue k (runPut . put . view inputValue $ v)) inpKeys inpVals
       measureKeys <- mapM (insert . PrepMeasure expResId . view measurePeriod) ress
       zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ PrepResultStep k n mX y) xs) measureKeys ress
-      replace k (PrepResultData expResId sTime eTime (tshow sG) (tshow <$> eG) (runPut . put $ sSt) (runPut . put <$> eSt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
+      replace k (PrepResultData expResId sTime eTime (tshow sG) (tshow <$> eG) (runPut . put $ serialisable sSt) (runPut . put . serialisable <$> eSt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
     upd (WarmUp repResId) (ResultData (ResultDataWarmUp k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do
       inpKeys <- mapM (insert . WarmUpInput repResId . view inputValuePeriod) inpVals
       zipWithM_ (\k v -> insert $ WarmUpInputValue k (runPut . put . view inputValue $ v)) inpKeys inpVals
       measureKeys <- mapM (insert . WarmUpMeasure repResId . view measurePeriod) ress
       zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ WarmUpResultStep k n mX y) xs) measureKeys ress
-      replace k (WarmUpResultData repResId sTime eTime (tshow sG) (tshow <$> eG) (runPut . put $ sSt) (runPut . put <$> eSt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
+      replace k (WarmUpResultData repResId sTime eTime (tshow sG) (tshow <$> eG) (runPut . put $ serialisable sSt) (runPut . put . serialisable <$> eSt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
     upd (Rep repResId) (ResultData (ResultDataRep k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do
       inpKeys <- mapM (insert . RepInput repResId . view inputValuePeriod) inpVals
       zipWithM_ (\k v -> insert $ RepInputValue k (runPut . put . view inputValue $ v)) inpKeys inpVals
       measureKeys <- mapM (insert . RepMeasure repResId . view measurePeriod) ress
       zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ RepResultStep k n mX y) xs) measureKeys ress
-      replace k (RepResultData repResId sTime eTime (tshow sG) (tshow <$> eG) (runPut . put $ sSt) (runPut . put <$> eSt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
+      replace k (RepResultData repResId sTime eTime (tshow sG) (tshow <$> eG) (runPut . put $ serialisable sSt) (runPut . put . serialisable <$> eSt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
     upd _ _ = error "Unexpected update combination. This is a bug, please report it!"
 
 
