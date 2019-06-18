@@ -140,7 +140,7 @@ overReplicationResults evals = do
   let replicationTbls = map (map (mkExperimentTable evals)) replicEvals
   let experimentalReplicationTbls = map (map (mkExperimentTable evals)) expereEvals
   unless (null periodicTbls) $ do
-    trace (show  periodicTbls) $ section $ "Periodic Evaluations"
+    section "Periodic Evaluations"
     zipWithM_
       (\nr exps ->
          mapM_
@@ -152,7 +152,7 @@ overReplicationResults evals = do
       [1 ..]
       periodicTbls
   unless (null replicationTbls) $ do
-    section $ "Replication Evaluations"
+    section "Replication Evaluations"
     zipWithM_
       (\nr exps ->
          (mapM_
@@ -164,7 +164,7 @@ overReplicationResults evals = do
       [1 ..]
       replicationTbls
   unless (null experimentalReplicationTbls) $ do
-    section $ "Repetition Evaluations"
+    section "Repetition Evaluations"
     zipWithM_
       (\nr exps ->
          (mapM_
@@ -210,7 +210,7 @@ mkNamesUntil unit res
           UnitReplications -> map (\x -> "Rpl " <> tshow x <> ": ") [1 .. length vals]
           _ ->
             let sub = head $ map (mkNamesUntil unit) vals
-            in concatMap (\x -> map (\s -> "Rpt " <> tshow x <> ": " <> s) sub) [1 .. length vals]
+            in concatMap (\x -> map (\s -> if T.isInfixOf "Rpt" s then s else "Rpt " <> tshow x <> ": " <> s) sub) [1 .. length vals]
       _ -> error $ "cannot unpack res: " <> show res
 
 
