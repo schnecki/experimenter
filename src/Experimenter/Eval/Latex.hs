@@ -2,14 +2,13 @@
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell     #-}
-{-# LANGUAGE TupleSections       #-}
 module Experimenter.Eval.Latex
     ( writeLatex
     , writeAndCompileLatex
     ) where
 
 import           Control.Lens                 hiding ((&))
-import           Control.Monad                (void, zipWithM_)
+import           Control.Monad                (unless, void, zipWithM_)
 import           Control.Monad.Logger
 import           Data.Either
 import           Data.Function                (on)
@@ -95,23 +94,6 @@ theBody evals = do
   experimentsInfo (evals ^. evalsExperiments)
   experimentsEvals evals
 
-  -- mapM_ (experimentsEval evals) (evals ^. evalsResults)
-
-  -- section "Hello"
- --  "This is a simple example using the "
- --  hatex
- --  " library. "
- -- -- 'textbf' turns characters to bold font (as you already may know).
- --  textbf "Enjoy!"
- --  " "
- -- -- This is how we nest commands.
- --  textbf (large "Yoohoo!")
-
--- refTblGenInfo :: LaTeXT IO ()
--- refTblGenInfo = "tbl:genInfo"
-
--- refTblParamSetting :: Int -> LaTeXT IO ()
--- refTblParamSetting nr = "tbl:paramSetting:" <> raw (tshow nr)
 
 experimentsInfo :: (MonadLogger m) => Experiments a -> LaTeXT m ()
 experimentsInfo exps = do
@@ -128,80 +110,71 @@ experimentsInfo exps = do
     , Row ["Experiment Evaluation Replications:",         CellT (tshow $ exps ^. experimentsSetup . expsSetupEvaluationReplications)]
     ]
 
--- experimentsEval :: (MonadLogger m) => Evals a -> ExperimentEval a -> LaTeXT m ()
--- experimentsEval evals eval@(ExperimentEval nr res _) = do
---   pagebreak "4"
---   section $ "Experiment " <> raw (tshow nr)
---   -- paramSetting evals eval
---   -- experimentsResult evals
---   overReplicationResults evals
 
 experimentsEvals :: (MonadLogger m) => Evals a -> LaTeXT m ()
 experimentsEvals evals = do
   pagebreak "4"
   part "Experiment Evaluations"
-  -- paramSetting evals eval
-  -- experimentsResult evals
   overReplicationResults evals
 
 
 overReplicationResults :: (MonadLogger m) => Evals a -> LaTeXT m ()
 overReplicationResults evals = do
-  let isOverReplication res = res ^. evalUnit == UnitReplications
-      isOverExperiments res = res ^. evalUnit == UnitExperimentRepetition
-      isOverPeriods res = res ^. evalUnit == UnitPeriods
-      isEvalVectorOfPeriods (EvalVector _ _ vals) = all (== UnitPeriods) (vals ^.. traversed . evalUnit)
+  -- let isOverReplication res = res ^. evalUnit == UnitReplications
+  --     isOverExperiments res = res ^. evalUnit == UnitExperimentRepetition
+  --     isOverPeriods res = res ^. evalUnit == UnitPeriods
+  --     isEvalVectorOfPeriods (EvalVector _ _ vals) = all (== UnitPeriods) (vals ^.. traversed . evalUnit)
+  -- let isPeriodicEval (UnitPeriods, _, _) = True
+  --     isPeriodicEval _                   = False
+  -- let isReplicationEval (UnitReplications, _, _) = True
+  --     isReplicationEval _                        = False
+  let isExperimentalReplicationUnit UnitExperimentRepetition        = True
+      isExperimentalReplicationUnit UnitBestExperimentRepetitions{} =True
+      isExperimentalReplicationUnit _                               = False
   let groupedEvals = map groupEvaluations (evals ^. evalsResults)
-  -- let evalsExps = over (evalsResults . traversed . evalExperimentResults) (sortBy (compare `on` view evalType) . filter isOverExperiments) evals
-  -- let evalsExpsPer = over (evalsResults . traversed . evalExperimentResults) (filter isEvalVectorOfPeriods) evalsExps
-  -- let evalsRepls = over (evalsResults . traversed . evalExperimentResults) (sortBy (compare `on` view evalType) . filter isOverReplication) evals
-  -- let evalsPeri = over (evalsResults . traversed . evalExperimentResults) (sortBy (compare `on` view evalType) . filter isOverPeriods) evals
-  -- let tblsExps = map (mkExperimentTableExp evalsExps) (evalsExps ^. evalsResults)
-  -- let tblsExpsPer = map (mkExperimentTableExp evalsExps) (evalsExpsPer ^. evalsResults)
-  -- let tblsRepls = map (mkExperimentTableExp evalsRepls) (evalsRepls ^. evalsResults)
-  let isPeriodicEval (UnitPeriods, _, _) = True
-      isPeriodicEval _                   = False
-  let isReplicationEval (UnitReplications, _, _) = True
-      isReplicationEval _                        = False
-  let isExperimentalReplicationEval (UnitExperimentRepetition, _, _)         = True
-      isExperimentalReplicationEval (UnitBestExperimentRepetitions {}, _, _) = True
-      isExperimentalReplicationEval _                                        = False
-  let periodicTbls = map (map (mkExperimentTable evals)) $ transpose $ filter (isPeriodicEval . head) $ transpose groupedEvals
-  let replicationTbls = map (map (mkExperimentTable evals)) $ transpose $ filter (isReplicationEval . head) $ transpose groupedEvals
-  let experimentalReplicationTbls = map (map (mkExperimentTable evals)) $ transpose $ filter (isExperimentalReplicationEval . head) $ transpose groupedEvals
-  section $ "Periodic Evaluations"
-  zipWithM_
-    (\nr exps ->
-       mapM_
-         (\(mPs, vs) -> do
-            subsection $ "Experiment No. " <> raw (tshow nr)
-            maybe "There are no configured parameters!" printTable mPs
-            mapM_ printTableWithName vs)
-         exps)
-    [1 ..]
-    periodicTbls
-  section $ "Replication Evaluations"
-  zipWithM_
-    (\nr exps ->
-       (mapM_
-          (\(mPs, vs) -> do
-             subsection $ "Experiment No. " <> raw (tshow nr)
-             maybe "There are no configured parameters!" printTable mPs
-             mapM_ printTableWithName vs)
-          exps))
-    [1 ..]
-    replicationTbls
-  section $ "Repetition Evaluations"
-  zipWithM_
-    (\nr exps ->
-       (mapM_
-          (\(mPs, vs) -> do
-             subsection $ "Experiment No. " <> raw (tshow nr)
-             maybe "There are no configured parameters!" printTable mPs
-             mapM_ printTableWithName vs)
-          exps))
-    [1 ..]
-    experimentalReplicationTbls
+  let periodEvals = filter ((== UnitPeriods) . (^._1) . head) groupedEvals
+      replicEvals = filter ((== UnitReplications) . (^._1) . head) groupedEvals
+      expereEvals = filter (isExperimentalReplicationUnit . (^._1) . head) groupedEvals
+
+  let periodicTbls = map (map (mkExperimentTable evals)) periodEvals
+  let replicationTbls = map (map (mkExperimentTable evals)) replicEvals
+  let experimentalReplicationTbls = map (map (mkExperimentTable evals)) expereEvals
+  unless (null periodicTbls) $ do
+    trace (show  periodicTbls) $ section $ "Periodic Evaluations"
+    zipWithM_
+      (\nr exps ->
+         mapM_
+           (\(mPs, vs) -> do
+              subsection $ "Experiment No. " <> raw (tshow nr)
+              maybe "There are no configured parameters!" printTable mPs
+              mapM_ printTableWithName vs)
+           exps)
+      [1 ..]
+      periodicTbls
+  unless (null replicationTbls) $ do
+    section $ "Replication Evaluations"
+    zipWithM_
+      (\nr exps ->
+         (mapM_
+            (\(mPs, vs) -> do
+               subsection $ "Experiment No. " <> raw (tshow nr)
+               maybe "There are no configured parameters!" printTable mPs
+               mapM_ printTableWithName vs)
+            exps))
+      [1 ..]
+      replicationTbls
+  unless (null experimentalReplicationTbls) $ do
+    section $ "Repetition Evaluations"
+    zipWithM_
+      (\nr exps ->
+         (mapM_
+            (\(mPs, vs) -> do
+               subsection $ "Experiment No. " <> raw (tshow nr)
+               maybe "There are no configured parameters!" printTable mPs
+               mapM_ printTableWithName vs)
+            exps))
+      [1 ..]
+      experimentalReplicationTbls
 
 printTableWithName :: (Monad m, MonadLogger m) => (StatsDef a, Table) -> LaTeXT m ()
 printTableWithName (nm, tbl) = do
@@ -217,7 +190,7 @@ groupEvaluations eval@(ExperimentEval _ res _) = map (\xs@(x:_) -> (leastUnit x,
 leastUnit :: EvalResults a -> Unit
 leastUnit (EvalValue _ u _ _ _)    = u
 leastUnit (EvalReducedValue _ u _) = u
-leastUnit (EvalVector _ _ vals)    = leastUnit (head vals)
+leastUnit (EvalVector _ u vals)    = min u (leastUnit (head vals))
 
 
 unpackUntil :: Unit -> EvalResults a -> [EvalResults a]
@@ -244,37 +217,28 @@ mkNamesUntil unit res
 mkExperimentTable :: Evals a -> (Unit, ExperimentEval a, [EvalResults a]) -> (Maybe Table, [(StatsDef a, Table)])
 mkExperimentTable evals (lowestUnit, eval, res) =
   let params = paramSettingTable evals eval
-      resUnit = map ((names, ) . unpackUntil lowestUnit) res
-      tableRes = map (uncurry (zipWith mkEvalResult)) resUnit
+      resUnit = map (\rs -> (mkNames rs,unpackUntil lowestUnit rs)) res
+      tableRes = map (uncurry (zipWith (mkEvalResult lowestUnit))) resUnit
       tbls = map toTables tableRes
-      names = (map (map CellT . return) . mkNamesUntil lowestUnit) (head res)
+      mkNames = map (map CellT . return) . mkNamesUntil lowestUnit
       evalStatDefs = map (^. evalType) res
    in (params, zip evalStatDefs tbls)
 
--- mkExperimentTable evals (UnitBestExperimentRepetitions _, eval, res) = mkExperimentTable evals (UnitExperimentRepetition, eval, res)
--- mkExperimentTable evals (UnitExperimentRepetition, eval, res) = undefined
-
 
 data TableResult = TableResult
-  { reducedOver :: Maybe Unit
-  , header      :: Row
-  , rows        :: [Row]
+  { header :: Row
+  , rows   :: [Row]
   } deriving (Show)
-
-toTable :: TableResult -> Table
-toTable (TableResult _ h rs) = Table h rs
 
 toTables :: [TableResult] -> Table
 toTables xs = Table (header $ head xs) (concatMap rows xs)
 
-
-mkEvalResult :: [Cell] -> EvalResults a -> TableResult
-mkEvalResult _ (EvalVector _ unit []) = error "Empty evaluation. Check your eval setup."
-mkEvalResult name (EvalVector _ unit vals) =
-  TableResult (demoteUnit unit) (Row $ CellT (unitName unit) : map (CellT . tshow) [1 .. length vals])
-  (map Row (foldl' mkRows [name] rowVals))
+mkEvalResult :: Unit -> [Cell] -> EvalResults a -> TableResult
+mkEvalResult leastUnit _ (EvalVector _ unit []) = error "Empty evaluation. Check your eval setup."
+mkEvalResult leastUnit name eval@(EvalVector _ unit vals) =
+  TableResult (Row $ CellT (unitName leastUnit) : map (CellT . tshow) [1 .. length vals]) (map Row (foldl' mkRows [name] rowVals))
   where
-    subVals = map (mkEvalResult []) vals
+    subVals = map (mkEvalResult leastUnit []) vals
     rowVals = map rows subVals
     mkRows :: [[Cell]] -> [Row] -> [[Cell]]
     mkRows accs vs = zipWith (++) accs (map fromRow vs)
@@ -283,44 +247,14 @@ mkEvalResult name (EvalVector _ unit vals) =
     unitName UnitReplications = "Replication:"
     unitName UnitExperimentRepetition = "Experiment Repetition:"
     unitName (UnitBestExperimentRepetitions bestNr) = "Best " <> tshow bestNr <> " Experiment Repetitions:"
-mkEvalResult [] (EvalValue _ u n x y) = TableResult Nothing (Row [getXValue x]) [Row [CellD y]]
+mkEvalResult leastUnit [] (EvalValue _ u n x y) = TableResult (Row [getXValue x]) [Row [CellD y]]
   where getXValue (Left x)  = CellT $ tshow x
         getXValue (Right d) = CellD d
-mkEvalResult names@(n1:_) (EvalValue _ u n x y) = TableResult Nothing (Row [CellEmpty, getXValue x]) [Row [n1, CellD y]]
+mkEvalResult leastUnit names@(n1:_) (EvalValue _ u n x y) = TableResult (Row [CellEmpty, getXValue x]) [Row [n1, CellD y]]
   where getXValue (Left x)  = CellT $ tshow x
         getXValue (Right d) = CellD d
-mkEvalResult [] (EvalReducedValue statsDef u y) = TableResult (Just u) (Row [CellT $ tshow statsDef]) [Row [CellD y]]
-mkEvalResult names@(n:_) (EvalReducedValue statsDef u y) = TableResult (Just u) (Row [CellEmpty , CellT $ prettyStatsDef statsDef]) [Row [n, CellD y]]
-
-
--- experimentsResult :: (MonadLogger m) => Evals a -> LaTeXT m ()
--- experimentsResult evals = do
---   subsection $ "Evaluation over Experiments"
---   let exps = evals ^. evalsExperiments
---       paramSetups = view experimentsParameters exps
---   mapM_ (experimentResultForParam evals) paramSetups
-
-
--- experimentResultForParam :: (MonadLogger m) => Evals a -> ParameterSetup a -> LaTeXT m ()
--- experimentResultForParam evals (ParameterSetup paramName setter getter _ (minV, maxV)) = do
---   -- let paramValuesBS = L.nub $ eval ^.. evalExperiment . parameterSetup . traversed . filtered ((== paramName) . view parameterSettingName) . parameterSettingValue
---   --     fromRight (Right x) = x
---   --     fromRight _ = error $ "Could not deserialise parameter values of parameter " <> T.unpack paramName
---   --     eiParamValues = map (S.runGet S.get) paramValuesBS
---   --     otherParams = eval ^.. evalExperiment . parameterSetup . traversed . filtered ((/= paramName) . view parameterSettingName)
---   --     unused = setter (fromRight $ head eiParamValues) (evals ^. evalsExperiments . experimentsInitialState)
-
---   -- case find isLeft eiParamValues of
---   --   Just (Left err) -> $(logDebug) $ "Could not deserialise parameter values of parameter " <> paramName <> ". Skipping this evaluation. Error was: " <> T.pack err
---   --   Nothing -> do
---   --     let paramValues = map fromRight eiParamValues
---   --     -- let otherParamGrouped =
-
---   --     -- let cmp (ExperimentEval )
---   --     -- let ress = L.groupBy ((==) `on` cmp) $ L.sortBy (compare `on` cmp) res
---   --     -- undefined
-
---       return ()
+mkEvalResult leastUnit [] (EvalReducedValue statsDef u y) = TableResult (Row [CellT $ tshow statsDef]) [Row [CellD y]]
+mkEvalResult leastUnit names@(n:_) (EvalReducedValue statsDef u y) = TableResult (Row [CellEmpty , CellT $ prettyStatsDef statsDef]) [Row [n, CellD y]]
 
 
 paramSetting :: (MonadLogger m) => Evals a -> ExperimentEval a -> LaTeXT m ()

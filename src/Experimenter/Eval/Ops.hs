@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell   #-}
 
 module Experimenter.Eval.Ops
     ( genEvals
@@ -6,6 +7,7 @@ module Experimenter.Eval.Ops
 
 import           Control.Lens             hiding (Cons, Over, over)
 import           Control.Monad            (unless)
+import           Control.Monad.Logger     (logDebug)
 import           Data.Function            (on)
 import           Data.List                (find, sortBy)
 import           Data.Maybe               (fromMaybe)
@@ -16,6 +18,7 @@ import           Experimenter.Eval.Type   as E
 import           Experimenter.Measure
 import           Experimenter.Result.Type
 import           Experimenter.StepResult
+import           Experimenter.Util
 
 
 genEvals :: Experiments a -> [StatsDef a] -> IO (Evals a)
@@ -50,15 +53,21 @@ genExperimentResult :: Experiment a -> StatsDef a -> ExperimentResult a -> IO (E
 genExperimentResult _ (Named _ n) _ = error $ "An evaluation may only be named on the outermost function in evaluation " <> T.unpack n
 genExperimentResult exp eval expRes =
   case eval of
-    Mean OverReplications eval'   -> reduce eval' <$> genRepl (Id eval')
-    StdDev OverReplications eval' -> reduce eval' <$> genRepl (Id eval')
-    Sum OverReplications eval'    -> reduce eval' <$> genRepl (Id eval')
-    _                             -> packGenRes <$> genRepl eval
-  where
+    Mean OverReplications eval' -> do
+      repl <- genRepl (Id eval')
+      print ("REPL: " <> tshow (reduce repl))
+      reduce <$> genRepl (Id eval')
+    StdDev OverReplications eval' -> reduce <$> genRepl (Id eval')
+    Sum OverReplications eval' -> reduce <$> genRepl (Id eval')
+    _ -> packGenRes <$> genRepl eval
     -- packGenRes [x] = x
-    packGenRes xs  = EvalVector eval UnitReplications xs
+  where
+    packGenRes xs = EvalVector eval UnitReplications xs
     genRepl e = mapM (genReplication exp e) (expRes ^. evaluationResults)
-    reduce eval' = reduceUnary eval . EvalVector (Id eval') UnitReplications
+    reduce inp = EvalVector eval (getUnit inp) $ map (reduceUnary eval)  $ transpose UnitReplications inp
+    getUnit (EvalVector _ unit _:_)       = unit
+    getUnit (EvalValue _ unit _ _ _:_)    = unit
+    getUnit (EvalReducedValue _ unit _:_) = unit
 
 
 genReplication :: Experiment a -> StatsDef a -> ReplicationResult a -> IO (EvalResults a)
