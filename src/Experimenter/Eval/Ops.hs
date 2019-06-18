@@ -53,13 +53,10 @@ genExperimentResult :: Experiment a -> StatsDef a -> ExperimentResult a -> IO (E
 genExperimentResult _ (Named _ n) _ = error $ "An evaluation may only be named on the outermost function in evaluation " <> T.unpack n
 genExperimentResult exp eval expRes =
   case eval of
-    Mean OverReplications eval' -> do
-      repl <- genRepl (Id eval')
-      print ("REPL: " <> tshow (reduce repl))
-      reduce <$> genRepl (Id eval')
+    Mean OverReplications eval'   -> reduce <$> genRepl (Id eval')
     StdDev OverReplications eval' -> reduce <$> genRepl (Id eval')
-    Sum OverReplications eval' -> reduce <$> genRepl (Id eval')
-    _ -> packGenRes <$> genRepl eval
+    Sum OverReplications eval'    -> reduce <$> genRepl (Id eval')
+    _                             -> packGenRes <$> genRepl eval
     -- packGenRes [x] = x
   where
     packGenRes xs = EvalVector eval UnitReplications xs

@@ -129,52 +129,52 @@ overReplicationResults evals = do
   -- let isReplicationEval (UnitReplications, _, _) = True
   --     isReplicationEval _                        = False
   let isExperimentalReplicationUnit UnitExperimentRepetition        = True
-      isExperimentalReplicationUnit UnitBestExperimentRepetitions{} =True
+      isExperimentalReplicationUnit UnitBestExperimentRepetitions{} = True
       isExperimentalReplicationUnit _                               = False
   let groupedEvals = map groupEvaluations (evals ^. evalsResults)
-  let periodEvals = filter ((== UnitPeriods) . (^._1) . head) groupedEvals
-      replicEvals = filter ((== UnitReplications) . (^._1) . head) groupedEvals
-      expereEvals = filter (isExperimentalReplicationUnit . (^._1) . head) groupedEvals
+  let periodEvals = map (filter ((== UnitPeriods) . (^._1))) groupedEvals
+      replicEvals = map (filter ((== UnitReplications) . (^._1))) groupedEvals
+      expereEvals = map (filter (isExperimentalReplicationUnit . (^._1))) groupedEvals
 
   let periodicTbls = map (map (mkExperimentTable evals)) periodEvals
   let replicationTbls = map (map (mkExperimentTable evals)) replicEvals
   let experimentalReplicationTbls = map (map (mkExperimentTable evals)) expereEvals
-  unless (null periodicTbls) $ do
-    section "Periodic Evaluations"
-    zipWithM_
-      (\nr exps ->
-         mapM_
-           (\(mPs, vs) -> do
-              subsection $ "Experiment No. " <> raw (tshow nr)
-              maybe "There are no configured parameters!" printTable mPs
-              mapM_ printTableWithName vs)
-           exps)
-      [1 ..]
-      periodicTbls
-  unless (null replicationTbls) $ do
-    section "Replication Evaluations"
-    zipWithM_
-      (\nr exps ->
-         (mapM_
-            (\(mPs, vs) -> do
-               subsection $ "Experiment No. " <> raw (tshow nr)
-               maybe "There are no configured parameters!" printTable mPs
-               mapM_ printTableWithName vs)
-            exps))
-      [1 ..]
-      replicationTbls
-  unless (null experimentalReplicationTbls) $ do
-    section "Repetition Evaluations"
-    zipWithM_
-      (\nr exps ->
-         (mapM_
-            (\(mPs, vs) -> do
-               subsection $ "Experiment No. " <> raw (tshow nr)
-               maybe "There are no configured parameters!" printTable mPs
-               mapM_ printTableWithName vs)
-            exps))
-      [1 ..]
-      experimentalReplicationTbls
+  -- unless (null periodicTbls) $ do
+  section "Periodic Evaluations"
+  zipWithM_
+    (\nr exps ->
+       mapM_
+         (\(mPs, vs) -> do
+            subsection $ "Experiment No. " <> raw (tshow nr)
+            maybe "There are no configured parameters!" printTable mPs
+            mapM_ printTableWithName vs)
+         exps)
+    [1 ..]
+    periodicTbls
+  --  unless (null replicationTbls) $ do
+  section "Replication Evaluations"
+  zipWithM_
+    (\nr exps ->
+       (mapM_
+          (\(mPs, vs) -> do
+             subsection $ "Experiment No. " <> raw (tshow nr)
+             maybe "There are no configured parameters!" printTable mPs
+             mapM_ printTableWithName vs)
+          exps))
+    [1 ..]
+    replicationTbls
+  -- unless (null experimentalReplicationTbls) $ do
+  section "Repetition Evaluations"
+  zipWithM_
+    (\nr exps ->
+       (mapM_
+          (\(mPs, vs) -> do
+             subsection $ "Experiment No. " <> raw (tshow nr)
+             maybe "There are no configured parameters!" printTable mPs
+             mapM_ printTableWithName vs)
+          exps))
+    [1 ..]
+    experimentalReplicationTbls
 
 printTableWithName :: (Monad m, MonadLogger m) => (StatsDef a, Table) -> LaTeXT m ()
 printTableWithName (nm, tbl) = do
@@ -182,10 +182,7 @@ printTableWithName (nm, tbl) = do
   printTable tbl
 
 groupEvaluations :: ExperimentEval a -> [(Unit, ExperimentEval a, [EvalResults a])]
-groupEvaluations eval@(ExperimentEval _ res _) = map (\xs@(x:_) -> (leastUnit x, eval, xs)) $ groupBy ((==) `on` minMaxUnits) $ sortBy (compare `on` minMaxUnits) res
-  where
-    minMaxUnits e = (e ^. evalUnit, leastUnit e)
-
+groupEvaluations eval@(ExperimentEval _ res _) = map (\xs@((_,x):_) -> (x, eval, map fst xs)) $ groupBy ((==) `on` snd) $ sortBy (compare `on` snd) (map (\x -> (x, leastUnit x)) res)
 
 leastUnit :: EvalResults a -> Unit
 leastUnit (EvalValue _ u _ _ _)    = u
