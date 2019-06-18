@@ -18,8 +18,8 @@ ExpsSetup
 Param
     exps ExpsId
     name Text
-    minBound ByteString
-    maxBound ByteString
+    minBound ByteString Maybe
+    maxBound ByteString Maybe
     deriving Show Eq Ord
 
 Exp         -- Adding "json" causes ToJSON and FromJSON instances to be derived.

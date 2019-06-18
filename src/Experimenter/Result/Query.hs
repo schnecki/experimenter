@@ -300,4 +300,5 @@ getOrCreateExps setup initInpSt initSt = do
         (max 1 $ view evaluationReplications setup)
         (max 1 $ view maximumParallelEvaluations setup)
     insertParam :: Key Exps -> ParameterSetup a -> ReaderT SqlBackend m (Key Param)
-    insertParam eExp (ParameterSetup n _ _ _ (minVal, maxVal)) = insert $ Param eExp n (runPut $ put minVal) (runPut $ put maxVal)
+    insertParam eExp (ParameterSetup n _ _ _ (Just (minVal, maxVal))) = insert $ Param eExp n (Just $ runPut $ put minVal) (Just $ runPut $ put maxVal)
+    insertParam eExp (ParameterSetup n _ _ _ Nothing) = insert $ Param eExp n Nothing Nothing

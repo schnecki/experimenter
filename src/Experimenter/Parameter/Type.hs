@@ -14,7 +14,7 @@ data ParameterSetup a =
   , setParameter    :: b -> a -> a         -- ^ Set the parameter.
   , getParameter    :: a -> b              -- ^ Get the parameter from the current state.
   , modifyParameter :: Maybe (b -> IO [b]) -- ^ Either no modification or function.
-  , bounds          :: (b, b)              -- ^ Bounds (inclusive).
+  , bounds          :: Maybe (b, b)              -- ^ Bounds (inclusive).
   }
 -- makeLenses ''ParameterSetup  -- does not work with ExistentialQuantification
 

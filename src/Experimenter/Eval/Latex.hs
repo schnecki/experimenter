@@ -337,9 +337,15 @@ paramSettingTable evals (ExperimentEval nr _ exp)
     mkRow (ParameterSetting n bsV) =
       case find ((== n) . parameterName) (evals ^. evalsExperiments . experimentsParameters) of
         Nothing -> Row [CellT n, "was not modified as it is not listed in the parameter setting"]
-        Just (ParameterSetup _ setter _ _ (minVal, maxVal)) ->
+        Just (ParameterSetup _ setter _ _ mBounds) ->
           case S.runGet S.get bsV of
             Left err -> Row [CellT n, CellT (T.pack err)]
             Right val ->
               let _ = setter val (evals ^. evalsExperiments . experimentsInitialState) -- only needed for type inference
-              in Row [CellT n, CellL $ raw (tshow val) <> math (text " " `in_` autoParens (text (raw (tshow minVal)) <> ", " <> text (raw (tshow maxVal))))]
+              in Row
+                   [ CellT n
+                   , CellL $ raw (tshow val) <>
+                     case mBounds of
+                       Nothing -> ""
+                       Just (minVal, maxVal) -> math (text " " `in_` autoParens (text (raw (tshow minVal)) <> ", " <> text (raw (tshow maxVal))))
+                   ]

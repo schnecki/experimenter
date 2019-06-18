@@ -10,9 +10,9 @@ module Experimenter.Experiment where
 import           Experimenter.Parameter
 import           Experimenter.StepResult
 
+import           Control.Monad.IO.Class  (MonadIO)
 import           Data.Serialize          (Serialize)
 import           System.Random
-
 
 type Period = Int
 
@@ -35,10 +35,10 @@ class (Serialize (InputValue a), Serialize (InputState a), Serialize (Serializab
 
   -- ^ Generate some input values and possibly modify state. This function can be used to change the state. It is called
   -- before `runStep` and its output is used to call `runStep`.
-  generateInput :: (Monad m) => StdGen -> a -> InputState a -> Period -> m (InputValue a, InputState a)
+  generateInput :: (MonadIO m) => StdGen -> a -> InputState a -> Period -> m (InputValue a, InputState a)
 
   -- ^ Run a step of the environment and return new state and result.
-  runStep :: (Monad m) => a -> InputValue a -> Period -> m ([StepResult], a)
+  runStep :: (MonadIO m) => a -> InputValue a -> Period -> m ([StepResult], a)
 
   -- ^ Provides the parameter setting.
   parameters :: a -> [ParameterSetup a]

@@ -176,7 +176,7 @@ continueExperiments exp = do
       return $ map fst $ filter (not . snd) $ zip paramSettings paramSettingExits
     modifyParam :: (MonadLogger m, MonadIO m) => Experiments a -> ParameterSetup a -> ReaderT SqlBackend m [ParameterSetting a]
     modifyParam exps (ParameterSetup _ _ _ Nothing _) = return []
-    modifyParam exps (ParameterSetup n setter getter (Just modifier) (minBound, maxBound)) = do
+    modifyParam exps (ParameterSetup n setter getter (Just modifier) mBounds) = do
       pairs <-
         E.select $ E.from $ \(exp, par) -> do
           E.where_ (exp E.^. ExpExps E.==. E.val (view experimentsKey exps))
@@ -185,7 +185,10 @@ continueExperiments exp = do
       let concatRight Left {}   = []
           concatRight (Right x) = [x]
       let vals = concatMap (concatRight . S.runGet S.get . view paramSettingValue . entityVal . snd) pairs
-      bss <- liftIO $ concat <$> mapM (\val -> fmap (runPut . put) . filter (\x -> x <= maxBound && x >= minBound) <$> modifier (getter $ setter val st)) vals
+      let filterBounds x = case mBounds of
+            Nothing           -> True
+            Just (minB, maxB) -> x <= maxB && x >= minB
+      bss <- liftIO $ concat <$> mapM (\val -> fmap (runPut . put) . filter filterBounds <$> modifier (getter $ setter val st)) vals
       return $ map (ParameterSetting n) bss
       where
         st = exps ^. experimentsInitialState
@@ -476,7 +479,7 @@ runResultData len repResType resData = do
     upd _ _ = error "Unexpected update combination. This is a bug, please report it!"
 
 
-run :: (ExperimentDef a, MonadLogger m)
+run :: (ExperimentDef a, MonadIO m, MonadLogger m)
   => (StdGen, a, InputState a, [Input a], [Measure])
   -> Int
   -> ReaderT SqlBackend m (StdGen, a, InputState a, [Input a], [Measure])
