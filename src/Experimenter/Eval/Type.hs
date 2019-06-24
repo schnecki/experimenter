@@ -82,13 +82,21 @@ prettyStatsDef statsDef = case statsDef of
   Id of'          -> prettyOf of'
 
 prettyOf :: Of a -> T.Text
-prettyOf of' = case of' of
-  Of name        -> "of " <> name
-  Stats statsDef -> "(" <> prettyStatsDef statsDef <> ")"
-  Div x y        -> "( " <> prettyOf x <> ") / (" <> prettyOf y <> ")"
-  Add x y        -> "( " <> prettyOf x <> ") + (" <> prettyOf y <> ")"
-  Sub x y        -> "( " <> prettyOf x <> ") - (" <> prettyOf y <> ")"
-  Mult x y       -> "( " <> prettyOf x <> ") * (" <> prettyOf y <> ")"
+prettyOf = dropDoublePars . prettyOf'
+
+  where prettyOf' of' = case of' of
+          Of name           -> "of " <> name
+          Stats statsDef    -> "(" <> prettyStatsDef statsDef <> ")"
+          Div x y           -> "( " <> prettyOf' x <> ") / (" <> prettyOf' y <> ")"
+          Add x y           -> "( " <> prettyOf' x <> ") + (" <> prettyOf' y <> ")"
+          Sub x y           -> "( " <> prettyOf' x <> ") - (" <> prettyOf' y <> ")"
+          Mult x y          -> "( " <> prettyOf' x <> ") * (" <> prettyOf' y <> ")"
+          Last x            -> "Last(" <> prettyOf' x <> ")"
+          First x           -> "First(" <> prettyOf' x <> ")"
+          Length x          -> "Length(" <> prettyOf' x <> ")"
+          EveryXthElem nr x -> "EveryXthElem(" <> T.pack (show nr) <> ", " <> prettyOf' x <> ")"
+        dropDoublePars = T.replace "((" "(" . T.replace "))" ")"
+
 
 prettyOver :: Over a -> T.Text
 prettyOver ov = "over " <> case ov of
@@ -130,7 +138,7 @@ data Unit
   | UnitReplications
   | UnitExperimentRepetition
   | UnitBestExperimentRepetitions Int
-  | NoUnit
+  | UnitScalar
   deriving (Eq, Ord, Show)
 
 data EvalResults a
@@ -180,6 +188,7 @@ getEvalType f (EvalVector tp unit _)     = f (fromUnit unit) (Stats tp)
         fromUnit UnitReplications = OverReplications
         fromUnit UnitExperimentRepetition = OverExperimentRepetitions
         fromUnit (UnitBestExperimentRepetitions nr) = OverBestXExperimentRepetitions nr (error "compare function in BestXExperimentEvaluations may not be used")
+        fromUnit UnitScalar = OverExperimentRepetitions -- TODO really?
 getEvalType _ (EvalValue t _ _ _ _)      = t
 getEvalType _ (EvalReducedValue t _ _) = t
 
@@ -189,9 +198,11 @@ fromOver OverReplications                      = UnitReplications
 fromOver OverExperimentRepetitions             = UnitExperimentRepetition
 fromOver (OverBestXExperimentRepetitions nr _) = UnitBestExperimentRepetitions nr
 
+
 -- | Demotes the unit by 1 degree. Thus this calculates the unit of a vector over which it was reduced.
 demoteUnit :: Unit -> Maybe Unit
 demoteUnit UnitPeriods                     = Nothing
 demoteUnit UnitReplications                = Just UnitPeriods
 demoteUnit UnitExperimentRepetition        = Just UnitReplications
 demoteUnit UnitBestExperimentRepetitions{} = Just UnitReplications
+demoteUnit UnitScalar                      = Just UnitExperimentRepetition

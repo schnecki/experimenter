@@ -370,6 +370,7 @@ runEval ::
   -> Maybe (ResultData a)
   -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, Maybe (ResultData a))
 runEval g exps warmUpUpdated repResId mResData = do
+  $(logDebug) "Starting evaluation..."
   mResData' <-
     if delNeeded
       then deleteResultData (Rep repResId) >> return Nothing

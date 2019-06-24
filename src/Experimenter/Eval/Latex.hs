@@ -135,27 +135,14 @@ overReplicationResults evals = do
   let periodEvals = map (filter ((== UnitPeriods) . (^._1))) groupedEvals
       replicEvals = map (filter ((== UnitReplications) . (^._1))) groupedEvals
       expereEvals = map (filter (isExperimentalReplicationUnit . (^._1))) groupedEvals
-      numberEvals = map (filter ((== NoUnit) . (^._1))) groupedEvals
+      numberEvals = map (filter ((== UnitScalar) . (^._1))) groupedEvals
 
   let periodicTbls = map (map (mkExperimentTable evals)) periodEvals
   let replicationTbls = map (map (mkExperimentTable evals)) replicEvals
   let experimentalReplicationTbls = map (map (mkExperimentTable evals)) expereEvals
   let numberEvalsTbls = map (map (mkExperimentTable evals)) numberEvals
 
-  -- unless (null periodicTbls) $ do
-  section "Periodic Evaluations"
-  zipWithM_
-    (\nr exps ->
-       mapM_
-         (\(mPs, vs) -> do
-            subsection $ "Experiment No. " <> raw (tshow nr)
-            maybe "There are no configured parameters!" printTable mPs
-            mapM_ printTableWithName vs)
-         exps)
-    [1 ..]
-    periodicTbls
-  --  unless (null replicationTbls) $ do
-  section "Replication Evaluations"
+  section "Scalar Number Evaluations:"
   zipWithM_
     (\nr exps ->
        (mapM_
@@ -165,7 +152,7 @@ overReplicationResults evals = do
              mapM_ printTableWithName vs)
           exps))
     [1 ..]
-    replicationTbls
+    experimentalReplicationTbls
   -- unless (null experimentalReplicationTbls) $ do
   section "Repetition Evaluations"
   zipWithM_
@@ -179,7 +166,8 @@ overReplicationResults evals = do
     [1 ..]
     experimentalReplicationTbls
 
-  section "Single Number Evaluations:"
+  --  unless (null replicationTbls) $ do
+  section "Replication Evaluations"
   zipWithM_
     (\nr exps ->
        (mapM_
@@ -189,7 +177,20 @@ overReplicationResults evals = do
              mapM_ printTableWithName vs)
           exps))
     [1 ..]
-    experimentalReplicationTbls
+    replicationTbls
+
+  -- unless (null periodicTbls) $ do
+  section "Periodic Evaluations"
+  zipWithM_
+    (\nr exps ->
+       mapM_
+         (\(mPs, vs) -> do
+            subsection $ "Experiment No. " <> raw (tshow nr)
+            maybe "There are no configured parameters!" printTable mPs
+            mapM_ printTableWithName vs)
+         exps)
+    [1 ..]
+    periodicTbls
 
 
 printTableWithName :: (Monad m, MonadLogger m) => (StatsDef a, Table) -> LaTeXT m ()
@@ -260,7 +261,7 @@ mkEvalResult leastUnit name eval@(EvalVector _ unit vals) =
     unitName UnitReplications = "Replication:"
     unitName UnitExperimentRepetition = "Experiment Repetition:"
     unitName (UnitBestExperimentRepetitions bestNr) = "Best " <> tshow bestNr <> " Experiment Repetitions:"
-    unitName NoUnit = "Value:"
+    unitName UnitScalar = "Value:"
 mkEvalResult leastUnit [] (EvalValue _ u n x y) = TableResult (Row [getXValue x]) [Row [CellD y]]
   where getXValue (Left x)  = CellT $ tshow x
         getXValue (Right d) = CellD d
