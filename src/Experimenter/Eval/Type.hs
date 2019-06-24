@@ -66,6 +66,10 @@ data Of a
   | Add (Of a) (Of a)
   | Sub (Of a) (Of a)
   | Mult (Of a) (Of a)
+  | Last (Of a)
+  | First (Of a)
+  | EveryXthElem Int (Of a)
+  | Length (Of a)
   deriving (Show, Eq, Ord)
 
 prettyStatsDef :: StatsDef a -> T.Text
@@ -126,6 +130,7 @@ data Unit
   | UnitReplications
   | UnitExperimentRepetition
   | UnitBestExperimentRepetitions Int
+  | NoUnit
   deriving (Eq, Ord, Show)
 
 data EvalResults a

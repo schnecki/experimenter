@@ -1,16 +1,17 @@
-{-# LANGUAGE FlexibleContexts    #-}
-{-# LANGUAGE GADTs               #-}
-{-# LANGUAGE OverloadedStrings   #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TemplateHaskell     #-}
-{-# LANGUAGE TypeFamilies        #-}
+{-# LANGUAGE FlexibleContexts     #-}
+{-# LANGUAGE FlexibleInstances    #-}
+{-# LANGUAGE GADTs                #-}
+{-# LANGUAGE OverloadedStrings    #-}
+{-# LANGUAGE ScopedTypeVariables  #-}
+{-# LANGUAGE TemplateHaskell      #-}
+{-# LANGUAGE TypeFamilies         #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Experimenter.Run
     ( DatabaseSetup (..)
     , execExperiments
     , runExperiments
-    , runExperimentsLogging
-    , runExperimentsLoggingNoSql
+    , runExperimentsIO
     ) where
 
 import           Control.Arrow                (first, (***))
@@ -19,9 +20,9 @@ import           Control.Monad                (forM)
 import           Control.Monad.IO.Class
 import           Control.Monad.IO.Unlift
 import           Control.Monad.Logger         (LogLevel (..), LoggingT, MonadLogger,
-                                               defaultLoc, filterLogger, logDebug,
-                                               logError, logInfo, runFileLoggingT,
-                                               runLoggingT, runNoLoggingT,
+                                               WriterLoggingT, defaultLoc, filterLogger,
+                                               logDebug, logError, logInfo,
+                                               runFileLoggingT, runLoggingT, runNoLoggingT,
                                                runStderrLoggingT, runStdoutLoggingT)
 
 import           Control.Monad.Reader
@@ -62,62 +63,47 @@ data DatabaseSetup = DatabaseSetup
 
 type Updated = Bool
 
-execExperiments :: (ExperimentDef a) => DatabaseSetup -> ExperimentSetup -> InputState a -> a -> IO (Experiments a)
-execExperiments db setup inpSt st = snd <$> runExperiments db setup inpSt st
+execExperiments :: (ExperimentDef a) => (ExpM a (Bool, Experiments a) -> IO (Bool, Experiments a)) -> DatabaseSetup -> ExperimentSetup -> InputState a -> a -> IO (Experiments a)
+execExperiments runExpM dbSetup setup initInpSt initSt = snd <$> runExperiments runExpM dbSetup setup initInpSt initSt
 
-runExperiments :: (ExperimentDef a) => DatabaseSetup -> ExperimentSetup -> InputState a -> a -> IO (Bool, Experiments a)
-runExperiments = runner runNoLoggingT runNoLoggingT
+runExperiments :: (ExperimentDef a) => (ExpM a (Bool, Experiments a) -> IO (Bool, Experiments a)) -> DatabaseSetup -> ExperimentSetup -> InputState a -> a -> IO (Bool, Experiments a)
+runExperiments = runner
 
-runExperimentsLogging :: (ExperimentDef a) => DatabaseSetup -> ExperimentSetup -> InputState a -> a -> IO (Bool, Experiments a)
-runExperimentsLogging = runner runStdoutLoggingT runStdoutLoggingT
-
-runExperimentsLoggingNoSql :: (ExperimentDef a) => DatabaseSetup -> ExperimentSetup -> InputState a -> a -> IO (Bool, Experiments a)
-runExperimentsLoggingNoSql = runner (runStdoutLoggingT . filterLogger (\s _ -> s /= "SQL")) runStdoutLoggingT
+runExperimentsIO :: (ExperimentDef a, IO ~ ExpM a) => DatabaseSetup -> ExperimentSetup -> InputState a -> a -> IO (Bool, Experiments a)
+runExperimentsIO = runner id
 
 
-runSqlPersistMPoolLogging :: (IsSqlBackend backend, MonadUnliftIO m, MonadUnliftIO m1) => (m a -> ResourceT m1 a1) -> ReaderT backend m a -> Pool backend -> m1 a1
-runSqlPersistMPoolLogging logFun x pool = runResourceT $ logFun $ runSqlPool x pool
-
-liftSqlPersistMPoolLogging ::
-     (IsPersistBackend backend, MonadUnliftIO m1, MonadIO m2, BaseBackend backend ~ SqlBackend) => (m1 a1 -> ResourceT IO a2) -> ReaderT backend m1 a1 -> Pool backend -> m2 a2
-liftSqlPersistMPoolLogging logFun x pool = liftIO (runSqlPersistMPoolLogging logFun x pool)
-
-runner ::
-     (MonadUnliftIO m, MonadUnliftIO m1, ExperimentDef a1, MonadLogger m, MonadLogger m1)
-  => (m a2 -> t)
-  -> (m1 (Bool, Experiments a1) -> ResourceT IO a2)
-  -> DatabaseSetup
-  -> ExperimentSetup
-  -> InputState a1
-  -> a1
-  -> t
-runner logFunDb logFunRun dbSetup setup initInpSt initSt =
-  logFunDb $
-  withPostgresqlPool (connectionString dbSetup) (parallelConnections dbSetup) $
-  liftSqlPersistMPoolLogging logFunRun $ do
+runner :: (ExperimentDef a) => (ExpM a (Bool, Experiments a) -> IO (Bool, Experiments a)) -> DatabaseSetup -> ExperimentSetup -> InputState a -> a -> IO (Bool, Experiments a)
+runner runExpM dbSetup setup initInpSt initSt = do
+  runStderrLoggingT $ withPostgresqlPool (connectionString dbSetup) (parallelConnections dbSetup) $ liftSqlPersistMPool $
     runMigration migrateAll
-    loadExperiments setup initInpSt initSt >>= checkUniqueParamNames >>= runExperiment
-  where runExperiment exps = do
-          (anyChange, exps') <- continueExperiments exps
-          if anyChange
-            then first (const True) <$> runExperiment exps'
-            else return (anyChange, exps')
-        checkUniqueParamNames exps = do
-          let paramNames = map parameterName (view experimentsParameters exps)
-          when (any ((>1) . length) (L.group $ L.sort paramNames)) $ error "Parameter names must be unique!"
-          return exps
+  runExpM $ runStderrLoggingT $ withPostgresqlConn (connectionString dbSetup) $ \backend ->
+    flip runSqlConn backend $ loadExperiments setup initInpSt initSt >>= checkUniqueParamNames >>= runExperiment
+
+runExperiment :: (ExperimentDef a) => Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Bool, Experiments a)
+runExperiment exps = do
+  (anyChange, exps') <- continueExperiments exps
+  if anyChange
+    then first (const True) <$> runExperiment exps'
+    else return (anyChange, exps')
+
+checkUniqueParamNames :: (Monad m) => Experiments a -> m (Experiments a)
+checkUniqueParamNames exps = do
+  let paramNames = map parameterName (view experimentsParameters exps)
+  when (any ((> 1) . length) (L.group $ L.sort paramNames)) $ error "Parameter names must be unique!"
+  return exps
 
 
-continueExperiments :: (ExperimentDef a, MonadLogger m, MonadIO m) => Experiments a -> ReaderT SqlBackend m (Bool, Experiments a)
+continueExperiments :: (ExperimentDef a) => Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Bool, Experiments a)
 continueExperiments exp = do
-  $(logInfo) $ "Processing experiment with ID " <> tshow (unSqlBackendKey $ unExpsKey $ exp ^. experimentsKey)
+  $(logDebug) $ "Processing experiment with ID " <> tshow (unSqlBackendKey $ unExpsKey $ exp ^. experimentsKey)
   liftIO $ hFlush stdout
   let exps = exp ^. experiments
   rands <- liftIO $ mkRands exps
   newExps <- mkNewExps exp exps
   let expsList = exps ++ newExps
-  $(logInfo) $ "Number of experiments loaded: " <> tshow (length expsList)
-  $(logInfo) $ "Number of new experiments: " <> tshow (length newExps)
+  $(logDebug) $ "Number of experiments loaded: " <> tshow (length exps)
+  $(logDebug) $ "Number of new experiments: " <> tshow (length newExps)
   expRes <- mapM (continueExperiment rands exp) expsList
   let updated = any fst expRes
       res = map snd expRes
@@ -131,7 +117,7 @@ continueExperiments exp = do
     mkParamSetting :: Experiments a -> ParameterSetup a -> ParameterSetting a
     mkParamSetting exp (ParameterSetup name setter getter mod bnds) = ParameterSetting name (runPut $ put $ getter (exp ^. experimentsInitialState))
     initParams exp = map (mkParamSetting exp) (view experimentsParameters exp)
-    mkNewExps :: (MonadLogger m, ExperimentDef a, MonadIO m) => Experiments a -> [Experiment a] -> ReaderT SqlBackend m [Experiment a]
+    mkNewExps :: (ExperimentDef a) => Experiments a -> [Experiment a] -> ReaderT SqlBackend (LoggingT (ExpM a)) [Experiment a]
     mkNewExps exp [] = do
       $(logDebug) $ "Initializing new experiments..."
       startTime <- liftIO getCurrentTime
@@ -174,7 +160,7 @@ continueExperiments exp = do
                (L.nub pValsIds))
           pExists
       return $ map fst $ filter (not . snd) $ zip paramSettings paramSettingExits
-    modifyParam :: (MonadLogger m, MonadIO m) => Experiments a -> ParameterSetup a -> ReaderT SqlBackend m [ParameterSetting a]
+    modifyParam :: (MonadIO m) => Experiments a -> ParameterSetup a -> ReaderT SqlBackend m [ParameterSetting a]
     modifyParam exps (ParameterSetup _ _ _ Nothing _) = return []
     modifyParam exps (ParameterSetup n setter getter (Just modifier) mBounds) = do
       pairs <-
@@ -219,13 +205,13 @@ deleteExperimentResult :: (MonadIO m) => ExperimentResult a -> ReaderT SqlBacken
 deleteExperimentResult (ExperimentResult k _ _ repls) = mapM_ deleteReplicationResult repls >> deleteCascade k
 
 -- | Loads parameters of an experiment into the initial states of the given experiments variable.
-loadParameters  :: (ExperimentDef a, MonadLogger m) => Experiments a -> Experiment a  -> ReaderT SqlBackend m (Experiments a)
+loadParameters  :: (ExperimentDef a) => Experiments a -> Experiment a  -> ReaderT SqlBackend (LoggingT (ExpM a)) (Experiments a)
 loadParameters exps exp = foldM setParam exps (exp ^. parameterSetup)
   where
     setParam e (ParameterSetting n bs) =
       case L.find (\(ParameterSetup name _ _ _ _) -> name == n) parameterSetups of
         Nothing -> do
-          $(logError) $ "Could not find parameter with name " <> n <> " in the current parameter setting. Thus it will not be modified!"
+          $(logDebug) $ "Could not find parameter with name " <> n <> " in the current parameter setting. Thus it will not be modified!"
           return e
         Just (ParameterSetup _ setter _ _ _) ->
           case runGet S.get bs of
@@ -241,12 +227,12 @@ loadParameters exps exp = foldM setParam exps (exp ^. parameterSetup)
 type Rands = ([StdGen],[StdGen],[StdGen]) -- ^ Preparation, Warm Up and Evaluation random generators
 
 
-continueExperiment :: (ExperimentDef a, MonadLogger m, MonadIO m) => Rands -> Experiments a -> Experiment a  -> ReaderT SqlBackend m (Updated, Experiment a)
+continueExperiment :: (ExperimentDef a) => Rands -> Experiments a -> Experiment a  -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, Experiment a)
 continueExperiment rands exps exp = do
   -- TODO: parallelisation
   exps' <- loadParameters exps exp -- loads parameters into the init state
   expResList <- getExpRes exps' (exp ^. experimentResults) >>= truncateExperiments repetits
-  $(logInfo) $ "Number of experiment results loaded: " <> tshow (length expResList)
+  $(logDebug) $ "Number of experiment results loaded: " <> tshow (length expResList)
   expRes <- mapM (runExperimentResult rands exps') expResList
   let updated = any fst expRes
       res = map snd expRes
@@ -270,7 +256,7 @@ continueExperiment rands exps exp = do
 
     truncateExperiments nr xs = do
       let dels = drop nr xs
-      unless (null dels) $ $(logInfo) $ "Number of experiment repetitions being deleted " <> tshow (length dels)
+      unless (null dels) $ $(logDebug) $ "Number of experiment repetitions being deleted " <> tshow (length dels)
       mapM_ deleteExperimentResult dels
       unless (null dels) transactionSave
       return $ take nr xs
@@ -286,7 +272,7 @@ newResultData g repResType st inpSt = do
   return $ ResultData k time Nothing g Nothing [] [] st Nothing inpSt Nothing
 
 
-runExperimentResult :: (ExperimentDef a, MonadLogger m, MonadIO m) => Rands -> Experiments a -> ExperimentResult a -> ReaderT SqlBackend m (Updated, ExperimentResult a)
+runExperimentResult :: (ExperimentDef a) => Rands -> Experiments a -> ExperimentResult a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, ExperimentResult a)
 runExperimentResult rands@(prepRands,_,_) exps expRes = do
   (prepUpdated, prepRes) <- runPreparation (prepRands !! (expRes^.repetitionNumber-1)) exps expResId (expRes ^. preparationResults)
   repsDone <-
@@ -308,8 +294,8 @@ runExperimentResult rands@(prepRands,_,_) exps expRes = do
     expResId = expRes ^. experimentResultKey
     getRepRes :: (MonadLogger m, MonadIO m) => Experiments a -> [ReplicationResult a] -> ReaderT SqlBackend m [ReplicationResult a]
     getRepRes exps repsDone = do
-      $(logInfo) $ "Number of loaded replications: " <> tshow (length repsDone)
-      $(logInfo) $ "Number of new replications: " <> tshow (exps ^. experimentsSetup . expsSetupEvaluationReplications - length repsDone)
+      $(logDebug) $ "Number of loaded replications: " <> tshow (length repsDone)
+      $(logDebug) $ "Number of new replications: " <> tshow (exps ^. experimentsSetup . expsSetupEvaluationReplications - length repsDone)
       (repsDone ++) <$> forM
         [length repsDone + 1 .. exps ^. experimentsSetup . expsSetupEvaluationReplications]
         (\nr -> do
@@ -318,8 +304,7 @@ runExperimentResult rands@(prepRands,_,_) exps expRes = do
 
 type RepetitionNr = Int
 
-runReplicationResult ::
-     (ExperimentDef a, MonadLogger m, MonadIO m) => Rands -> Experiments a -> RepetitionNr -> ReplicationResult a -> ReaderT SqlBackend m (Updated, ReplicationResult a)
+runReplicationResult :: (ExperimentDef a) => Rands -> Experiments a -> RepetitionNr -> ReplicationResult a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, ReplicationResult a)
 runReplicationResult (_, wmUpRands, replRands) exps repetNr repRes = do
   (wmUpChange, mWmUp) <- runWarmUp (wmUpRands !! ((repetNr - 1) * replicats + (repRes ^. replicationNumber-1))) exps (repRes ^. replicationResultKey) (repRes ^. warmUpResults)
   mEval <-
@@ -334,8 +319,7 @@ runReplicationResult (_, wmUpRands, replRands) exps repetNr repRes = do
     replicats = exps ^. experimentsSetup . expsSetupEvaluationReplications
 
 
-runPreparation ::
-     (ExperimentDef a, MonadLogger m, MonadIO m) => StdGen -> Experiments a -> Key ExpResult -> Maybe (ResultData a) -> ReaderT SqlBackend m (Updated, Maybe (ResultData a))
+runPreparation :: (ExperimentDef a) => StdGen -> Experiments a -> Key ExpResult -> Maybe (ResultData a) -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, Maybe (ResultData a))
 runPreparation g exps expResId mResData = do
   mResData' <-
     if delNeeded
@@ -356,7 +340,7 @@ runPreparation g exps expResId mResData = do
     run rD = ((delNeeded ||) *** Just) <$> runResultData prepSteps (Prep expResId) rD
 
 
-runWarmUp :: (ExperimentDef a, MonadLogger m, MonadIO m) => StdGen -> Experiments a -> Key RepResult -> Maybe (ResultData a) -> ReaderT SqlBackend m (Updated, Maybe (ResultData a))
+runWarmUp :: (ExperimentDef a) => StdGen -> Experiments a -> Key RepResult -> Maybe (ResultData a) -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, Maybe (ResultData a))
 runWarmUp g exps repResId mResData = do
   mResData' <-
     if delNeeded
@@ -378,13 +362,13 @@ runWarmUp g exps repResId mResData = do
 
 
 runEval ::
-     (ExperimentDef a, MonadLogger m, MonadIO m)
+     (ExperimentDef a)
   => StdGen
   -> Experiments a
   -> Updated
   -> Key RepResult
   -> Maybe (ResultData a)
-  -> ReaderT SqlBackend m (Updated, Maybe (ResultData a))
+  -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, Maybe (ResultData a))
 runEval g exps warmUpUpdated repResId mResData = do
   mResData' <-
     if delNeeded
@@ -392,7 +376,7 @@ runEval g exps warmUpUpdated repResId mResData = do
       else return mResData
   if runNeeded
     then do
-      $(logInfo) $ "A run is needed for replication with ID " <> tshow (unSqlBackendKey $ unRepResultKey repResId)
+      $(logDebug) $ "A run is needed for replication with ID " <> tshow (unSqlBackendKey $ unRepResultKey repResId)
       maybe new return mResData' >>= run
     else return (delNeeded, mResData')
   where
@@ -434,7 +418,7 @@ deleteResultData repResType =
     del unique = getBy unique >>= mapM_ (deleteCascade . entityKey)
 
 
-runResultData :: (ExperimentDef a, MonadLogger m, MonadIO m) => Int -> RepResultType -> ResultData a -> ReaderT SqlBackend m (Updated, ResultData a)
+runResultData :: (ExperimentDef a) => Int -> RepResultType -> ResultData a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, ResultData a)
 runResultData len repResType resData = do
   let isNew = null (resData ^. results)
   let st = fromMaybe (resData ^. startState) (resData ^. endState)
@@ -479,12 +463,12 @@ runResultData len repResType resData = do
     upd _ _ = error "Unexpected update combination. This is a bug, please report it!"
 
 
-run :: (ExperimentDef a, MonadIO m, MonadLogger m)
+run :: (ExperimentDef a)
   => (StdGen, a, InputState a, [Input a], [Measure])
   -> Int
-  -> ReaderT SqlBackend m (StdGen, a, InputState a, [Input a], [Measure])
+  -> ReaderT SqlBackend (LoggingT (ExpM a)) (StdGen, a, InputState a, [Input a], [Measure])
 run (g, st, stInp, inpVals, res) period = do
   let (randGen, g') = split g
-  (inpVal', inpSt') <- lift $ generateInput randGen st stInp period
-  (res', st') <- lift $ runStep st inpVal' period
+  (inpVal', inpSt') <- lift $ lift $ generateInput randGen st stInp period
+  (res', st') <- lift $ lift $ runStep st inpVal' period
   return (g', st', inpSt', Input period inpVal' : inpVals, Measure period res' : res)

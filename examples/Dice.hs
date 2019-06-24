@@ -28,6 +28,7 @@ instance Serialize Dice where
 
 
 instance ExperimentDef Dice where
+  type ExpM Dice = IO
   type InputValue Dice = ()
   type InputState Dice = ()
   type Serializable Dice = Dice
@@ -70,7 +71,7 @@ main :: IO ()
 main = do
   let databaseSetup = DatabaseSetup "host=localhost dbname=experimenter user=schnecki password= port=5432" 10
   g <- newStdGen
-  (changed, res) <- runExperimentsLoggingNoSql databaseSetup setup () (Dice g (Just 0.2))
+  (changed, res) <- runExperimentsIO databaseSetup setup () (Dice g (Just 0.2))
   putStrLn $ "Any change: " ++ show changed
   let evals = [ Mean OverExperimentRepetitions (Of "draw") `Named` "Mean Repetitions"
               , StdDev OverExperimentRepetitions (Of "draw") `Named` "StdDev Repetitions"

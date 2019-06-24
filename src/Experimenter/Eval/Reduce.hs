@@ -2,7 +2,8 @@
 
 module Experimenter.Eval.Reduce
     ( reduceUnary
-    , reduceBinary
+    , reduceUnaryOf
+    , reduceBinaryOf
     , transpose
     ) where
 
@@ -49,14 +50,53 @@ flattenStats (Id (Stats e)) = e
 flattenStats e              = e
 
 
-reduceBinary :: Of a -> EvalResults a -> EvalResults a -> EvalResults a
-reduceBinary Add{} (EvalValue tp1 u1 _ _ val1) (EvalValue tp2 u2 _ _ val2) = checkUnitTypes "Add" u1 u2 $ EvalReducedValue (Id $ Stats tp1 `Add` Stats tp2) u1 (val1 + val2)
-reduceBinary Sub{} (EvalValue tp1 u1 _ _ val1) (EvalValue tp2 u2 _ _ val2) = checkUnitTypes "Sub" u1 u2 $ EvalReducedValue (Id $ Stats tp1 `Sub` Stats tp2) u1 (val1 - val2)
-reduceBinary Mult{} (EvalValue tp1 u1 _ _ val1) (EvalValue tp2 u2 _ _ val2) = checkUnitTypes "Mult" u1 u2 $ EvalReducedValue (Id $ Stats tp1 `Mult` Stats tp2) u1 (val1 * val2)
-reduceBinary Div{} (EvalValue tp1 u1 _ _ val1) (EvalValue tp2 u2 _ _ val2) = checkUnitTypes "Div" u1 u2 $ EvalReducedValue (Id $ Stats tp1 `Div` Stats tp2) u1 (val1 / val2)
-reduceBinary eval _ _ = error $ "unexpected binary reduce: " ++ show eval
+reduceUnaryOf :: Of a -> EvalResults a -> EvalResults a
+reduceUnaryOf First {} (EvalVector tp unit vals) =
+  case vals of
+    (EvalVector {}:_)          -> EvalVector (Id $ First $ Stats tp) unit [head vals]
+    (EvalValue _ _ _ _ v:_)    -> EvalReducedValue (Id $ First $ Stats tp) unit v
+    (EvalReducedValue _ _ v:_) -> EvalReducedValue (Id $ First $ Stats tp) unit v
+    []                         -> error "empty elements in reduceUnaryOf First{}"
+    _                          -> error "call of First on value"
+reduceUnaryOf Last {} (EvalVector tp unit vals) =
+  case vals of
+ (EvalVector {}:_)          -> EvalVector (Id $ First $ Stats tp) unit [last vals]
+ (EvalValue _ _ _ _ v:_)    -> EvalReducedValue (Id $ First $ Stats tp) unit ((^?! evalY) $ last vals)
+ (EvalReducedValue _ _ v:_) -> EvalReducedValue (Id $ First $ Stats tp) unit ((^?! evalValue) $ last vals)
+ []                         -> error "empty elements in reduceUnaryOf Last{}"
+reduceUnaryOf (EveryXthElem nr _) (EvalVector tp unit vals) =
+  case vals of
+    (EvalVector {}:_)          -> EvalVector (Id $ First $ Stats tp) unit (extractEvery nr vals)
+    (EvalValue _ _ _ _ v:_)    -> EvalVector (Id $ First $ Stats tp) unit [(^?! evalY) $ last vals]
+    (EvalReducedValue _ _ v:_) -> EvalVector (Id $ First $ Stats tp) unit [(^?! evalValue) $ last vals]
+    []                         -> error "empty elements in reduceUnaryOf Last{}"
+  where
+    extractEvery m = map snd . filter (\(x, _) -> mod x m == 0) . zip [1 ..]
+reduceUnaryOf Length {} (EvalVector tp unit vals) = EvalReducedValue (Id $ Length $ Stats $ tp) NoUnit (fromIntegral $ length vals)
+reduceUnaryOf eval dt = error $ "unexpected unary reduce: " ++ show eval ++ " on " ++ show dt
+
+reduceBinaryOf :: Of a -> EvalResults a -> EvalResults a -> EvalResults a
+reduceBinaryOf Add{}  (EvalValue tp1 u1 _ _ val1) (EvalValue tp2 u2 _ _ val2)       = checkUnitTypes "Add" u1 u2 $ EvalReducedValue (Id $ Stats tp1 `Add` Stats tp2) u1 (val1 + val2)
+reduceBinaryOf Sub{}  (EvalValue tp1 u1 _ _ val1) (EvalValue tp2 u2 _ _ val2)       = checkUnitTypes "Sub" u1 u2 $ EvalReducedValue (Id $ Stats tp1 `Sub` Stats tp2) u1 (val1 - val2)
+reduceBinaryOf Mult{} (EvalValue tp1 u1 _ _ val1) (EvalValue tp2 u2 _ _ val2)       = checkUnitTypes "Mult" u1 u2 $ EvalReducedValue (Id $ Stats tp1 `Mult` Stats tp2) u1 (val1 * val2)
+reduceBinaryOf Div{}  (EvalValue tp1 u1 _ _ val1) (EvalValue tp2 u2 _ _ val2)       = checkUnitTypes "Div" u1 u2 $ EvalReducedValue (Id $ Stats tp1 `Div` Stats tp2) u1 (val1 / val2)
+reduceBinaryOf Add{}  (EvalReducedValue tp1 u1 val1) (EvalReducedValue tp2 u2 val2) = checkUnitTypes "Add" u1 u2 $ EvalReducedValue (Id $ Stats tp1 `Add` Stats tp2) u1 (val1 + val2)
+reduceBinaryOf Sub{}  (EvalReducedValue tp1 u1 val1) (EvalReducedValue tp2 u2 val2) = checkUnitTypes "Sub" u1 u2 $ EvalReducedValue (Id $ Stats tp1 `Sub` Stats tp2) u1 (val1 - val2)
+reduceBinaryOf Mult{} (EvalReducedValue tp1 u1 val1) (EvalReducedValue tp2 u2 val2) = checkUnitTypes "Mult" u1 u2 $ EvalReducedValue (Id $ Stats tp1 `Mult` Stats tp2) u1 (val1 * val2)
+reduceBinaryOf Div{}  (EvalReducedValue tp1 u1 val1) (EvalReducedValue tp2 u2 val2) = checkUnitTypes "Div" u1 u2 $ EvalReducedValue (Id $ Stats tp1 `Div` Stats tp2) u1 (val1 / val2)
+reduceBinaryOf Add{}  (EvalValue tp1 u1 _ _ val1) (EvalReducedValue tp2 u2 val2)    = checkUnitTypes "Add" u1 u2 $ EvalReducedValue (Id $ Stats tp1 `Add` Stats tp2) u1 (val1 + val2)
+reduceBinaryOf Sub{}  (EvalValue tp1 u1 _ _ val1) (EvalReducedValue tp2 u2 val2)    = checkUnitTypes "Sub" u1 u2 $ EvalReducedValue (Id $ Stats tp1 `Sub` Stats tp2) u1 (val1 - val2)
+reduceBinaryOf Mult{} (EvalValue tp1 u1 _ _ val1) (EvalReducedValue tp2 u2 val2)    = checkUnitTypes "Mult" u1 u2 $ EvalReducedValue (Id $ Stats tp1 `Mult` Stats tp2) u1 (val1 * val2)
+reduceBinaryOf Div{}  (EvalValue tp1 u1 _ _ val1) (EvalReducedValue tp2 u2 val2)    = checkUnitTypes "Div" u1 u2 $ EvalReducedValue (Id $ Stats tp1 `Div` Stats tp2) u1 (val1 / val2)
+reduceBinaryOf Add{}  (EvalValue tp1 u1 _ _ val1) (EvalReducedValue tp2 u2 val2)    = checkUnitTypes "Add" u1 u2 $ EvalReducedValue (Id $ Stats tp1 `Add` Stats tp2) u1 (val1 + val2)
+reduceBinaryOf Sub{}  (EvalValue tp1 u1 _ _ val1) (EvalReducedValue tp2 u2 val2)    = checkUnitTypes "Sub" u1 u2 $ EvalReducedValue (Id $ Stats tp1 `Sub` Stats tp2) u1 (val1 - val2)
+reduceBinaryOf Mult{} (EvalValue tp1 u1 _ _ val1) (EvalReducedValue tp2 u2 val2)    = checkUnitTypes "Mult" u1 u2 $ EvalReducedValue (Id $ Stats tp1 `Mult` Stats tp2) u1 (val1 * val2)
+reduceBinaryOf Div{}  (EvalValue tp1 u1 _ _ val1) (EvalReducedValue tp2 u2 val2)    = checkUnitTypes "Div" u1 u2 $ EvalReducedValue (Id $ Stats tp1 `Div` Stats tp2) u1 (val1 / val2)
+
+reduceBinaryOf eval _ _ = error $ "unexpected binary reduce: " ++ show eval
 
 
+checkUnitTypes :: (Eq a, Show a) => String -> a -> a -> p -> p
 checkUnitTypes f a b c | a == b = c
                        | otherwise = error $ f <> " on different units: " <> show a <> ", " <> show b
 

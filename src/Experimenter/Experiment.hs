@@ -11,13 +11,17 @@ import           Experimenter.Parameter
 import           Experimenter.StepResult
 
 import           Control.Monad.IO.Class  (MonadIO)
+import           Control.Monad.IO.Unlift
+import           Control.Monad.Logger
 import           Data.Serialize          (Serialize)
 import           System.Random
 
 type Period = Int
 
 
-class (Serialize (InputValue a), Serialize (InputState a), Serialize (Serializable a)) => ExperimentDef a where
+class (MonadUnliftIO (ExpM a), Serialize (InputValue a), Serialize (InputState a), Serialize (Serializable a)) => ExperimentDef a where
+
+  type ExpM a :: (* -> *)
 
   type Serializable a :: *      -- ^ Type that is used to serialize the current state.
 
@@ -35,10 +39,10 @@ class (Serialize (InputValue a), Serialize (InputState a), Serialize (Serializab
 
   -- ^ Generate some input values and possibly modify state. This function can be used to change the state. It is called
   -- before `runStep` and its output is used to call `runStep`.
-  generateInput :: (MonadIO m) => StdGen -> a -> InputState a -> Period -> m (InputValue a, InputState a)
+  generateInput :: StdGen -> a -> InputState a -> Period -> (ExpM a) (InputValue a, InputState a)
 
   -- ^ Run a step of the environment and return new state and result.
-  runStep :: (MonadIO m) => a -> InputValue a -> Period -> m ([StepResult], a)
+  runStep :: a -> InputValue a -> Period -> (ExpM a) ([StepResult], a)
 
   -- ^ Provides the parameter setting.
   parameters :: a -> [ParameterSetup a]

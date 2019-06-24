@@ -85,13 +85,16 @@ genResultData exp eval repl =
 evalOf :: Experiment a -> Of a -> ResultData a -> IO (EvalResults a)
 evalOf exp eval resData =
   case eval of
-    Of name -> return $ EvalVector (Id $ Of name) UnitPeriods $  sortBy (compare `on` (^?! evalX)) $ map (fromMeasure name) (resData ^. results)
-    Stats def -> genExperiment exp def
-    Div eval1 eval2 -> reduceBinary eval <$> evalOf exp eval1 resData <*> evalOf exp eval2 resData
-    Add eval1 eval2 -> reduceBinary eval <$> evalOf exp eval1 resData <*> evalOf exp eval2 resData
-    Sub eval1 eval2 -> reduceBinary eval <$> evalOf exp eval1 resData <*> evalOf exp eval2 resData
-    Mult eval1 eval2 -> reduceBinary eval <$> evalOf exp eval1 resData <*> evalOf exp eval2 resData
-
+    Of name              -> return $ EvalVector (Id $ Of name) UnitPeriods $  sortBy (compare `on` (^?! evalX)) $ map (fromMeasure name) (resData ^. results)
+    Stats def            -> genExperiment exp def
+    Div eval1 eval2      -> reduceBinaryOf eval <$> evalOf exp eval1 resData <*> evalOf exp eval2 resData
+    Add eval1 eval2      -> reduceBinaryOf eval <$> evalOf exp eval1 resData <*> evalOf exp eval2 resData
+    Sub eval1 eval2      -> reduceBinaryOf eval <$> evalOf exp eval1 resData <*> evalOf exp eval2 resData
+    Mult eval1 eval2     -> reduceBinaryOf eval <$> evalOf exp eval1 resData <*> evalOf exp eval2 resData
+    First eval'          -> reduceUnaryOf eval <$> evalOf exp eval' resData
+    Last eval'           -> reduceUnaryOf eval <$> evalOf exp eval' resData
+    EveryXthElem _ eval' -> reduceUnaryOf eval <$> evalOf exp eval' resData
+    Length eval'         -> reduceUnaryOf eval <$> evalOf exp eval' resData
 
 fromMeasure :: T.Text -> Measure -> EvalResults a
 fromMeasure name (Measure p res) = case find ((==name) . view resultName) res of
