@@ -67,12 +67,12 @@ reduceUnaryOf Last {} (EvalVector tp unit vals) =
 reduceUnaryOf (EveryXthElem nr _) (EvalVector tp unit vals) =
   case vals of
     (EvalVector {}:_)          -> EvalVector (Id $ First $ Stats tp) unit (extractEvery nr vals)
-    (EvalValue _ _ _ _ v:_)    -> EvalVector (Id $ First $ Stats tp) unit [(^?! evalY) $ last vals]
-    (EvalReducedValue _ _ v:_) -> EvalVector (Id $ First $ Stats tp) unit [(^?! evalValue) $ last vals]
+    (EvalValue _ _ _ _ v:_)    -> EvalReducedValue (Id $ First $ Stats tp) unit ((^?! evalY) $ last vals)
+    (EvalReducedValue _ _ v:_) -> EvalReducedValue (Id $ First $ Stats tp) unit ((^?! evalValue) $ last vals)
     []                         -> error "empty elements in reduceUnaryOf Last{}"
   where
     extractEvery m = map snd . filter (\(x, _) -> mod x m == 0) . zip [1 ..]
-reduceUnaryOf Length {} (EvalVector tp unit vals) = EvalReducedValue (Id $ Length $ Stats $ tp) NoUnit (fromIntegral $ length vals)
+reduceUnaryOf Length {} (EvalVector tp unit vals) = EvalReducedValue (Id $ Length $ Stats tp) NoUnit (fromIntegral $ length vals)
 reduceUnaryOf eval dt = error $ "unexpected unary reduce: " ++ show eval ++ " on " ++ show dt
 
 reduceBinaryOf :: Of a -> EvalResults a -> EvalResults a -> EvalResults a
