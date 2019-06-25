@@ -412,16 +412,17 @@ runEval ::
   -> Maybe (ResultData a)
   -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, Maybe (ResultData a))
 runEval g exps warmUpUpdated repResId initSt initInpSt mResData = do
-  $(logInfo) "Starting evaluation..."
   mResData' <-
     if delNeeded
       then deleteResultData (Rep repResId) >> return Nothing
       else return mResData
   if runNeeded
     then do
-      $(logInfo) $ "A run is needed for replication with ID " <> tshow (unSqlBackendKey $ unRepResultKey repResId)
+      $(logInfo) $ "An evaluation run is needed for replication with ID " <> tshow (unSqlBackendKey $ unRepResultKey repResId)
       maybe new return mResData' >>= run
-    else return (delNeeded, mResData')
+    else do
+      $(logInfo) $ "No evaluation run needed for replication with ID " <> tshow (unSqlBackendKey $ unRepResultKey repResId) <> ". All needed data comes from the DB!"
+      return (delNeeded, mResData')
   where
     delNeeded = warmUpUpdated || maybe False (\r -> evalSteps < length (r ^. results)) mResData
     runNeeded = maybe (evalSteps > 0) (\r -> evalSteps > length (r ^. results)) mResData
