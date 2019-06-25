@@ -240,7 +240,7 @@ continueExperiment rands exps exp = do
   exps' <- loadParameters exps exp -- loads parameters into the init state
   expResList <- getExpRes exps' (exp ^. experimentResults) >>= truncateExperiments repetits
   $(logDebug) $ "Number of experiment results loaded: " <> tshow (length expResList)
-  let dropPrep = or (map (^. parameterDropPrepeationPhase) (exp ^. parameterSetup) )
+  let dropPrep = any (^. parameterDropPrepeationPhase) (exp ^. parameterSetup)
   expRes <- mapM (runExperimentResult dropPrep rands exps') expResList
   let updated = any fst expRes
       res = map snd expRes
@@ -283,9 +283,11 @@ newResultData g repResType st inpSt = do
 type DropPreparation = Bool
 
 runExperimentResult :: (ExperimentDef a) => DropPreparation -> Rands -> Experiments a -> ExperimentResult a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, ExperimentResult a)
-runExperimentResult dropPrep rands@(prepRands,_,_) exps expRes = do
-
-  (prepUpdated, prepRes) <- runPreparation (prepRands !! (expRes^.repetitionNumber-1)) exps expResId (expRes ^. preparationResults)
+runExperimentResult dropPrep rands@(prepRands, _, _) exps expRes = do
+  (prepUpdated, prepRes) <-
+    if dropPrep
+      then return (False, Nothing)
+      else runPreparation (prepRands !! (expRes ^. repetitionNumber - 1)) exps expResId (expRes ^. preparationResults)
   repsDone <-
     if prepUpdated
       then do
@@ -296,7 +298,7 @@ runExperimentResult dropPrep rands@(prepRands,_,_) exps expRes = do
   let initSt = fromMaybe (exps ^. experimentsInitialState) (join $ fmap (view endState) prepRes)
       initInpSt = fromMaybe (exps ^. experimentsInitialInputState) (join $ fmap (view endInputState) prepRes)
   let runRepl e repRess = do
-        res <- runReplicationResult rands e (expRes^.repetitionNumber) initSt initInpSt repRess
+        res <- runReplicationResult rands e (expRes ^. repetitionNumber) initSt initInpSt repRess
         transactionSave
         return res
   repRes <- getRepRes exps repsDone >>= mapM (runRepl exps)
@@ -309,11 +311,12 @@ runExperimentResult dropPrep rands@(prepRands,_,_) exps expRes = do
     getRepRes exps repsDone = do
       $(logDebug) $ "Number of loaded replications: " <> tshow (length repsDone)
       $(logDebug) $ "Number of new replications: " <> tshow (exps ^. experimentsSetup . expsSetupEvaluationReplications - length repsDone)
-      (repsDone ++) <$> forM
-        [length repsDone + 1 .. exps ^. experimentsSetup . expsSetupEvaluationReplications]
-        (\nr -> do
-           kRepRes <- insert $ RepResult (expRes ^. experimentResultKey) nr
-           return $ ReplicationResult kRepRes nr Nothing Nothing)
+      (repsDone ++) <$>
+        forM
+          [length repsDone + 1 .. exps ^. experimentsSetup . expsSetupEvaluationReplications]
+          (\nr -> do
+             kRepRes <- insert $ RepResult (expRes ^. experimentResultKey) nr
+             return $ ReplicationResult kRepRes nr Nothing Nothing)
 
 
 runPreparation :: (ExperimentDef a) => StdGen -> Experiments a -> Key ExpResult -> Maybe (ResultData a) -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, Maybe (ResultData a))
