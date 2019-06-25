@@ -47,26 +47,19 @@ class (MonadUnliftIO (ExpM a), Serialize (InputValue a), Serialize (InputState a
   -- ^ Provides the parameter setting.
   parameters :: a -> [ParameterSetup a]
 
+  -- ^ Function to call on the state after the preparation, that is before the warm-up, or in case of no warm-up phase,
+  -- the evaluation phase is started. This function can be useful to set different parameters for the evaluation phase
+  -- as compared to the preparation (e.g. learning) phase. The default implementation is `id`.
+  afterPreparationPhase :: a -> a
+  default afterPreparationPhase :: a -> a
+  afterPreparationPhase = id
+
+
   -- ^ This function defines how to find experiments that can be resumed. Note that the experiments name is always a
   -- comparison factor, that is, experiments with different names are unequal.
   equalExperiments :: (a, InputState a) -> (a, InputState a) -> Bool
   default equalExperiments :: (Eq a, Eq (InputState a)) => (a, InputState a) -> (a, InputState a) -> Bool
   equalExperiments x y = x == y
-
-  -- -- ^ Calculate the objective
-  -- objective :: Maybe (Objective a)
-  -- default objective :: Maybe (Objective a)
-  -- objective = Nothing
-
-
--- data Objective a
---   = MaxMean (Over a) (Of a)
---   | MaxStdDev (Over a) (Of a)
---   | MaxSum (Over a) (Of a)
---   | MinMean (Over a) (Of a)
---   | MinStdDev (Over a) (Of a)
---   | MinSum (Over a) (Of a)
---   deriving (Show)
 
 
 -- fromObjective :: Objective a -> StatsDef a

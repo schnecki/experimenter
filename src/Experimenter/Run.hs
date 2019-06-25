@@ -295,8 +295,9 @@ runExperimentResult dropPrep rands@(prepRands, _, _) exps expRes = do
         return []
       else return (expRes ^. evaluationResults)
   transactionSave
-  let initSt = fromMaybe (exps ^. experimentsInitialState) (join $ fmap (view endState) prepRes)
-      initInpSt = fromMaybe (exps ^. experimentsInitialInputState) (join $ fmap (view endInputState) prepRes)
+
+  let initSt = afterPreparationPhase $ fromMaybe (exps ^. experimentsInitialState) (view endState =<< prepRes)
+      initInpSt = fromMaybe (exps ^. experimentsInitialInputState) (view endInputState =<< prepRes)
   let runRepl e repRess = do
         res <- runReplicationResult rands e (expRes ^. repetitionNumber) initSt initInpSt repRess
         transactionSave
@@ -356,8 +357,8 @@ runReplicationResult ::
   -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, ReplicationResult a)
 runReplicationResult (_, wmUpRands, replRands) exps repetNr initSt initInpSt repRes = do
   (wmUpChange, mWmUp) <- runWarmUp (wmUpRands !! ((repetNr - 1) * replicats + (repRes ^. replicationNumber - 1))) exps (repRes ^. replicationResultKey) initSt initInpSt (repRes ^. warmUpResults)
-  let initStEval = fromMaybe initSt (join $ fmap (view endState) mWmUp)
-      initInpStEval = fromMaybe initInpSt (join $ fmap (view endInputState) mWmUp)
+  let initStEval = fromMaybe initSt (view endState =<< mWmUp)
+      initInpStEval = fromMaybe initInpSt (view endInputState =<< mWmUp)
   mEval <-
     if wmUpChange
       then deleteResultData (Rep repResId) >> return Nothing
