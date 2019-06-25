@@ -57,9 +57,9 @@ fakeParam = ParameterSetup "fake" (\mD (Dice g _) -> Dice g mD) (\(Dice _ mD) ->
 
 setup :: ExperimentSetup
 setup = ExperimentSetup
-  { _experimentBaseName         = "dice param 10"
+  { _experimentBaseName         = "dice param 11"
   , _experimentRepetitions      =  2
-  , _preparationSteps           =  0
+  , _preparationSteps           =  100
   , _evaluationWarmUpSteps      =  0
   , _evaluationSteps            =  10
   , _evaluationReplications     =  2
@@ -81,5 +81,5 @@ main = do
               , Id (Of "draw") `Named` "draws 2"
               ]
   evalRes <- genEvals res evals
-  print (view evalsResults evalRes)
+  -- print (view evalsResults evalRes)
   writeAndCompileLatex evalRes

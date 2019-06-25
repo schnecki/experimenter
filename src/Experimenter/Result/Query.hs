@@ -15,15 +15,13 @@ import           Data.ByteString             (ByteString)
 import qualified Data.ByteString             as B
 import           Data.Function               (on)
 import qualified Data.List                   as L
-import           Data.Maybe                  (fromMaybe, isJust)
+import           Data.Maybe                  (fromMaybe)
 import           Data.Serialize              as S (Serialize, get, put, runGet, runPut)
 import qualified Data.Text                   as T
 import           Data.Time                   (getCurrentTime)
 import qualified Database.Esqueleto          as E
 import           Database.Persist
 import           Database.Persist.Postgresql (SqlBackend)
-import           GHC.Stack
-import           System.Random               (newStdGen)
 
 import           Experimenter.Experiment
 import           Experimenter.Input
@@ -300,5 +298,5 @@ getOrCreateExps setup initInpSt initSt = do
         (max 1 $ view evaluationReplications setup)
         (max 1 $ view maximumParallelEvaluations setup)
     insertParam :: Key Exps -> ParameterSetup a -> ReaderT SqlBackend m (Key Param)
-    insertParam eExp (ParameterSetup n _ _ _ (Just (minVal, maxVal)) drp) = insert $ Param eExp n (Just $ runPut $ put minVal) (Just $ runPut $ put maxVal)
+    insertParam eExp (ParameterSetup n _ _ _ (Just (minVal, maxVal)) drp) = insert $ Param eExp n (Just $ serializeParamValue minVal) (Just $ serializeParamValue maxVal)
     insertParam eExp (ParameterSetup n _ _ _ Nothing drp) = insert $ Param eExp n Nothing Nothing

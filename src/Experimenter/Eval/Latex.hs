@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -fno-warn-type-defaults #-}
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -8,34 +9,24 @@ module Experimenter.Eval.Latex
     ) where
 
 import           Control.Lens                 hiding ((&))
-import           Control.Monad                (unless, void, zipWithM_)
+import           Control.Monad                (void, zipWithM_)
 import           Control.Monad.Logger
-import           Data.Either
 import           Data.Function                (on)
-import           Data.List                    as L (find, foldl', groupBy, nub, sortBy,
-                                                    transpose)
--- import           Data.Matrix hiding (trace)
-import           Data.Maybe                   (fromMaybe)
-import qualified Data.Serialize               as S
+import           Data.List                    as L (find, foldl', groupBy, sortBy)
+
 import qualified Data.Text                    as T
 import           System.Directory
 import           System.Process
 import           Text.LaTeX
-import           Text.LaTeX.Base.Class
 import           Text.LaTeX.Packages.AMSMath
 import           Text.LaTeX.Packages.Inputenc
 
 import           Experimenter.Eval.Table
 import           Experimenter.Eval.Type
-import           Experimenter.Experiment
 import           Experimenter.Models
 import           Experimenter.Parameter.Type
 import           Experimenter.Result.Type
 import           Experimenter.Util
-
-import           Debug.Trace
-
-instance (MonadLogger m) => MonadLogger (LaTeXT m) where
 
 
 rootPath :: FilePath
@@ -297,7 +288,7 @@ paramSettingTable evals (ExperimentEval nr _ exp)
             ] :
           [dropRow | drp]
         Just (ParameterSetup _ setter _ _ mBounds _) ->
-          case S.runGet S.get bsV of
+          case deserializeParamValue bsV of
             Left err -> [Row [CellT n, CellT (T.pack err)]]
             Right val ->
               let _ = setter val (evals ^. evalsExperiments . experimentsInitialState) -- only needed for type inference

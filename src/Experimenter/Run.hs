@@ -97,14 +97,14 @@ checkUniqueParamNames exps = do
 
 continueExperiments :: (ExperimentDef a) => Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Bool, Experiments a)
 continueExperiments exp = do
-  $(logDebug) $ "Processing experiment with ID " <> tshow (unSqlBackendKey $ unExpsKey $ exp ^. experimentsKey)
+  $(logInfo) $ "Processing experiment with ID " <> tshow (unSqlBackendKey $ unExpsKey $ exp ^. experimentsKey)
   liftIO $ hFlush stdout
   let exps = exp ^. experiments
   rands <- liftIO $ mkRands exps
   newExps <- mkNewExps exp exps
   let expsList = exps ++ newExps
-  $(logDebug) $ "Number of experiments loaded: " <> tshow (length exps)
-  $(logDebug) $ "Number of new experiments: " <> tshow (length newExps)
+  $(logInfo) $ "Number of experiments loaded: " <> tshow (length exps)
+  $(logInfo) $ "Number of new experiments: " <> tshow (length newExps)
   expRes <- mapM (continueExperiment rands exp) expsList
   let updated = any fst expRes
       res = map snd expRes
@@ -116,17 +116,18 @@ continueExperiments exp = do
     else return (updated, set experiments res exp)
   where
     mkParamSetting :: Experiments a -> ParameterSetup a -> ParameterSetting a
-    mkParamSetting exp (ParameterSetup name setter getter mod bnds drp) = ParameterSetting name (runPut $ put $ getter (exp ^. experimentsInitialState)) (drp $ getter (exp ^. experimentsInitialState))
+    mkParamSetting exp (ParameterSetup name setter getter mod bnds drp) =
+      ParameterSetting name (serializeParamValue $ getter (exp ^. experimentsInitialState)) (drp $ getter (exp ^. experimentsInitialState))
     initParams exp = map (mkParamSetting exp) (view experimentsParameters exp)
     mkNewExps :: (ExperimentDef a) => Experiments a -> [Experiment a] -> ReaderT SqlBackend (LoggingT (ExpM a)) [Experiment a]
     mkNewExps exp [] = do
-      $(logDebug) $ "Initializing new experiments..."
+      $(logInfo) $ "Initializing new experiments..."
       startTime <- liftIO getCurrentTime
       kExp <- insert $ Exp (exp ^. experimentsKey) 1 startTime Nothing
       saveParamSettings kExp (initParams exp)
       return [Experiment kExp 1 startTime Nothing (initParams exp) []]
     mkNewExps exp expsDone = do
-      $(logDebug) "Checking whether adding further experiments is necessary..."
+      $(logInfo) "Checking whether adding further experiments is necessary..."
       params <- liftIO $ shuffleM $ parameters (exp ^. experimentsInitialState)
       if null params
         then return []
@@ -141,7 +142,7 @@ continueExperiments exp = do
           kExps <- mapM (\nr -> insert $ Exp (exp ^. experimentsKey) nr startTime Nothing) nrs
           zipWithM_ saveParamSettings kExps settings
           let exps = zipWith3 (\key nr params -> Experiment key nr startTime Nothing params []) kExps nrs settings
-          unless (null exps) $ $(logDebug) $ "Created " <> tshow (length exps) <> " new experiments variations!"
+          unless (null exps) $ $(logInfo) $ "Created " <> tshow (length exps) <> " new experiments variations!"
           return exps
       where
         st = exp ^. experimentsInitialState
@@ -171,11 +172,11 @@ continueExperiments exp = do
           return (exp, par)
       let concatRight Left {}   = []
           concatRight (Right x) = [x]
-      let vals = concatMap (concatRight . S.runGet S.get . view paramSettingValue . entityVal . snd) pairs
+      let vals = concatMap (concatRight . deserializeParamValue . view paramSettingValue . entityVal . snd) pairs
       let filterBounds x = case mBounds of
             Nothing           -> True
             Just (minB, maxB) -> x <= maxB && x >= minB
-      bss <- liftIO $ concat <$> mapM (\val -> zip (repeat val) . fmap (runPut . put) . filter filterBounds <$> modifier (getter $ setter val st)) vals
+      bss <- liftIO $ concat <$> mapM (\val -> zip (repeat val) . fmap serializeParamValue . filter filterBounds <$> modifier (getter $ setter val st)) vals
       return $ map (\(v, bs) -> ParameterSetting n bs (drp v)) bss
       where
         st = exps ^. experimentsInitialState
@@ -212,13 +213,13 @@ loadParameters exps exp = foldM setParam exps (exp ^. parameterSetup)
     setParam e (ParameterSetting n bs drp) =
       case L.find (\(ParameterSetup name _ _ _ _ _) -> name == n) parameterSetups of
         Nothing -> do
-          $(logDebug) $ "Could not find parameter with name " <> n <> " in the current parameter setting. Thus it will not be modified!"
+          $(logError) $ "Could not find parameter with name " <> n <> " in the current parameter setting. Thus it cannot be modified!"
           return e
         Just (ParameterSetup _ setter _ _ _ drp) ->
-          case runGet S.get bs of
+          case deserializeParamValue bs of
             Left err -> error $ "Could not read value of parameter " <> T.unpack n <> ". Aborting! Serializtion error was: " ++ err
             Right val -> do
-              $(logDebug) $ "Loaded parameter '" <> n <> "' value: " <> tshow val
+              $(logInfo) $ "Loaded parameter '" <> n <> "' value: " <> tshow val
               return $ foldl' (\e stSet -> over stSet (setter val) e) e
                 [ experimentsInitialState
                 , experiments.traversed.experimentResults.traversed.preparationResults.traversed.startState
@@ -239,7 +240,7 @@ continueExperiment rands exps exp = do
   -- TODO: parallelisation
   exps' <- loadParameters exps exp -- loads parameters into the init state
   expResList <- getExpRes exps' (exp ^. experimentResults) >>= truncateExperiments repetits
-  $(logDebug) $ "Number of experiment results loaded: " <> tshow (length expResList)
+  $(logInfo) $ "Number of experiment results loaded: " <> tshow (length expResList)
   let dropPrep = any (^. parameterDropPrepeationPhase) (exp ^. parameterSetup)
   expRes <- mapM (runExperimentResult dropPrep rands exps') expResList
   let updated = any fst expRes
@@ -264,7 +265,7 @@ continueExperiment rands exps exp = do
 
     truncateExperiments nr xs = do
       let dels = drop nr xs
-      unless (null dels) $ $(logDebug) $ "Number of experiment repetitions being deleted " <> tshow (length dels)
+      unless (null dels) $ $(logInfo) $ "Number of experiment repetitions being deleted " <> tshow (length dels)
       mapM_ deleteExperimentResult dels
       unless (null dels) transactionSave
       return $ take nr xs
@@ -286,7 +287,9 @@ runExperimentResult :: (ExperimentDef a) => DropPreparation -> Rands -> Experime
 runExperimentResult dropPrep rands@(prepRands, _, _) exps expRes = do
   (prepUpdated, prepRes) <-
     if dropPrep
-      then return (False, Nothing)
+      then do
+      $(logInfo) "Skipping preparation phase as provided by the parameter setting (dropPreparationPhase)."
+      return (False, Nothing)
       else runPreparation (prepRands !! (expRes ^. repetitionNumber - 1)) exps expResId (expRes ^. preparationResults)
   repsDone <-
     if prepUpdated
@@ -310,8 +313,8 @@ runExperimentResult dropPrep rands@(prepRands, _, _) exps expRes = do
     expResId = expRes ^. experimentResultKey
     getRepRes :: (MonadLogger m, MonadIO m) => Experiments a -> [ReplicationResult a] -> ReaderT SqlBackend m [ReplicationResult a]
     getRepRes exps repsDone = do
-      $(logDebug) $ "Number of loaded replications: " <> tshow (length repsDone)
-      $(logDebug) $ "Number of new replications: " <> tshow (exps ^. experimentsSetup . expsSetupEvaluationReplications - length repsDone)
+      $(logInfo) $ "Number of loaded replications: " <> tshow (length repsDone)
+      $(logInfo) $ "Number of new replications: " <> tshow (exps ^. experimentsSetup . expsSetupEvaluationReplications - length repsDone)
       (repsDone ++) <$>
         forM
           [length repsDone + 1 .. exps ^. experimentsSetup . expsSetupEvaluationReplications]
@@ -326,8 +329,8 @@ runPreparation g exps expResId mResData = do
     if delNeeded
       then deleteResultData (Prep expResId) >> return Nothing
       else return mResData
-  when delNeeded $ $(logDebug) "Updating Preparation (deletion of data was required)"
-  when runNeeded $ $(logDebug) "Updating Preparation (a run was required)"
+  when delNeeded $ $(logInfo) "Updating Preparation (deletion of data was required)"
+  when runNeeded $ $(logInfo) "Updating Preparation (a run was required)"
   if runNeeded
     then maybe new return mResData' >>= run
     else return (delNeeded || runNeeded, mResData')
@@ -363,7 +366,7 @@ runReplicationResult (_, wmUpRands, replRands) exps repetNr initSt initInpSt rep
     if wmUpChange
       then deleteResultData (Rep repResId) >> return Nothing
       else return (repRes ^. evalResults)
-  when wmUpChange $ $(logDebug) $ "A change in the settings of the warm up phase occurred. Discarding the result data."
+  when wmUpChange $ $(logInfo) $ "A change in the settings of the warm up phase occurred. Discarding the result data."
   (evalChange, mEval') <- runEval (replRands !! ((repetNr - 1) * replicats + (repRes ^. replicationNumber - 1))) exps wmUpChange (repRes ^. replicationResultKey) initStEval initInpStEval mEval
   return (wmUpChange || evalChange, set warmUpResults mWmUp $ set evalResults mEval' repRes)
   where
@@ -388,7 +391,7 @@ runWarmUp g exps repResId initSt initInpSt mResData = do
   if runNeeded
     then maybe new return mResData' >>= run
     else do
-      when delNeeded $ $(logDebug) "Updating WarmUp (delNeeded)"
+      when delNeeded $ $(logInfo) "Updating WarmUp (delNeeded)"
       return (delNeeded, mResData')
   where
     delNeeded = maybe False (\r -> wmUpSteps < length (r ^. results)) mResData
@@ -409,14 +412,14 @@ runEval ::
   -> Maybe (ResultData a)
   -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, Maybe (ResultData a))
 runEval g exps warmUpUpdated repResId initSt initInpSt mResData = do
-  $(logDebug) "Starting evaluation..."
+  $(logInfo) "Starting evaluation..."
   mResData' <-
     if delNeeded
       then deleteResultData (Rep repResId) >> return Nothing
       else return mResData
   if runNeeded
     then do
-      $(logDebug) $ "A run is needed for replication with ID " <> tshow (unSqlBackendKey $ unRepResultKey repResId)
+      $(logInfo) $ "A run is needed for replication with ID " <> tshow (unSqlBackendKey $ unRepResultKey repResId)
       maybe new return mResData' >>= run
     else return (delNeeded, mResData')
   where
@@ -463,13 +466,13 @@ runResultData len repResType resData = do
   let stInp = fromMaybe (resData ^. startInputState) (resData ^. endInputState)
   let g = fromMaybe (resData ^. startRandGen) (resData ^. endRandGen)
   let periodsToRun = [1 + length (resData ^. results) .. len]
-  $(logDebug) $ "Number of periods to run: " <> tshow (length periodsToRun)
+  $(logInfo) $ "Number of periods to run: " <> tshow (length periodsToRun)
   let updated = not (null periodsToRun)
   sTime <- liftIO getCurrentTime
   (g', st', stInp', inputs, measures) <- foldM run (g, st, stInp, [], []) periodsToRun
   if updated
     then do
-      $(logDebug) "Updating Result Data"
+      $(logInfo) "Updating Result Data"
       eTime <- pure <$> liftIO getCurrentTime
       let resData' =
             (if isNew
