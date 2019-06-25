@@ -280,21 +280,35 @@ paramSetting evals expEval@(ExperimentEval nr _ exp) = do
 paramSettingTable :: Evals a -> ExperimentEval a -> Maybe Table
 paramSettingTable evals (ExperimentEval nr _ exp)
   | null (exp ^. parameterSetup) = Nothing
-  | otherwise = Just $ Table (Row ["Parameter", "Value"]) (map mkRow (exp ^. parameterSetup))
+  | otherwise = Just $ Table (Row ["Parameter", "Value"]) (concatMap mkRow (exp ^. parameterSetup))
   where
-    mkRow :: ParameterSetting a -> Row
-    mkRow (ParameterSetting n bsV) =
+    dropRow :: Row
+    dropRow = Row [CellT "Drop Preparation Phase", CellT "True (No preparation phase was executed!)"]
+    mkRow :: ParameterSetting a -> [Row]
+    mkRow (ParameterSetting n bsV drp) =
       case find ((== n) . parameterName) (evals ^. evalsExperiments . experimentsParameters) of
-        Nothing -> Row [CellT n, "was not modified as it is not listed in the parameter setting"]
-        Just (ParameterSetup _ setter _ _ mBounds) ->
+        Nothing ->
+          Row
+            [ CellT n
+            , CellT $ "was not modified as it is not listed in the parameter setting" <>
+              (if drp
+                 then " [DropPrepPhase]"
+                 else "")
+            ] :
+          [dropRow | drp]
+        Just (ParameterSetup _ setter _ _ mBounds _) ->
           case S.runGet S.get bsV of
-            Left err -> Row [CellT n, CellT (T.pack err)]
+            Left err -> [Row [CellT n, CellT (T.pack err)]]
             Right val ->
               let _ = setter val (evals ^. evalsExperiments . experimentsInitialState) -- only needed for type inference
               in Row
                    [ CellT n
                    , CellL $ raw (tshow val) <>
-                     case mBounds of
-                       Nothing -> ""
-                       Just (minVal, maxVal) -> math (text " " `in_` autoParens (text (raw (tshow minVal)) <> ", " <> text (raw (tshow maxVal))))
-                   ]
+                     (case mBounds of
+                        Nothing -> ""
+                        Just (minVal, maxVal) -> math (text " " `in_` autoParens (text (raw (tshow minVal)) <> ", " <> text (raw (tshow maxVal))))) <>
+                     (if drp
+                        then " [DropPrepPhase]"
+                        else mempty)
+                   ] :
+                 [dropRow | drp]
