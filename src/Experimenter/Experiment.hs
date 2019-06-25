@@ -1,7 +1,6 @@
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE RankNTypes        #-}
-{-# LANGUAGE TemplateHaskell   #-}
 {-# LANGUAGE TypeFamilies      #-}
 
 module Experimenter.Experiment where
@@ -10,9 +9,7 @@ module Experimenter.Experiment where
 import           Experimenter.Parameter
 import           Experimenter.StepResult
 
-import           Control.Monad.IO.Class  (MonadIO)
 import           Control.Monad.IO.Unlift
-import           Control.Monad.Logger
 import           Data.Serialize          (Serialize)
 import           System.Random
 
