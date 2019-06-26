@@ -269,7 +269,7 @@ getOrCreateExps setup initInpSt initSt = do
   let exps =
         filter
           (\(Entity _ (Exps _ _ _ s iS)) ->
-             let other = (,) <$> deserialisable <$> (runGet S.get s) <*> runGet S.get iS
+             let other = (,) <$> deserialisable <$> runGet S.get s <*> runGet S.get iS
               in fromEither False (equalExperiments (initSt, initInpSt) <$> other))
           expsList
   params <- mapM (\e -> selectList [ParamExps ==. entityKey e] [Asc ParamName]) exps
@@ -298,5 +298,5 @@ getOrCreateExps setup initInpSt initSt = do
         (max 1 $ view evaluationReplications setup)
         (max 1 $ view maximumParallelEvaluations setup)
     insertParam :: Key Exps -> ParameterSetup a -> ReaderT SqlBackend m (Key Param)
-    insertParam eExp (ParameterSetup n _ _ _ (Just (minVal, maxVal)) drp) = insert $ Param eExp n (Just $ serializeParamValue minVal) (Just $ serializeParamValue maxVal)
+    insertParam eExp (ParameterSetup n _ _ _ (Just (minVal, maxVal)) drp) = insert $ Param eExp n (Just $ runPut $ put minVal) (Just $ runPut $ put maxVal)
     insertParam eExp (ParameterSetup n _ _ _ Nothing drp) = insert $ Param eExp n Nothing Nothing

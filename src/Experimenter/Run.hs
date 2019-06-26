@@ -76,10 +76,10 @@ runExperimentsIO = runner id
 
 runner :: (ExperimentDef a) => (ExpM a (Bool, Experiments a) -> IO (Bool, Experiments a)) -> DatabaseSetup -> ExperimentSetup -> InputState a -> a -> IO (Bool, Experiments a)
 runner runExpM dbSetup setup initInpSt initSt = do
-  runStdoutLoggingT $ withPostgresqlPool (connectionString dbSetup) (parallelConnections dbSetup) $ liftSqlPersistMPool $
-    runMigration migrateAll
-  runExpM $ (runStdoutLoggingT  . filterLogger (\s _ -> s /= "SQL")) $ withPostgresqlConn (connectionString dbSetup) $ \backend ->
-    flip runSqlConn backend $ loadExperiments setup initInpSt initSt >>= checkUniqueParamNames >>= runExperiment
+  runStdoutLoggingT $ withPostgresqlPool (connectionString dbSetup) (parallelConnections dbSetup) $ liftSqlPersistMPool $ runMigration migrateAll
+  runExpM $
+    (runStdoutLoggingT . filterLogger (\s _ -> s /= "SQL")) $
+    withPostgresqlConn (connectionString dbSetup) $ \backend -> flip runSqlConn backend $ loadExperiments setup initInpSt initSt >>= checkUniqueParamNames >>= runExperiment
 
 runExperiment :: (ExperimentDef a) => Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Bool, Experiments a)
 runExperiment exps = do
@@ -117,7 +117,7 @@ continueExperiments exp = do
   where
     mkParamSetting :: Experiments a -> ParameterSetup a -> ParameterSetting a
     mkParamSetting exp (ParameterSetup name setter getter mod bnds drp) =
-      ParameterSetting name (serializeParamValue $ getter (exp ^. experimentsInitialState)) (drp $ getter (exp ^. experimentsInitialState))
+      ParameterSetting name (runPut $ put $ getter (exp ^. experimentsInitialState)) (drp $ getter (exp ^. experimentsInitialState))
     initParams exp = map (mkParamSetting exp) (view experimentsParameters exp)
     mkNewExps :: (ExperimentDef a) => Experiments a -> [Experiment a] -> ReaderT SqlBackend (LoggingT (ExpM a)) [Experiment a]
     mkNewExps exp [] = do
@@ -172,11 +172,11 @@ continueExperiments exp = do
           return (exp, par)
       let concatRight Left {}   = []
           concatRight (Right x) = [x]
-      let vals = concatMap (concatRight . deserializeParamValue . view paramSettingValue . entityVal . snd) pairs
+      let vals = concatMap (concatRight . S.runGet S.get . view paramSettingValue . entityVal . snd) pairs
       let filterBounds x = case mBounds of
             Nothing           -> True
             Just (minB, maxB) -> x <= maxB && x >= minB
-      bss <- liftIO $ concat <$> mapM (\val -> zip (repeat val) . fmap serializeParamValue . filter filterBounds <$> modifier (getter $ setter val st)) vals
+      bss <- liftIO $ concat <$> mapM (\val -> zip (repeat val) . fmap (runPut . put) . filter filterBounds <$> modifier (getter $ setter val st)) vals
       return $ map (\(v, bs) -> ParameterSetting n bs (drp v)) bss
       where
         st = exps ^. experimentsInitialState
@@ -216,7 +216,7 @@ loadParameters exps exp = foldM setParam exps (exp ^. parameterSetup)
           $(logError) $ "Could not find parameter with name " <> n <> " in the current parameter setting. Thus it cannot be modified!"
           return e
         Just (ParameterSetup _ setter _ _ _ drp) ->
-          case deserializeParamValue bs of
+          case runGet S.get bs of
             Left err -> error $ "Could not read value of parameter " <> T.unpack n <> ". Aborting! Serializtion error was: " ++ err
             Right val -> do
               $(logInfo) $ "Loaded parameter '" <> n <> "' value: " <> tshow val
@@ -445,14 +445,24 @@ deleteResultData :: (MonadIO m) => RepResultType -> ReaderT SqlBackend m ()
 deleteResultData repResType =
   case repResType of
     Prep expResId   -> do
+      selectKeysList [PrepInputExpResult ==. expResId] [] >>= mapM_ (\x -> deleteWhere [PrepInputValuePrepInput ==. x])
+      deleteCascadeWhere [PrepInputExpResult ==. expResId]
       del (UniquePrepResultDataExpResult expResId)
       selectList [PrepInputExpResult ==. expResId] [] >>= mapM_ (deleteCascade . entityKey)
       selectList [PrepMeasureExpResult ==. expResId] [] >>= mapM_ (deleteCascade . entityKey)
     WarmUp repResId -> do
+      selectKeysList [WarmUpInputRepResult ==. repResId] [] >>= mapM_ (\x -> deleteWhere [WarmUpInputValueWarmUpInput ==. x])
+      deleteCascadeWhere [WarmUpInputRepResult ==. repResId]
+      selectKeysList [WarmUpMeasureRepResult ==. repResId] [] >>= mapM_ (\x -> deleteWhere [WarmUpResultStepMeasure ==. x])
+      deleteCascadeWhere [WarmUpMeasureRepResult ==. repResId]
       del (UniqueWarmUpResultDataRepResult repResId)
       selectList [WarmUpInputRepResult ==. repResId] [] >>= mapM_ (deleteCascade . entityKey)
       selectList [WarmUpMeasureRepResult ==. repResId] [] >>= mapM_ (deleteCascade . entityKey)
     Rep repResId    -> do
+      selectKeysList [RepInputRepResult ==. repResId] [] >>= mapM_ (\x -> deleteWhere [RepInputValueRepInput ==. x])
+      deleteCascadeWhere [RepInputRepResult ==. repResId]
+      selectKeysList [RepMeasureRepResult ==. repResId] [] >>= mapM_ (\x -> deleteWhere [RepResultStepMeasure ==. x])
+      deleteCascadeWhere [RepMeasureRepResult ==. repResId]
       del (UniqueRepResultDataRepResult repResId)
       selectList [RepInputRepResult ==. repResId] [] >>= mapM_ (deleteCascade . entityKey)
       selectList [RepMeasureRepResult ==. repResId] [] >>= mapM_ (deleteCascade . entityKey)

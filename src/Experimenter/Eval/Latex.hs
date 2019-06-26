@@ -13,6 +13,7 @@ import           Control.Monad                (void, zipWithM_)
 import           Control.Monad.Logger
 import           Data.Function                (on)
 import           Data.List                    as L (find, foldl', groupBy, sortBy)
+import qualified Data.Serialize               as S
 
 import qualified Data.Text                    as T
 import           System.Directory
@@ -288,7 +289,7 @@ paramSettingTable evals (ExperimentEval nr _ exp)
             ] :
           [dropRow | drp]
         Just (ParameterSetup _ setter _ _ mBounds _) ->
-          case deserializeParamValue bsV of
+          case S.runGet S.get bsV of
             Left err -> [Row [CellT n, CellT (T.pack err)]]
             Right val ->
               let _ = setter val (evals ^. evalsExperiments . experimentsInitialState) -- only needed for type inference
