@@ -103,7 +103,7 @@ RepResultData
 
 
 WarmUpInput
-    repResult RepResultId
+    repResult WarmUpResultDataId
     period Int
 
 WarmUpInputValue
@@ -111,7 +111,7 @@ WarmUpInputValue
     value ByteString
 
 WarmUpMeasure
-    repResult RepResultId
+    repResult WarmUpResultDataId
     period Int
 
 WarmUpResultStep
@@ -121,7 +121,7 @@ WarmUpResultStep
     yValue  Double
 
 RepInput
-    repResult RepResultId
+    repResult RepResultDataId
     period Int
 
 RepInputValue
@@ -129,7 +129,7 @@ RepInputValue
     value ByteString
 
 RepMeasure
-    repResult RepResultId
+    repResult RepResultDataId
     period Int
 
 RepResultStep
