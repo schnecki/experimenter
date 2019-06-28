@@ -55,7 +55,7 @@ PrepResultData
 
 
 PrepInput
-    expResult ExpResultId
+    expResult PrepResultDataId
     period Int
 
 PrepInputValue
@@ -63,7 +63,7 @@ PrepInputValue
     value ByteString
 
 PrepMeasure
-    expResult ExpResultId
+    expResult PrepResultDataId
     period Int
 
 PrepResultStep

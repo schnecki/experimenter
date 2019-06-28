@@ -76,8 +76,8 @@ loadExperimentResult (Entity k (ExpResult _ rep)) = do
   prepRes <- case mEPrepResData of
     Nothing -> return Nothing
     Just (Entity resDataKey (PrepResultData _ startT endT startRandGen endRandGen startStBS endStBS startInpStBS endInpStBS)) -> do
-      mInputVals <- loadPreparationInput k
-      results <- loadPrepartionMeasures k
+      mInputVals <- loadPreparationInput resDataKey
+      results <- loadPrepartionMeasures resDataKey
       mStartSt <- fmap deserialisable <$> deserialise "prep start state" startStBS
       mEndSt <- fmap (fmap deserialisable) <$> mDeserialise "prep end state" endStBS
       mStartInpSt <- deserialise "prep start input state" startInpStBS
@@ -98,7 +98,7 @@ loadParamSetup kExp = L.sortBy (compare `on` view parameterSettingName) . map (m
     mkParameterSetting' (ParamSetting _ n v b) = ParameterSetting n v b
 
 
-loadPreparationInput :: (ExperimentDef a, MonadLogger m, MonadIO m) => Key ExpResult -> ReaderT SqlBackend m (Maybe [Input a])
+loadPreparationInput :: (ExperimentDef a, MonadLogger m, MonadIO m) => Key PrepResultData -> ReaderT SqlBackend m (Maybe [Input a])
 loadPreparationInput kExpRes = do
   res <-
     E.select $
@@ -115,7 +115,7 @@ loadPreparationInput kExpRes = do
       return $ Input p <$> v'
 
 
-loadPrepartionMeasures :: (MonadLogger m, MonadIO m) => Key ExpResult -> ReaderT SqlBackend m [Measure]
+loadPrepartionMeasures :: (MonadLogger m, MonadIO m) => Key PrepResultData -> ReaderT SqlBackend m [Measure]
 loadPrepartionMeasures kExpRes = do
   res <-
     E.select $
@@ -155,8 +155,8 @@ loadReplicationResult (Entity k (RepResult _ repNr)) = do
       let wmUpEndTime = view warmUpResultDataEndTime wmUpRes
       let wmUpStartRandGen = tread $ view warmUpResultDataStartRandGen wmUpRes
       let wmUpEndRandGen = tread <$> view warmUpResultDataEndRandGen wmUpRes
-      mWmUpInpVals <- loadReplicationWarmUpInput k
-      wmUpMeasures <- loadReplicationWarmUpMeasures k
+      mWmUpInpVals <- loadReplicationWarmUpInput wmUpResKey
+      wmUpMeasures <- loadReplicationWarmUpMeasures wmUpResKey
       mWmUpStartSt <- fmap deserialisable <$> deserialise "warm up start state" (view warmUpResultDataStartState wmUpRes)
       mWmUpEndSt <- fmap (fmap deserialisable) <$> mDeserialise "warm up end state" (view warmUpResultDataEndState wmUpRes)
       mWmUpStartInpSt <- deserialise "warm up start input state" (view warmUpResultDataStartInputState wmUpRes)
@@ -185,8 +185,8 @@ loadReplicationResult (Entity k (RepResult _ repNr)) = do
       let repEndTime = view repResultDataEndTime repRes
       let repStartRandGen = tread $ view repResultDataStartRandGen repRes
       let repEndRandGen = tread <$> view repResultDataEndRandGen repRes
-      mRepInpVals <- loadReplicationInput k
-      repMeasures <- loadReplicationMeasures k
+      mRepInpVals <- loadReplicationInput repResKey
+      repMeasures <- loadReplicationMeasures repResKey
       mRepStartSt <- fmap deserialisable <$> deserialise "rep start state" (view repResultDataStartState repRes)
       mRepEndSt <- fmap (fmap deserialisable) <$> mDeserialise "rep end state" (view repResultDataEndState repRes)
       mRepStartInpSt <- deserialise "rep start input state" (view repResultDataStartInputState repRes)
@@ -200,7 +200,7 @@ loadReplicationResult (Entity k (RepResult _ repNr)) = do
         return $ ResultData (ResultDataRep repResKey) repStartTime repEndTime repStartRandGen repEndRandGen repInpVals repMeasures repStartSt repEndSt repStartInpSt repEndInpSt
 
 
-loadReplicationWarmUpInput :: (ExperimentDef a, MonadLogger m, MonadIO m) => Key RepResult -> ReaderT SqlBackend m (Maybe [Input a])
+loadReplicationWarmUpInput :: (ExperimentDef a, MonadLogger m, MonadIO m) => Key WarmUpResultData -> ReaderT SqlBackend m (Maybe [Input a])
 loadReplicationWarmUpInput kExpRes = do
   res <-
     E.select $
@@ -215,7 +215,7 @@ loadReplicationWarmUpInput kExpRes = do
       return $ Input p <$> v'
 
 
-loadReplicationWarmUpMeasures :: (MonadLogger m, MonadIO m) => Key RepResult -> ReaderT SqlBackend m [Measure]
+loadReplicationWarmUpMeasures :: (MonadLogger m, MonadIO m) => Key WarmUpResultData -> ReaderT SqlBackend m [Measure]
 loadReplicationWarmUpMeasures kExpRes = do
   res <-
     E.select $
@@ -231,7 +231,7 @@ loadReplicationWarmUpMeasures kExpRes = do
     combineMeasures _                  = error "not possible"
 
 
-loadReplicationInput :: (ExperimentDef a, MonadLogger m, MonadIO m) => Key RepResult -> ReaderT SqlBackend m (Maybe [Input a])
+loadReplicationInput :: (ExperimentDef a, MonadLogger m, MonadIO m) => Key RepResultData -> ReaderT SqlBackend m (Maybe [Input a])
 loadReplicationInput kExpRes = do
   res <-
     E.select $
@@ -246,7 +246,7 @@ loadReplicationInput kExpRes = do
       return $ Input p <$> v'
 
 
-loadReplicationMeasures :: (MonadLogger m, MonadIO m) => Key RepResult -> ReaderT SqlBackend m [Measure]
+loadReplicationMeasures :: (MonadLogger m, MonadIO m) => Key RepResultData -> ReaderT SqlBackend m [Measure]
 loadReplicationMeasures kExpRes = do
   res <-
     E.select $

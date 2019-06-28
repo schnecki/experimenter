@@ -452,40 +452,33 @@ deleteResultData :: (MonadIO m) => RepResultType -> ReaderT SqlBackend m ()
 deleteResultData repResType =
   case repResType of
     Prep expResId   -> do
-      liftIO $ putStrLn  "PREP IN"
       -- selectKeysList [PrepInputExpResult ==. expResId] [] >>= mapM_ (\x -> deleteWhere [PrepInputValuePrepInput ==. x])
       -- deleteCascadeWhere [PrepInputExpResult ==. expResId]
       -- deleteCascadeWhere [PrepInputExpResult ==. expResId]
       -- selectKeysList [PrepMeasureExpResult ==. expResId] [] >>= mapM_ (\k -> deleteWhere [PrepResultStepMeasure ==. k])
       del (UniquePrepResultDataExpResult expResId)
-      selectList [PrepInputExpResult ==. expResId] [] >>= mapM_ (deleteCascade . entityKey)
-      selectList [PrepMeasureExpResult ==. expResId] [] >>= mapM_ (deleteCascade . entityKey)
-      liftIO $ putStrLn  "PREP out"
+      -- selectList [PrepInputExpResult ==. expResId] [] >>= mapM_ (deleteCascade . entityKey)
+      -- selectList [PrepMeasureExpResult ==. expResId] [] >>= mapM_ (deleteCascade . entityKey)
     WarmUp repResId -> do
-      liftIO $ putStrLn  "WARM IN"
       -- selectKeysList [WarmUpInputRepResult ==. repResId] [] >>= mapM_ (\x -> deleteWhere [WarmUpInputValueWarmUpInput ==. x])
       -- deleteCascadeWhere [WarmUpInputRepResult ==. repResId]
       -- selectKeysList [WarmUpMeasureRepResult ==. repResId] [] >>= mapM_ (\x -> deleteWhere [WarmUpResultStepMeasure ==. x])
       -- deleteCascadeWhere [WarmUpMeasureRepResult ==. repResId]
       del (UniqueWarmUpResultDataRepResult repResId)
-      selectList [WarmUpInputRepResult ==. repResId] [] >>= mapM_ (deleteCascade . entityKey)
-      selectList [WarmUpMeasureRepResult ==. repResId] [] >>= mapM_ (deleteCascade . entityKey)
-      liftIO $ putStrLn  "WARM OUT"
+
+      -- selectList [WarmUpInputRepResult ==. repResId] [] >>= mapM_ (deleteCascade . entityKey)
+      -- selectList [WarmUpMeasureRepResult ==. repResId] [] >>= mapM_ (deleteCascade . entityKey)
     Rep repResId    -> do
-      liftIO $ putStrLn  "REP IN"
       -- selectKeysList [RepInputRepResult ==. repResId] [] >>= mapM_ (\x -> deleteWhere [RepInputValueRepInput ==. x])
       -- deleteCascadeWhere [RepInputRepResult ==. repResId]
       -- selectKeysList [RepMeasureRepResult ==. repResId] [] >>= mapM_ (\x -> deleteWhere [RepResultStepMeasure ==. x])
       -- deleteCascadeWhere [RepMeasureRepResult ==. repResId]
       del (UniqueRepResultDataRepResult repResId)
-      selectList [RepInputRepResult ==. repResId] [] >>= mapM_ (deleteCascade . entityKey)
-      selectList [RepMeasureRepResult ==. repResId] [] >>= mapM_ (deleteCascade . entityKey)
-      liftIO $ putStrLn  "REP OUT"
+      -- selectList [RepInputRepResult ==. repResId] [] >>= mapM_ (deleteCascade . entityKey)
+      -- selectList [RepMeasureRepResult ==. repResId] [] >>= mapM_ (deleteCascade . entityKey)
   where
     del unique = do
-      liftIO $ putStrLn $ "delete unique : "
       getBy unique >>= mapM_ (deleteCascade . entityKey)
-      liftIO $ putStrLn $ "DONE delete unique : "
 
 
 runResultData :: (ExperimentDef a) => Int -> RepResultType -> ResultData a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, ResultData a)
@@ -508,36 +501,28 @@ runResultData len repResType resData = do
                then set startTime sTime
                else id) $
             set results measures $ set inputValues inputs $ set endInputState (Just stInp') $ set endState (Just st') $ set endRandGen (Just g') $ set endTime eTime resData
-      $(logDebug) "upd Bef"
       upd repResType resData'
-      $(logDebug) "upd Aft"
       return (True, resData')
     else return (False, resData)
   where
     upd (Prep expResId) (ResultData (ResultDataPrep k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do
-      inpKeys <- mapM (insert . PrepInput expResId . view inputValuePeriod) inpVals
+      inpKeys <- mapM (insert . PrepInput k . view inputValuePeriod) inpVals
       zipWithM_ (\k v -> insert $ PrepInputValue k (runPut . put . view inputValue $ v)) inpKeys inpVals
-      measureKeys <- mapM (insert . PrepMeasure expResId . view measurePeriod) ress
+      measureKeys <- mapM (insert . PrepMeasure k . view measurePeriod) ress
       zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ PrepResultStep k n mX y) xs) measureKeys ress
-      $(logDebug) "ASDF"
       replace k (PrepResultData expResId sTime eTime (tshow sG) (tshow <$> eG) (runPut . put $ serialisable sSt) (runPut . put . serialisable <$> eSt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
-      $(logDebug) "ASDFASDF"
     upd (WarmUp repResId) (ResultData (ResultDataWarmUp k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do
-      inpKeys <- mapM (insert . WarmUpInput repResId . view inputValuePeriod) inpVals
+      inpKeys <- mapM (insert . WarmUpInput k . view inputValuePeriod) inpVals
       zipWithM_ (\k v -> insert $ WarmUpInputValue k (runPut . put . view inputValue $ v)) inpKeys inpVals
-      measureKeys <- mapM (insert . WarmUpMeasure repResId . view measurePeriod) ress
+      measureKeys <- mapM (insert . WarmUpMeasure k . view measurePeriod) ress
       zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ WarmUpResultStep k n mX y) xs) measureKeys ress
-      $(logDebug) "WARMUO RES DATA"
       replace k (WarmUpResultData repResId sTime eTime (tshow sG) (tshow <$> eG) (runPut . put $ serialisable sSt) (runPut . put . serialisable <$> eSt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
-      $(logDebug) "WARMUO RES DATA END"
     upd (Rep repResId) (ResultData (ResultDataRep k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do
-      inpKeys <- mapM (insert . RepInput repResId . view inputValuePeriod) inpVals
+      inpKeys <- mapM (insert . RepInput k . view inputValuePeriod) inpVals
       zipWithM_ (\k v -> insert $ RepInputValue k (runPut . put . view inputValue $ v)) inpKeys inpVals
-      measureKeys <- mapM (insert . RepMeasure repResId . view measurePeriod) ress
+      measureKeys <- mapM (insert . RepMeasure k . view measurePeriod) ress
       zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ RepResultStep k n mX y) xs) measureKeys ress
-      $(logDebug) "REPUO RES DATA"
       replace k (RepResultData repResId sTime eTime (tshow sG) (tshow <$> eG) (runPut . put $ serialisable sSt) (runPut . put . serialisable <$> eSt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
-      $(logDebug) "REPUO RES DATA"
     upd _ _ = error "Unexpected update combination. This is a bug, please report it!"
 
 

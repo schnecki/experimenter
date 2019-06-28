@@ -57,11 +57,11 @@ fakeParam = ParameterSetup "fake" (\mD (Dice g _) -> Dice g mD) (\(Dice _ mD) ->
 
 setup :: ExperimentSetup
 setup = ExperimentSetup
-  { _experimentBaseName         = "dice param 11"
+  { _experimentBaseName         = "dice param 12"
   , _experimentRepetitions      =  2
   , _preparationSteps           =  100
-  , _evaluationWarmUpSteps      =  0
-  , _evaluationSteps            =  10
+  , _evaluationWarmUpSteps      =  10
+  , _evaluationSteps            =  14
   , _evaluationReplications     =  2
   , _maximumParallelEvaluations =  2
   }
