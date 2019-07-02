@@ -271,13 +271,16 @@ continueExperiment rands exps exp = do
       return $ take nr xs
 
 
-newResultData :: (ExperimentDef a, MonadIO m) => StdGen -> RepResultType -> a -> InputState a -> ReaderT SqlBackend m (ResultData a)
+newResultData :: (ExperimentDef a, MonadLogger m, MonadIO m) => StdGen -> RepResultType -> a -> InputState a -> ReaderT SqlBackend m (ResultData a)
 newResultData g repResType st inpSt = do
   time <- liftIO getCurrentTime
   k <- case repResType of
           Prep expResId   -> ResultDataPrep <$> insert (PrepResultData expResId time Nothing (tshow g) Nothing (runPut $ put $ serialisable st) Nothing (runPut $ put inpSt) Nothing)
           WarmUp repResId -> ResultDataWarmUp <$> insert (WarmUpResultData repResId time Nothing (tshow g) Nothing  (runPut $ put $ serialisable st) Nothing (runPut $ put inpSt) Nothing)
-          Rep repResId    -> ResultDataRep <$> insert (RepResultData repResId time Nothing (tshow g) Nothing (runPut $ put $ serialisable st) Nothing (runPut $ put inpSt) Nothing)
+          Rep repResId    -> do
+            trace ("newResultData") $ $(logDebug) $ "newResultData"
+            -- getBy (UniqueRepResultDataRepResult repResId) >>=
+            ResultDataRep <$> insert (RepResultData repResId time Nothing (tshow g) Nothing (runPut $ put $ serialisable st) Nothing (runPut $ put inpSt) Nothing)
   return $ ResultData k time Nothing g Nothing [] [] st Nothing inpSt Nothing
 
 
@@ -314,7 +317,7 @@ runExperimentResult dropPrep rands@(prepRands, _, _) exps expRes = do
     getRepRes :: (MonadLogger m, MonadIO m) => Experiments a -> [ReplicationResult a] -> ReaderT SqlBackend m [ReplicationResult a]
     getRepRes exps repsDone = do
       $(logInfo) $ "Number of loaded replications: " <> tshow (length repsDone)
-      $(logInfo) $ "Number of new replications: " <> tshow (exps ^. experimentsSetup . expsSetupEvaluationReplications - length repsDone)
+      $(logInfo) $ "Number of new replications: " <> tshow (length [length repsDone + 1 .. exps ^. experimentsSetup . expsSetupEvaluationReplications])
       (repsDone ++) <$>
         forM
           [length repsDone + 1 .. exps ^. experimentsSetup . expsSetupEvaluationReplications]
@@ -420,6 +423,9 @@ runEval g exps warmUpUpdated repResId initSt initInpSt mResData = do
     if delNeeded
       then deleteResultData (Rep repResId) >> return Nothing
       else return mResData
+  trace ("runNeeded: " ++ show runNeeded ++ "evalSteps: " ++ show evalSteps ++ " > " ++ show (length . view results <$> mResData' )) $ trace ("delNeeded: " ++ show delNeeded) $
+    trace ("mResData: " ++ show (view resultDataKey <$> mResData' ))
+    when delNeeded $ $(logInfo) "Deletion of Evaluation data needed"
   if runNeeded
     then do
       $(logInfo) $ "An evaluation run is needed for replication with ID " <> tshow (unSqlBackendKey $ unRepResultKey repResId)
@@ -437,8 +443,8 @@ runEval g exps warmUpUpdated repResId initSt initInpSt mResData = do
 
 deleteReplicationResult :: (MonadIO m) => ReplicationResult a -> ReaderT SqlBackend m ()
 deleteReplicationResult (ReplicationResult repResId _ _ _) =
-  -- deleteResultData (WarmUp repResId) >>
-  -- deleteResultData (Rep repResId) >>
+  deleteResultData (WarmUp repResId) >>
+  deleteResultData (Rep repResId) >>
   deleteCascade repResId
 
 
@@ -522,6 +528,7 @@ runResultData len repResType resData = do
       zipWithM_ (\k v -> insert $ RepInputValue k (runPut . put . view inputValue $ v)) inpKeys inpVals
       measureKeys <- mapM (insert . RepMeasure k . view measurePeriod) ress
       zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ RepResultStep k n mX y) xs) measureKeys ress
+      trace ("runResultData") $(logDebug) $ "runResultData"
       replace k (RepResultData repResId sTime eTime (tshow sG) (tshow <$> eG) (runPut . put $ serialisable sSt) (runPut . put . serialisable <$> eSt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
     upd _ _ = error "Unexpected update combination. This is a bug, please report it!"
 

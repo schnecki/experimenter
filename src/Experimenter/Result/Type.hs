@@ -21,6 +21,7 @@ data ResultDataKey
   = ResultDataPrep (Key PrepResultData)
   | ResultDataWarmUp (Key WarmUpResultData)
   | ResultDataRep (Key RepResultData)
+  deriving (Eq, Show)
 
 data ResultData a = ResultData
   { _resultDataKey   :: ResultDataKey
