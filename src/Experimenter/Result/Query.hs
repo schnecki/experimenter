@@ -20,7 +20,7 @@ import           Data.Serialize              as S (Serialize, get, put, runGet, 
 import qualified Data.Text                   as T
 import           Data.Time                   (getCurrentTime)
 import qualified Database.Esqueleto          as E
-import           Database.Persist
+import           Database.Persist            as P
 import           Database.Persist.Postgresql (SqlBackend)
 import           System.Exit                 (exitFailure)
 
@@ -73,11 +73,11 @@ loadExperimentResults kExp = do
 
 
 loadExperimentResult :: (ExperimentDef a, MonadLogger m, MonadIO m) => Entity ExpResult -> ReaderT SqlBackend m (ExperimentResult a)
-loadExperimentResult (Entity k (ExpResult _ rep)) = do
-  mEPrepResData <- getBy (UniquePrepResultDataExpResult k)
+loadExperimentResult (Entity k (ExpResult _ rep mPrepResDataId)) = do
+  mEPrepResData <- fmap join $ sequence $ P.getEntity <$> mPrepResDataId
   prepRes <- case mEPrepResData of
     Nothing -> return Nothing
-    Just (Entity resDataKey (PrepResultData _ startT endT startRandGen endRandGen startStBS endStBS startInpStBS endInpStBS)) -> do
+    Just (Entity resDataKey (PrepResultData startT endT startRandGen endRandGen startStBS endStBS startInpStBS endInpStBS)) -> do
       mInputVals <- loadPreparationInput resDataKey
       results <- loadPrepartionMeasures resDataKey
       mStartSt <- fmap deserialisable <$> deserialise "prep start state" startStBS
@@ -106,7 +106,7 @@ loadPreparationInput kExpRes = do
     E.select $
     E.from $ \(prepI, prepIV) -> do
       E.where_ (prepI E.^. PrepInputId E.==. prepIV E.^. PrepInputValuePrepInput)
-      E.where_ (prepI E.^. PrepInputExpResult E.==. E.val kExpRes)
+      E.where_ (prepI E.^. PrepInputPrepResultData E.==. E.val kExpRes)
 
       return (prepI, prepIV)
   sequence <$> mapM mkInput res
@@ -123,7 +123,7 @@ loadPrepartionMeasures kExpRes = do
     E.select $
     E.from $ \(prepM, prepRS) -> do
       E.where_ (prepM E.^. PrepMeasureId E.==. prepRS E.^. PrepResultStepMeasure)
-      E.where_ (prepM E.^. PrepMeasureExpResult E.==. E.val kExpRes)
+      E.where_ (prepM E.^. PrepMeasurePrepResultData E.==. E.val kExpRes)
       E.orderBy [E.asc (prepM E.^. PrepMeasurePeriod)]
       return (prepM, prepRS)
   return $ map combineMeasures $ L.groupBy ((==) `on` view measurePeriod) $ map mkMeasure res
@@ -139,9 +139,9 @@ loadReplicationResults kExpRes = do
 
 
 loadReplicationResult :: (ExperimentDef a, MonadLogger m, MonadIO m) => Entity RepResult -> ReaderT SqlBackend m (ReplicationResult a)
-loadReplicationResult (Entity k (RepResult _ repNr)) = do
-  mWmUpRes <- getBy (UniqueWarmUpResultDataRepResult k)
-  mRepRes <- getBy (UniqueRepResultDataRepResult k)
+loadReplicationResult (Entity k (RepResult _ repNr mWmUpResId mRepResId)) = do
+  mWmUpRes <- fmap join $ sequence $ P.getEntity <$> mWmUpResId
+  mRepRes <- fmap join $ sequence $ P.getEntity <$> mRepResId
   wmUp <-
     case mWmUpRes of
       Nothing    -> return Nothing

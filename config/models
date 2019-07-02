@@ -34,15 +34,15 @@ ParamSetting
     exp ExpId
     name Text
     value ByteString
-    dropPreparationPhase Bool 
+    dropPreparationPhase Bool
 
 
 ExpResult
     exp ExpId
     repetition Int
+    prepResultData                  PrepResultDataId Maybe
 
 PrepResultData
-    expResult                       ExpResultId
     startTime                       UTCTime
     endTime                         UTCTime Maybe
     startRandGen                    Text
@@ -51,11 +51,9 @@ PrepResultData
     endState                        ByteString Maybe
     startInputState                 ByteString
     endInputState                   ByteString Maybe
-    UniquePrepResultDataExpResult   expResult
-
 
 PrepInput
-    expResult PrepResultDataId
+    prepResultData PrepResultDataId
     period Int
 
 PrepInputValue
@@ -63,7 +61,7 @@ PrepInputValue
     value ByteString
 
 PrepMeasure
-    expResult PrepResultDataId
+    prepResultData PrepResultDataId
     period Int
 
 PrepResultStep
@@ -75,9 +73,11 @@ PrepResultStep
 RepResult
     expResult ExpResultId
     repNr Int
+    warmUpResultData WarmUpResultDataId Maybe
+    repResultData RepResultDataId Maybe
+    UniqueExpResultRepNr expResult repNr
 
 WarmUpResultData
-    repResult                       RepResultId
     startTime                       UTCTime
     endTime                         UTCTime Maybe
     startRandGen                    Text
@@ -86,11 +86,8 @@ WarmUpResultData
     endState                        ByteString Maybe
     startInputState                 ByteString
     endInputState                   ByteString Maybe
-    UniqueWarmUpResultDataRepResult repResult
-
 
 RepResultData
-    repResult                       RepResultId
     startTime                       UTCTime
     endTime                         UTCTime Maybe
     startRandGen                    Text
@@ -99,8 +96,6 @@ RepResultData
     endState                        ByteString Maybe
     startInputState                 ByteString
     endInputState                   ByteString Maybe
-    UniqueRepResultDataRepResult    repResult
-
 
 WarmUpInput
     repResult WarmUpResultDataId
