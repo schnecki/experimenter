@@ -286,7 +286,6 @@ newResultData g repResType st inpSt = do
           Rep repResId    -> do
             repResDataId <- insert (RepResultData time Nothing (tshow g) Nothing (runPut $ put $ serialisable st) Nothing (runPut $ put inpSt) Nothing)
             update repResId [RepResultRepResultData =. Just repResDataId]
-            trace ("newResultData") $ $(logDebug) $ "newResultData"
             return $ ResultDataRep repResDataId
   return $ ResultData k time Nothing g Nothing [] [] st Nothing inpSt Nothing
 
@@ -339,8 +338,8 @@ runPreparation g exps expResId mResData = do
     if delNeeded
       then deleteResultData (Prep expResId) >> return Nothing
       else return mResData
-  trace ("prep delNeeded: " ++ show delNeeded) $ when delNeeded $ $(logInfo) "Updating Preparation (deletion of data was required)"
-  trace ("prep runNeeded: " ++ show runNeeded) $ when runNeeded $ $(logInfo) "Updating Preparation (a run was required)"
+  when delNeeded $ $(logInfo) "Updating Preparation (deletion of data was required)"
+  when runNeeded $ $(logInfo) "Updating Preparation (a run was required)"
   when (not delNeeded && not runNeeded && prepSteps > 0) $ $(logInfo) "Preparation phase needs no change"
   if runNeeded
     then maybe new return mResData' >>= run
@@ -399,9 +398,8 @@ runWarmUp g exps repResId initSt initInpSt mResData = do
     if delNeeded
       then deleteResultData (WarmUp repResId) >> return Nothing
       else return mResData
-  trace ("warm delNeeded: " ++ show delNeeded) $
-    trace ("warm runNeeded: " ++ show runNeeded) $ if runNeeded
-  then maybe new return mResData' >>= run
+  if runNeeded
+    then maybe new return mResData' >>= run
     else do
       when delNeeded $ $(logInfo) "Updating WarmUp (delNeeded)"
       return (delNeeded, mResData')
@@ -426,11 +424,9 @@ runEval ::
 runEval g exps warmUpUpdated repResId initSt initInpSt mResData = do
   mResData' <-
     if delNeeded
-      then trace ("del Res data...") $ deleteResultData (Rep repResId) >> return Nothing
+      then deleteResultData (Rep repResId) >> return Nothing
       else return mResData
-  trace ("runNeeded: " ++ show runNeeded ++ "evalSteps: " ++ show evalSteps ++ " > " ++ show (length . view results <$> mResData' )) $ trace ("delNeeded: " ++ show delNeeded) $
-    trace ("mResData: " ++ show (view resultDataKey <$> mResData' ))
-    when delNeeded $ $(logInfo) "Deletion of Evaluation data needed"
+  when delNeeded $ $(logInfo) "Deletion of Evaluation data needed"
   if runNeeded
     then do
       $(logInfo) $ "An evaluation run is needed for replication with ID " <> tshow (unSqlBackendKey $ unRepResultKey repResId)
@@ -460,15 +456,16 @@ data RepResultType
 
 
 deleteResultData :: (MonadIO m) => RepResultType -> ReaderT SqlBackend m ()
-deleteResultData repResType =
+deleteResultData repResType = do
   case repResType of
     Prep expResId   -> do
       -- selectKeysList [PrepInputExpResult ==. expResId] [] >>= mapM_ (\x -> deleteWhere [PrepInputValuePrepInput ==. x])
       -- deleteCascadeWhere [PrepInputExpResult ==. expResId]
       -- deleteCascadeWhere [PrepInputExpResult ==. expResId]
       -- selectKeysList [PrepMeasureExpResult ==. expResId] [] >>= mapM_ (\k -> deleteWhere [PrepResultStepMeasure ==. k])
+      update expResId [ExpResultPrepResultData =. Nothing]
       exp <- get expResId
-      void $ sequence $ deleteCascade <$> (join $ view expResultPrepResultData <$> exp)
+      sequence_ $ deleteCascade <$> (view expResultPrepResultData =<< exp)
 
 
       -- del (UniquePrepResultDataExpResult expResId)
@@ -480,8 +477,9 @@ deleteResultData repResType =
       -- selectKeysList [WarmUpMeasureRepResult ==. repResId] [] >>= mapM_ (\x -> deleteWhere [WarmUpResultStepMeasure ==. x])
       -- deleteCascadeWhere [WarmUpMeasureRepResult ==. repResId]
       -- del (UniqueWarmUpResultDataRepResult repResId)
+      update repResId [RepResultWarmUpResultData =. Nothing]
       repRes <- get repResId
-      void $ sequence $ deleteCascade <$> (join $ view repResultWarmUpResultData <$> repRes)
+      sequence_ $ deleteCascade <$> (view repResultWarmUpResultData =<< repRes)
 
 
       -- selectList [WarmUpInputRepResult ==. repResId] [] >>= mapM_ (deleteCascade . entityKey)
@@ -495,12 +493,11 @@ deleteResultData repResType =
       -- deleteCascadeWhere [RepMeasureRepResult ==. repResId]
       -- selectList [RepInputRepResult ==. repResId] [] >>= mapM_ (deleteCascade . entityKey)
       -- selectList [RepMeasureRepResult ==. repResId] [] >>= mapM_ (deleteCascade . entityKey)
+      update repResId [RepResultRepResultData =. Nothing]
       repRes <- get repResId
-      void $ sequence $ deleteCascade <$> (join $ view repResultRepResultData <$> repRes)
+      sequence_ $ deleteCascade <$> (view repResultRepResultData =<< repRes)
       -- del (UniqueRepResultDataRepResult repResId)
-  where
-    del unique = do
-      getBy unique >>= mapM_ (deleteCascade . entityKey)
+  -- transactionSave
 
 
 runResultData :: (ExperimentDef a) => Int -> RepResultType -> ResultData a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, ResultData a)
@@ -544,7 +541,6 @@ runResultData len repResType resData = do
       zipWithM_ (\k v -> insert $ RepInputValue k (runPut . put . view inputValue $ v)) inpKeys inpVals
       measureKeys <- mapM (insert . RepMeasure k . view measurePeriod) ress
       zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ RepResultStep k n mX y) xs) measureKeys ress
-      trace ("runResultData") $(logDebug) $ "runResultData"
       replace k (RepResultData sTime eTime (tshow sG) (tshow <$> eG) (runPut . put $ serialisable sSt) (runPut . put . serialisable <$> eSt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
     upd _ _ = error "Unexpected update combination. This is a bug, please report it!"
 
