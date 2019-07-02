@@ -22,6 +22,7 @@ import           Data.Time                   (getCurrentTime)
 import qualified Database.Esqueleto          as E
 import           Database.Persist
 import           Database.Persist.Postgresql (SqlBackend)
+import           System.Exit                 (exitFailure)
 
 import           Experimenter.Experiment
 import           Experimenter.Input
@@ -60,7 +61,8 @@ deserialise n bs =
    in case res of
         Left err -> do
           $(logError) $ "Could not deserialise " <> n <> "! Discarding saved experiment result. Data length: " <> tshow (B.length bs) <> ". Error Message: " <> tshow err
-          return Nothing
+          liftIO exitFailure
+          -- return Nothing
         Right r -> return $ Just r
 
 
