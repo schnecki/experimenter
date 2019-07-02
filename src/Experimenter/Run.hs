@@ -332,9 +332,6 @@ runPreparation g exps expResId mResData = do
   when delNeeded $ $(logInfo) "Updating Preparation (deletion of data was required)"
   when runNeeded $ $(logInfo) "Updating Preparation (a run was required)"
   when (not delNeeded && not runNeeded && prepSteps > 0) $ $(logInfo) "Preparation phase needs no change"
-  $(logInfo) $ "PrepSteps: " <> tshow prepSteps
-  $(logInfo) $ "DelNeeded: " <> tshow delNeeded
-  $(logInfo) $ "RunNeeded: " <> tshow runNeeded
   if runNeeded
     then maybe new return mResData' >>= run
     else return (delNeeded || runNeeded, mResData')

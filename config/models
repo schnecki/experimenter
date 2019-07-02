@@ -34,7 +34,7 @@ ParamSetting
     exp ExpId
     name Text
     value ByteString
-    dropPreparationPhase Bool default=False
+    dropPreparationPhase Bool 
 
 
 ExpResult
