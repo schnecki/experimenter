@@ -37,7 +37,6 @@ dependencies:
 - aeson
 - esqueleto
 - unliftio-core
-- random-shuffle
 - HaTeX
 - directory
 - process

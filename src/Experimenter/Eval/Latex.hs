@@ -276,6 +276,8 @@ paramSettingTable evals (ExperimentEval nr _ exp)
   where
     dropRow :: Row
     dropRow = Row [CellT "Drop Preparation Phase", CellT "True (No preparation phase was executed!)"]
+    singleInstanceRow :: Text -> Row
+    singleInstanceRow n = Row [CellT "Run a single instance", CellT $ "True (No further variations needed as specified by parameter " <> n <> "!)"]
     mkRow :: ParameterSetting a -> [Row]
     mkRow (ParameterSetting n bsV drp design) =
       case find ((== n) . parameterName) (evals ^. evalsExperiments . experimentsParameters) of
@@ -290,23 +292,25 @@ paramSettingTable evals (ExperimentEval nr _ exp)
                  FullFactory    -> ""
                  SingleInstance -> "[SingleInstance]")
             ] :
-          [dropRow | drp]
+          [dropRow | drp] ++
+          [singleInstanceRow n | drp]
         Just (ParameterSetup _ setter _ _ mBounds _ _) ->
           case S.runGet S.get bsV of
             Left err -> [Row [CellT n, CellT (T.pack err)]]
             Right val ->
               let _ = setter val (evals ^. evalsExperiments . experimentsInitialState) -- only needed for type inference
-              in Row
-                   [ CellT n
-                   , CellL $ raw (tshow val) <>
-                     (case mBounds of
-                        Nothing -> ""
-                        Just (minVal, maxVal) -> math (text " " `in_` autoParens (text (raw (tshow minVal)) <> ", " <> text (raw (tshow maxVal))))) <>
-                     (if drp
-                        then " [DropPrepPhase]"
-                        else mempty) <>
-                     (case design of
-                        FullFactory    -> ""
-                        SingleInstance -> "[SingleInstance]")
-                   ] :
-                 [dropRow | drp]
+               in Row
+                    [ CellT n
+                    , CellL $ raw (tshow val) <>
+                      (case mBounds of
+                         Nothing -> ""
+                         Just (minVal, maxVal) -> math (text " " `in_` autoParens (text (raw (tshow minVal)) <> ", " <> text (raw (tshow maxVal))))) <>
+                      (if drp
+                         then " [DropPrepPhase]"
+                         else mempty) <>
+                      (case design of
+                         FullFactory    -> ""
+                         SingleInstance -> "[SingleInstance]")
+                    ] :
+                  [dropRow | drp] ++
+                  [singleInstanceRow n | drp]

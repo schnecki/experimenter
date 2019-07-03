@@ -32,12 +32,13 @@ data ParameterSetup a =
 
 data ParameterSetting a =
   ParameterSetting
-  { _parameterSettingName         :: T.Text
-  , _parameterSettingValue        :: BS.ByteString
-  , _parameterDropPrepeationPhase :: Bool
-  , _parameterExperimentDesign    :: ExperimentDesign
-  }
+  { _parameterSettingName                :: T.Text
+  , _parameterSettingValue               :: BS.ByteString
+  , _parameterSettingDropPrepeationPhase :: Bool
+  , _parameterSettingExperimentDesign    :: ExperimentDesign
+  } deriving (Eq)
 makeLenses ''ParameterSetting
+
 
 getParameterData :: ParameterSetup a -> a -> BS.ByteString
 getParameterData (ParameterSetup _ _ getter _ _ _ _) a = runPut $ put $ getter a
