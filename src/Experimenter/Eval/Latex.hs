@@ -264,10 +264,10 @@ mkEvalResult leastUnit [] (EvalReducedValue statsDef u y) = TableResult (Row [Ce
 mkEvalResult leastUnit names@(n:_) (EvalReducedValue statsDef u y) = TableResult (Row [CellEmpty , CellT $ prettyStatsDef statsDef]) [Row [n, CellD y]]
 
 
-paramSetting :: (MonadLogger m) => Evals a -> ExperimentEval a -> LaTeXT m ()
-paramSetting evals expEval@(ExperimentEval nr _ exp) = do
-  subsection $ "Parameter Setting of Experiment No. " <> raw (tshow nr)
-  maybe "There are no configured parameters!" printTable (paramSettingTable evals expEval)
+-- paramSetting :: (MonadLogger m) => Evals a -> ExperimentEval a -> LaTeXT m ()
+-- paramSetting evals expEval@(ExperimentEval nr _ exp) = do
+--   subsection $ "Parameter Setting of Experiment No. " <> raw (tshow nr)
+--   maybe "There are no configured parameters!" printTable (paramSettingTable evals expEval)
 
 paramSettingTable :: Evals a -> ExperimentEval a -> Maybe Table
 paramSettingTable evals (ExperimentEval nr _ exp)
@@ -277,7 +277,7 @@ paramSettingTable evals (ExperimentEval nr _ exp)
     dropRow :: Row
     dropRow = Row [CellT "Drop Preparation Phase", CellT "True (No preparation phase was executed!)"]
     mkRow :: ParameterSetting a -> [Row]
-    mkRow (ParameterSetting n bsV drp) =
+    mkRow (ParameterSetting n bsV drp design) =
       case find ((== n) . parameterName) (evals ^. evalsExperiments . experimentsParameters) of
         Nothing ->
           Row
@@ -285,10 +285,13 @@ paramSettingTable evals (ExperimentEval nr _ exp)
             , CellT $ "was not modified as it is not listed in the parameter setting" <>
               (if drp
                  then " [DropPrepPhase]"
-                 else "")
+                 else "") <>
+              (case design of
+                 FullFactory    -> ""
+                 SingleInstance -> "[SingleInstance]")
             ] :
           [dropRow | drp]
-        Just (ParameterSetup _ setter _ _ mBounds _) ->
+        Just (ParameterSetup _ setter _ _ mBounds _ _) ->
           case S.runGet S.get bsV of
             Left err -> [Row [CellT n, CellT (T.pack err)]]
             Right val ->
@@ -301,6 +304,9 @@ paramSettingTable evals (ExperimentEval nr _ exp)
                         Just (minVal, maxVal) -> math (text " " `in_` autoParens (text (raw (tshow minVal)) <> ", " <> text (raw (tshow maxVal))))) <>
                      (if drp
                         then " [DropPrepPhase]"
-                        else mempty)
+                        else mempty) <>
+                     (case design of
+                        FullFactory    -> ""
+                        SingleInstance -> "[SingleInstance]")
                    ] :
                  [dropRow | drp]

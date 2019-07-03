@@ -97,7 +97,7 @@ loadExperimentResult (Entity k (ExpResult _ rep mPrepResDataId)) = do
 loadParamSetup :: (MonadLogger m, MonadIO m) => Key Exp -> ReaderT SqlBackend m [ParameterSetting a]
 loadParamSetup kExp = L.sortBy (compare `on` view parameterSettingName) . map (mkParameterSetting' . entityVal) <$> selectList [ParamSettingExp ==. kExp] []
   where
-    mkParameterSetting' (ParamSetting _ n v b) = ParameterSetting n v b
+    mkParameterSetting' (ParamSetting _ n v b design) = ParameterSetting n v b (toEnum design)
 
 
 loadPreparationInput :: (ExperimentDef a, MonadLogger m, MonadIO m) => Key PrepResultData -> ReaderT SqlBackend m (Maybe [Input a])
@@ -300,5 +300,5 @@ getOrCreateExps setup initInpSt initSt = do
         (max 1 $ view evaluationReplications setup)
         (max 1 $ view maximumParallelEvaluations setup)
     insertParam :: Key Exps -> ParameterSetup a -> ReaderT SqlBackend m (Key Param)
-    insertParam eExp (ParameterSetup n _ _ _ (Just (minVal, maxVal)) drp) = insert $ Param eExp n (Just $ runPut $ put minVal) (Just $ runPut $ put maxVal)
-    insertParam eExp (ParameterSetup n _ _ _ Nothing drp) = insert $ Param eExp n Nothing Nothing
+    insertParam eExp (ParameterSetup n _ _ _ (Just (minVal, maxVal)) drp _) = insert $ Param eExp n (Just $ runPut $ put minVal) (Just $ runPut $ put maxVal)
+    insertParam eExp (ParameterSetup n _ _ _ Nothing drp _) = insert $ Param eExp n Nothing Nothing

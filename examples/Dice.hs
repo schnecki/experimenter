@@ -49,7 +49,7 @@ instance ExperimentDef Dice where
 
 
 fakeParam :: ParameterSetup Dice
-fakeParam = ParameterSetup "fake" (\mD (Dice g _) -> Dice g mD) (\(Dice _ mD) -> mD) (Just (\(Just b) -> return [Just (fromR $ toR b - 0.2), Just (fromR $ toR b + 0.2)])) (Just (Just 0, Just 1)) (const False)
+fakeParam = ParameterSetup "fake" (\mD (Dice g _) -> Dice g mD) (\(Dice _ mD) -> mD) (Just (\(Just b) -> return [Just (fromR $ toR b - 0.2), Just (fromR $ toR b + 0.2)])) (Just (Just 0, Just 1)) Nothing Nothing
   where
     toR x = approxRational x 0.0001
     fromR = fromRational

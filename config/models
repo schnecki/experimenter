@@ -35,6 +35,7 @@ ParamSetting
     name Text
     value ByteString
     dropPreparationPhase Bool
+    experimentDesign Int
 
 
 ExpResult

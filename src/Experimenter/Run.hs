@@ -101,7 +101,11 @@ continueExperiments exp = do
   liftIO $ hFlush stdout
   let exps = exp ^. experiments
   rands <- liftIO $ mkRands exps
-  newExps <- mkNewExps exp exps
+  let params = parameters (exp ^. experimentsInitialState)
+  newExps <-
+    if null params
+      then mkNoParamExp exp
+      else concat <$> mapM (mkNewExps exp exps) [0 .. length params - 1]
   let expsList = exps ++ newExps
   $(logInfo) $ "Number of experiments loaded: " <> tshow (length exps)
   $(logInfo) $ "Number of new experiments: " <> tshow (length newExps)
@@ -115,72 +119,6 @@ continueExperiments exp = do
       return (updated, set experiments res $ set experimentsEndTime endTime exp)
     else return (updated, set experiments res exp)
   where
-    mkParamSetting :: Experiments a -> ParameterSetup a -> ParameterSetting a
-    mkParamSetting exp (ParameterSetup name setter getter mod bnds drp) =
-      ParameterSetting name (runPut $ put $ getter (exp ^. experimentsInitialState)) (drp $ getter (exp ^. experimentsInitialState))
-    initParams exp = map (mkParamSetting exp) (view experimentsParameters exp)
-    mkNewExps :: (ExperimentDef a) => Experiments a -> [Experiment a] -> ReaderT SqlBackend (LoggingT (ExpM a)) [Experiment a]
-    mkNewExps exp [] = do
-      $(logInfo) $ "Initializing new experiments..."
-      startTime <- liftIO getCurrentTime
-      kExp <- insert $ Exp (exp ^. experimentsKey) 1 startTime Nothing
-      saveParamSettings kExp (initParams exp)
-      return [Experiment kExp 1 startTime Nothing (initParams exp) []]
-    mkNewExps exp expsDone = do
-      $(logInfo) "Checking whether adding further experiments is necessary..."
-      params <- liftIO $ shuffleM $ parameters (exp ^. experimentsInitialState)
-      if null params
-        then return []
-        else do
-          startTime <- liftIO getCurrentTime
-          let p = head params
-          let otherParams = map (`mkParameterSetting` st) (tail params)
-          paramSettings <- modifyParam exp p
-          paramSettings' <- filterParamSettings exp p otherParams paramSettings
-          let settings = map (\x -> L.sortBy (compare `on` view parameterSettingName) (x : otherParams)) paramSettings'
-          let nrs = [1 + length expsDone .. length expsDone + length settings]
-          kExps <- mapM (\nr -> insert $ Exp (exp ^. experimentsKey) nr startTime Nothing) nrs
-          zipWithM_ saveParamSettings kExps settings
-          let exps = zipWith3 (\key nr params -> Experiment key nr startTime Nothing params []) kExps nrs settings
-          unless (null exps) $ $(logInfo) $ "Created " <> tshow (length exps) <> " new experiments variations!"
-          return exps
-      where
-        st = exp ^. experimentsInitialState
-    filterParamSettings exp p otherParams paramSettings = do
-      expIds <- map entityKey <$> selectList [ExpExps ==. exp ^. experimentsKey] []
-      pExists <-
-        map (map (view paramSettingExp . entityVal)) <$>
-        mapM (\v -> selectList [ParamSettingExp <-. expIds, ParamSettingName ==. parameterName p, ParamSettingValue ==. view parameterSettingValue v] []) paramSettings
-      paramSettingExits <-
-        map or <$>
-        mapM
-          (\pValsIds ->
-             mapM
-               (\k -> do
-                  ps <- map entityVal <$> selectList [ParamSettingExp ==. k] []
-                  return $ all (\(ParameterSetting n vBs drp) -> maybe False ((vBs ==) . view paramSettingValue) $ L.find ((== n) . view paramSettingName) ps) otherParams)
-               (L.nub pValsIds))
-          pExists
-      return $ map fst $ filter (not . snd) $ zip paramSettings paramSettingExits
-    modifyParam :: (MonadIO m) => Experiments a -> ParameterSetup a -> ReaderT SqlBackend m [ParameterSetting a]
-    modifyParam exps (ParameterSetup _ _ _ Nothing _ _) = return []
-    modifyParam exps (ParameterSetup n setter getter (Just modifier) mBounds drp) = do
-      pairs <-
-        E.select $ E.from $ \(exp, par) -> do
-          E.where_ (exp E.^. ExpExps E.==. E.val (view experimentsKey exps))
-          E.where_ (par E.^. ParamSettingExp E.==. exp E.^. ExpId)
-          return (exp, par)
-      let concatRight Left {}   = []
-          concatRight (Right x) = [x]
-      let vals = concatMap (concatRight . S.runGet S.get . view paramSettingValue . entityVal . snd) pairs
-      let filterBounds x = case mBounds of
-            Nothing           -> True
-            Just (minB, maxB) -> x <= maxB && x >= minB
-      bss <- liftIO $ concat <$> mapM (\val -> zip (repeat val) . fmap (runPut . put) . filter filterBounds <$> modifier (getter $ setter val st)) vals
-      return $ map (\(v, bs) -> ParameterSetting n bs (drp v)) bss
-      where
-        st = exps ^. experimentsInitialState
-    saveParamSettings kExp = mapM_ (\(ParameterSetting n bs drp) -> insert $ ParamSetting kExp n bs drp)
     mkRands :: [Experiment a] -> IO ([StdGen], [StdGen], [StdGen])
     mkRands [] = do
       prep <- replicateM repetits newStdGen
@@ -198,6 +136,112 @@ continueExperiments exp = do
     repetits = exp ^. experimentsSetup . expsSetupRepetitions
     replicats = exp ^. experimentsSetup . expsSetupEvaluationReplications
 
+saveParamSettings :: (MonadIO m) =>Key Exp -> [ParameterSetting a] -> ReaderT SqlBackend m ()
+saveParamSettings kExp = mapM_ (\(ParameterSetting n bs drp design) -> insert $ ParamSetting kExp n bs drp (fromEnum design))
+
+
+initParams :: Experiments a -> [ParameterSetting a]
+initParams exp = map (mkParamSetting exp) (view experimentsParameters exp)
+  where
+    mkParamSetting :: Experiments a -> ParameterSetup a -> ParameterSetting a
+    mkParamSetting exp (ParameterSetup name setter getter mod bnds drp design) =
+      let v = getter (exp ^. experimentsInitialState)
+      in ParameterSetting name (runPut $ put $ getter (exp ^. experimentsInitialState)) (maybe False (\x -> x v) drp) (maybe FullFactory (\x -> x v) design)
+
+
+mkNoParamExp :: (ExperimentDef a) => Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) [Experiment a]
+mkNoParamExp exp = do
+  $(logInfo) $ "Initializing new experiments..."
+  startTime <- liftIO getCurrentTime
+  kExp <- insert $ Exp (exp ^. experimentsKey) 1 startTime Nothing
+  saveParamSettings kExp (initParams exp)
+  return [Experiment kExp 1 startTime Nothing (initParams exp) []]
+
+mkNewExps :: (ExperimentDef a) => Experiments a -> [Experiment a] -> Int -> ReaderT SqlBackend (LoggingT (ExpM a)) [Experiment a]
+mkNewExps exp expsDone paramId = do
+  $(logInfo) "Checking whether adding further experiments is necessary..."
+  -- params <- liftIO $ shuffleM $ parameters (exp ^. experimentsInitialState)
+  let params = parameters (exp ^. experimentsInitialState)
+  if null params
+    then return []
+    else do
+      $(logInfo) "Creating new experiment variants"
+      startTime <- liftIO getCurrentTime
+      let p = params !! paramId
+          otherPs = take paramId params ++ drop (paramId + 1) params
+      st' <- foldM applyParams (exp ^. experimentsInitialState) otherPs
+      let otherParams = map (`mkParameterSetting` st') otherPs
+      paramSettings <- modifyParam exp st' p
+      $(logDebug) $ "ParamSettings: " <> tshow (length paramSettings)
+      paramSettings' <- filterParamSettings exp p otherParams paramSettings
+      $(logDebug) $ "ParamSettings': " <> tshow (length paramSettings')
+      let settings = map (\x -> L.sortBy (compare `on` view parameterSettingName) (x : otherParams)) paramSettings'
+      let nrs = [1 + length expsDone .. length expsDone + length settings]
+      kExps <- mapM (\nr -> insert $ Exp (exp ^. experimentsKey) nr startTime Nothing) nrs
+      zipWithM_ saveParamSettings kExps settings
+      let exps = zipWith3 (\key nr params -> Experiment key nr startTime Nothing params []) kExps nrs settings
+      unless (null exps) $ $(logInfo) $ "Created " <> tshow (length exps) <> " new experiments variations!"
+      transactionSave
+      return exps
+  where
+    applyParams st param@(ParameterSetup n setter getter _ _ _ _) = do
+      p <- head . L.sortBy (compare `on` view parameterExperimentDesign) <$> modifyParam exp st param
+      return $
+        setter
+          (case S.runGet S.get $ view parameterSettingValue p of
+             Left _ ->
+               error $ "Could not deserialize parameter value of parameter " <> T.unpack n <> " and initial state value " <> show (view parameterSettingValue p) <>
+               ". Either add modifications to the parameter setup or provide a serialisable value in the initial state."
+             Right x -> x)
+          st
+
+filterParamSettings :: (MonadIO m) => Experiments a -> ParameterSetup a -> [ParameterSetting a] -> [ParameterSetting a] -> ReaderT SqlBackend m [ParameterSetting a]
+filterParamSettings exp p otherParams paramSettings = do
+  expIds <- map entityKey <$> selectList [ExpExps ==. exp ^. experimentsKey] []
+  pExists <-
+    map (map (view paramSettingExp . entityVal)) <$>
+    mapM (\v -> selectList [ParamSettingExp <-. expIds, ParamSettingName ==. parameterName p, ParamSettingValue ==. view parameterSettingValue v] []) paramSettings
+  paramSettingsExists <-
+    map or <$>
+    mapM
+      (\pValsIds ->
+         mapM
+           (\k -> do
+              ps <- map entityVal <$> selectList [ParamSettingExp ==. k] []
+              let selfSingleInstance = toEnum (ps ^. paramSettingExperimentDesign)
+              return $ all (\(ParameterSetting n vBs _ design) -> maybe False ((vBs ==) . view paramSettingValue) $ L.find ((== n) . view paramSettingName) ps) otherParams
+                && True)
+           (L.nub pValsIds))
+      pExists
+  return $ map fst $ filter (not . snd) $ zip paramSettings paramSettingsExists
+
+
+modifyParam :: (MonadLogger m, MonadIO m) => Experiments a -> a -> ParameterSetup a -> ReaderT SqlBackend m [ParameterSetting a]
+modifyParam exps st' (ParameterSetup n _ getter Nothing _ drop design) = do
+  $(logInfo) $ "No modifications for parameter " <> n <> " found. Using the default value set in the input state."
+  let v = getter st'
+      bs = S.runPut $ S.put v
+      drp = maybe False (\x -> x v) drop
+      dsgn = maybe FullFactory (\x -> x v) design
+  return [ParameterSetting n bs drp dsgn]
+modifyParam exps st' (ParameterSetup n setter getter (Just modifier) mBounds drp design) = do
+  pairs <-
+    E.select $ E.from $ \(exp, par) -> do
+      E.where_ (exp E.^. ExpExps E.==. E.val (view experimentsKey exps))
+      E.where_ (par E.^. ParamSettingExp E.==. exp E.^. ExpId)
+      return (exp, par)
+  $(logDebug) $ "pairs: " <> tshow (length pairs)
+  let concatRight Left {}   = []
+      concatRight (Right x) = [x]
+  let vals | null pairs = [getter st']
+           | otherwise = concatMap (concatRight . S.runGet S.get . view paramSettingValue . entityVal . snd) pairs
+  let filterBounds x =
+        case mBounds of
+          Nothing           -> True
+          Just (minB, maxB) -> x <= maxB && x >= minB
+  bss <- liftIO $ concat <$> mapM (\val -> zip (repeat val) . fmap (runPut . put) . filter filterBounds <$> modifier (getter $ setter val st')) vals
+  return $ map (\(v, bs) -> ParameterSetting n bs (maybe False (\x -> x v) drp) (maybe FullFactory (\x -> x v) design)) bss
+
 
 deleteExperiment :: (MonadIO m) => Experiment a -> ReaderT SqlBackend m ()
 deleteExperiment (Experiment k _ _ _ _ expRes) = mapM_ deleteExperimentResult expRes >> deleteCascade k
@@ -210,12 +254,12 @@ deleteExperimentResult (ExperimentResult k _ _ repls) = mapM_ deleteReplicationR
 loadParameters  :: (ExperimentDef a) => Experiments a -> Experiment a  -> ReaderT SqlBackend (LoggingT (ExpM a)) (Experiments a)
 loadParameters exps exp = foldM setParam exps (exp ^. parameterSetup)
   where
-    setParam e (ParameterSetting n bs drp) =
-      case L.find (\(ParameterSetup name _ _ _ _ _) -> name == n) parameterSetups of
+    setParam e (ParameterSetting n bs drp _) =
+      case L.find (\(ParameterSetup name _ _ _ _ _ _) -> name == n) parameterSetups of
         Nothing -> do
           $(logError) $ "Could not find parameter with name " <> n <> " in the current parameter setting. Thus it cannot be modified!"
           return e
-        Just (ParameterSetup _ setter _ _ _ drp) ->
+        Just (ParameterSetup _ setter _ _ _ drp _) ->
           case runGet S.get bs of
             Left err -> error $ "Could not read value of parameter " <> T.unpack n <> ". Aborting! Serializtion error was: " ++ err
             Right val -> do
