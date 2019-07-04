@@ -1,30 +1,61 @@
+{-# LANGUAGE FlexibleContexts  #-}
+{-# LANGUAGE GADTs             #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell   #-}
+{-# LANGUAGE TypeFamilies      #-}
 
 module Experimenter.Eval.Ops
     ( genEvals
+    , genEvalsIO
     ) where
 
-import           Control.Lens             hiding (Cons, Over, over)
-import           Control.Monad            (unless)
-import           Control.Monad.Logger     (logDebug)
-import           Data.Function            (on)
-import           Data.List                (find, sortBy)
-import           Data.Maybe               (fromMaybe)
-import qualified Data.Text                as T
+import           Control.Lens                hiding (Cons, Over, over)
+import           Control.Monad               (unless)
+import           Control.Monad.Logger        (logDebug)
+import           Control.Monad.Logger
+import           Control.Monad.Reader
+import           Data.Function               (on)
+import           Data.List                   (find, sortBy)
+import           Data.Maybe                  (fromMaybe)
+import qualified Data.Text                   as T
+import           Database.Persist.Postgresql (SqlBackend, runSqlConn, withPostgresqlConn)
 
+import           Experimenter.DatabaseSetup
 import           Experimenter.Eval.Reduce
-import           Experimenter.Eval.Type   as E
+import           Experimenter.Eval.Type      as E
+import           Experimenter.Experiment
 import           Experimenter.Measure
 import           Experimenter.Result.Type
 import           Experimenter.StepResult
 import           Experimenter.Util
 
 
-genEvals :: Experiments a -> [StatsDef a] -> IO (Evals a)
-genEvals exps evals = do
-  res <- mapM mkEval (exps ^. experiments)
-  return $ Evals exps res
+makeResDataAvailable :: (ExperimentDef a) => Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Experiments a)
+makeResDataAvailable exps =
+  (experiments . traversed . experimentResults . traversed . evaluationResults . traversed . evalResults . traversed . results) mkAvailable exps >>=
+  mapMOf (experiments . traversed . experimentResults . traversed . evaluationResults . traversed . evalResults . traversed . inputValues) mkAvailable
+  -- mapMOf (experiments . traversed . experimentResults . traversed . warmUpResults . traversed . evalResults . traversed . results) mkAvailable >>=
+  -- mapMOf (experiments . traversed . experimentResults . traversed . warmUpResults . traversed . evalResults . traversed . inputValues) mkAvailable >>=
+  -- mapMOf (experiments . traversed . preparationResults . traversed . evalResults . traversed . results) mkAvailable >>=
+  -- mapMOf (experiments . traversed . preparationResults . traversed . evalResults . traversed . inputValues) mkAvailable
+  where
+    mkAvailable (Available xs)          = return $ Available xs
+    mkAvailable (AvailableFromDB query) = Available <$> query
+
+runner :: (ExperimentDef a) => (ExpM a (Experiments a) -> IO (Experiments a)) -> DatabaseSetup -> Experiments a -> IO (Experiments a)
+runner runExpM dbSetup exps =
+  runExpM $
+  (runStdoutLoggingT . filterLogger (\s _ -> s /= "SQL")) $ withPostgresqlConn (connectionString dbSetup) $ \backend -> flip runSqlConn backend $ makeResDataAvailable exps
+
+
+genEvalsIO :: (ExperimentDef a, IO ~ ExpM a) => DatabaseSetup -> Experiments a -> [StatsDef a] -> IO (Evals a)
+genEvalsIO = genEvals id
+
+genEvals :: (ExperimentDef a) => (ExpM a (Experiments a) -> IO (Experiments a)) -> DatabaseSetup -> Experiments a -> [StatsDef a] -> IO (Evals a)
+genEvals runExpM dbSetup exps evals = do
+  exps' <- runner runExpM dbSetup exps
+  res <- mapM mkEval (exps' ^. experiments)
+  return $ Evals exps' res
   where
     mkEval e = do
       xs <- mapM (genExperiment e) evals
@@ -82,10 +113,14 @@ genResultData exp eval repl =
     _                        -> genExperiment exp eval
 
 
+fromAvailable :: Availability a b -> b
+fromAvailable (Available b) = b
+fromAvailable (AvailableFromDB _) = error "Data was not loaded from DB. Need to load data before running the evaluation!"
+
 evalOf :: Experiment a -> Of a -> ResultData a -> IO (EvalResults a)
 evalOf exp eval resData =
   case eval of
-    Of name              -> return $ EvalVector (Id $ Of name) UnitPeriods $  sortBy (compare `on` (^?! evalX)) $ map (fromMeasure name) (resData ^. results)
+    Of name              -> return $ EvalVector (Id $ Of name) UnitPeriods $  sortBy (compare `on` (^?! evalX)) $ map (fromMeasure name) (fromAvailable $ resData ^. results)
     Stats def            -> genExperiment exp def
     Div eval1 eval2      -> reduceBinaryOf eval <$> evalOf exp eval1 resData <*> evalOf exp eval2 resData
     Add eval1 eval2      -> reduceBinaryOf eval <$> evalOf exp eval1 resData <*> evalOf exp eval2 resData

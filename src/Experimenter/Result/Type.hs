@@ -1,6 +1,8 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE RankNTypes       #-}
-{-# LANGUAGE TemplateHaskell  #-}
+{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE FlexibleContexts          #-}
+{-# LANGUAGE GADTs                     #-}
+{-# LANGUAGE RankNTypes                #-}
+{-# LANGUAGE TemplateHaskell           #-}
 
 module Experimenter.Result.Type where
 
@@ -12,9 +14,13 @@ import           Experimenter.Parameter
 import           Experimenter.Setup
 
 import           Control.Lens
+import           Control.Monad.IO.Class
+import           Control.Monad.Logger
+import           Control.Monad.Reader
 import           Data.Serialize
-import qualified Data.Text               as T
+import qualified Data.Text                   as T
 import           Data.Time
+import           Database.Persist.Postgresql (SqlBackend)
 import           System.Random
 
 data ResultDataKey
@@ -23,14 +29,19 @@ data ResultDataKey
   | ResultDataRep (Key RepResultData)
   deriving (Eq, Show)
 
+data Availability a b
+  = (ExperimentDef a) =>
+    Available b
+  | AvailableFromDB (ReaderT SqlBackend (LoggingT (ExpM a)) b)
+
 data ResultData a = ResultData
   { _resultDataKey   :: ResultDataKey
   , _startTime       :: !UTCTime
   , _endTime         :: !(Maybe UTCTime)
   , _startRandGen    :: StdGen
   , _endRandGen      :: Maybe StdGen
-  , _inputValues     :: ![Input a]
-  , _results         :: ![Measure]
+  , _inputValues     :: !(Availability a [Input a])
+  , _results         :: !(Availability a [Measure])
   , _startState      :: !a
   , _endState        :: !(Maybe a)    -- ^ state at end of warm-up phase
   , _startInputState :: !(InputState a)

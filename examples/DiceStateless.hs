@@ -76,6 +76,6 @@ main = do
               , Mean OverReplications (Of "draw"), StdDev OverReplications (Of "draw")
               , Id (Of "draw"), Id (Of "draw")
               ]
-  evalRes <- genEvals res evals
+  evalRes <- genEvalsIO databaseSetup res evals
   -- print (view evalsResults evalRes)
   writeAndCompileLatex evalRes
