@@ -7,6 +7,7 @@
 {-# LANGUAGE TemplateHaskell      #-}
 {-# LANGUAGE TypeFamilies         #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ViewPatterns         #-}
 
 module Experimenter.Run
     ( DatabaseSetup (..)
@@ -16,6 +17,7 @@ module Experimenter.Run
     ) where
 
 import           Control.Arrow                (first, (&&&), (***))
+import           Control.DeepSeq
 import           Control.Lens
 import           Control.Monad                (forM)
 import           Control.Monad.IO.Class
@@ -587,10 +589,13 @@ runResultData len repResType resData = do
   let stInp = fromMaybe (resData ^. startInputState) (resData ^. endInputState)
   let g = fromMaybe (resData ^. startRandGen) (resData ^. endRandGen)
   let periodsToRun = [1 + curLen .. curLen + min 1000 len]
-  $(logInfo) $ "Number of periods still need to run: " <> tshow (len - curLen)
+  $(logInfo) $
+    trace ("Number of steps already run is " <> show curLen <> ", thus still need to run " <> show (len - curLen) <> " steps...") $
+    "Number of steps already run is " <> tshow curLen <> ", thus still need to run " <> tshow (len - curLen) <> " steps..."
   let updated = not (null periodsToRun)
   sTime <- liftIO getCurrentTime
-  (g', st', stInp', inputs, measures) <- foldM run (g, st, stInp, [], []) periodsToRun
+  (g', force -> st', stInp', inputs, force -> measures) <- foldM run (g, st, stInp, [], []) periodsToRun
+
   if updated
     then do
       eTime <- pure <$> liftIO getCurrentTime
@@ -626,23 +631,11 @@ runResultData len repResType resData = do
         return $ results .~ AvailableFromDB (loadReplicationMeasures key) $ inputValues .~ AvailableFromDB (fromMaybe [] <$> loadReplicationInput key) $ resData
 
 
-    upd (Prep expResId) (ResultData (ResultDataPrep k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do
-      -- inpKeys <- mapM (insert . PrepInput k . view inputValuePeriod) inpVals
-      -- zipWithM_ (\k v -> insert $ PrepInputValue k (runPut . put . view inputValue $ v)) inpKeys inpVals
-      -- measureKeys <- mapM (insert . PrepMeasure k . view measurePeriod) ress
-      -- zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ PrepResultStep k n mX y) xs) measureKeys ress
+    upd (Prep expResId) (ResultData (ResultDataPrep k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) =
       replace k (PrepResultData sTime eTime (tshow sG) (tshow <$> eG) (runPut . put $ serialisable sSt) (runPut . put . serialisable <$> eSt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
-    upd (WarmUp repResId) (ResultData (ResultDataWarmUp k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do
-      -- inpKeys <- mapM (insert . WarmUpInput k . view inputValuePeriod) inpVals
-      -- zipWithM_ (\k v -> insert $ WarmUpInputValue k (runPut . put . view inputValue $ v)) inpKeys inpVals
-      -- measureKeys <- mapM (insert . WarmUpMeasure k . view measurePeriod) ress
-      -- zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ WarmUpResultStep k n mX y) xs) measureKeys ress
+    upd (WarmUp repResId) (ResultData (ResultDataWarmUp k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) =
       replace k (WarmUpResultData sTime eTime (tshow sG) (tshow <$> eG) (runPut . put $ serialisable sSt) (runPut . put . serialisable <$> eSt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
-    upd (Rep repResId) (ResultData (ResultDataRep k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do
-      -- inpKeys <- mapM (insert . RepInput k . view inputValuePeriod) inpVals
-      -- zipWithM_ (\k v -> insert $ RepInputValue k (runPut . put . view inputValue $ v)) inpKeys inpVals
-      -- measureKeys <- mapM (insert . RepMeasure k . view measurePeriod) ress
-      -- zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ RepResultStep k n mX y) xs) measureKeys ress
+    upd (Rep repResId) (ResultData (ResultDataRep k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) =
       replace k (RepResultData sTime eTime (tshow sG) (tshow <$> eG) (runPut . put $ serialisable sSt) (runPut . put . serialisable <$> eSt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
     upd _ _ = error "Unexpected update combination. This is a bug, please report it!"
 

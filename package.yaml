@@ -43,6 +43,7 @@ dependencies:
 - matrix
 - unix
 - hostname
+- deepseq
 
 library:
   source-dirs: src

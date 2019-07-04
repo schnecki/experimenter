@@ -6,10 +6,11 @@
 
 module Main where
 
-import           Control.Lens   (view)
+import           Control.DeepSeq
+import           Control.Lens    (view)
 import           Data.Ratio
 import           Data.Serialize
-import qualified Data.Text      as T
+import qualified Data.Text       as T
 import           GHC.Generics
 import           System.Random
 
@@ -18,6 +19,9 @@ import           Experimenter
 
 data Dice = Dice StdGen (Maybe Double)
   deriving (Show, Generic)
+
+instance NFData Dice where
+  rnf (Dice _ nr) = rnf nr
 
 instance Serialize Dice where
   put (Dice g mD) = put (show g) >> put mD

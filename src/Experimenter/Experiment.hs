@@ -6,17 +6,19 @@
 module Experimenter.Experiment where
 
 
-import           Experimenter.Parameter
-import           Experimenter.StepResult
-
+import           Control.DeepSeq
 import           Control.Monad.IO.Unlift
 import           Data.Serialize          (Serialize)
 import           System.Random
 
+import           Experimenter.Parameter
+import           Experimenter.StepResult
+
+
 type Period = Int
 
 
-class (MonadUnliftIO (ExpM a), Serialize (InputValue a), Serialize (InputState a), Serialize (Serializable a)) => ExperimentDef a where
+class (MonadUnliftIO (ExpM a), NFData a, Serialize (InputValue a), Serialize (InputState a), Serialize (Serializable a)) => ExperimentDef a where
 
   type ExpM a :: (* -> *)
 
