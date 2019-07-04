@@ -5,6 +5,13 @@ Exps
     initialState ByteString
     initialInputState ByteString
 
+ExpsMaster
+    exps ExpsId
+    hostname Text
+    pid Int
+    lastAliveSign UTCTime
+    UniqueExpsMaster exps
+
 ExpsSetup
     exps ExpsId
     repetitions Int
@@ -29,6 +36,13 @@ Exp         -- Adding "json" causes ToJSON and FromJSON instances to be derived.
     endTime UTCTime Maybe
     deriving Eq Ord
 
+
+ExpExecutionLock
+    exp ExpId
+    hostname Text
+    pid Int
+    lastAliveSign UTCTime
+    UniqueExpExecutionLock exp
 
 ParamSetting
     exp ExpId

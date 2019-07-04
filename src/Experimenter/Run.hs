@@ -36,11 +36,15 @@ import           Data.Pool                    as P
 import           Data.Serialize               hiding (get)
 import qualified Data.Serialize               as S
 import qualified Data.Text                    as T
-import           Data.Time                    (getCurrentTime)
+import           Data.Time                    (diffUTCTime, getCurrentTime)
 import qualified Database.Esqueleto           as E
 import           Database.Persist.Postgresql
+import           Network.HostName             (HostName, getHostName)
 import           System.IO
+import           System.Posix.Process
+import           System.Posix.Signals
 import           System.Random
+
 
 import           Experimenter.Experiment
 import           Experimenter.Input
@@ -78,7 +82,30 @@ runner runExpM dbSetup setup initInpSt initSt = do
   runStdoutLoggingT $ withPostgresqlPool (connectionString dbSetup) (parallelConnections dbSetup) $ liftSqlPersistMPool $ runMigration migrateAll
   runExpM $
     (runStdoutLoggingT . filterLogger (\s _ -> s /= "SQL")) $
-    withPostgresqlConn (connectionString dbSetup) $ \backend -> flip runSqlConn backend $ loadExperiments setup initInpSt initSt >>= checkUniqueParamNames >>= runExperiment
+    withPostgresqlConn (connectionString dbSetup) $ \backend -> flip runSqlConn backend $ loadExperiments setup initInpSt initSt >>= checkUniqueParamNames >>= runExperimenter
+
+timeout = 30
+
+runExperimenter :: (ExperimentDef a) => Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Bool, Experiments a)
+runExperimenter exps = do
+  pid <- liftIO getProcessID
+  hostName <- liftIO getHostName
+  time <- liftIO getCurrentTime
+  maybeMaster <- insertUnique $ ExpsMaster (exps ^. experimentsKey) (T.pack hostName) (fromIntegral pid) time
+  transactionSave
+  case maybeMaster of
+    Just master -- installHandler sigKill deleteMaster Nothing >>
+     -> runExperiment exps
+    Nothing -> do
+      mMaster <- getBy $ UniqueExpsMaster (exps ^. experimentsKey)
+      case mMaster of
+        Nothing -> runExperimenter exps
+        Just (Entity masterId master) ->
+          if diffUTCTime (master ^. expsMasterLastAliveSign) time > 2 * timeout
+            then delete masterId >> runExperiment exps
+            else undefined
+      -- aquireExperimentLock >>= runExperimentAsClient
+
 
 runExperiment :: (ExperimentDef a) => Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Bool, Experiments a)
 runExperiment exps = do
@@ -542,7 +569,8 @@ runResultData len repResType resData = do
   let st = fromMaybe (resData ^. startState) (resData ^. endState)
   let stInp = fromMaybe (resData ^. startInputState) (resData ^. endInputState)
   let g = fromMaybe (resData ^. startRandGen) (resData ^. endRandGen)
-  let periodsToRun = [1 + length (resData ^. results) .. len]
+  let curLen = length (resData ^. results)
+  let periodsToRun = [1 + curLen .. curLen + min 100 len]
   $(logInfo) $ "Number of periods to run: " <> tshow (length periodsToRun)
   let updated = not (null periodsToRun)
   sTime <- liftIO getCurrentTime
@@ -557,7 +585,10 @@ runResultData len repResType resData = do
                else id) $
             over results (++measures) $ over inputValues (++inputs) $ set endInputState (Just stInp') $ set endState (Just st') $ set endRandGen (Just g') $ set endTime eTime resData
       upd repResType resData'
-      return (True, resData')
+      transactionSave
+      if curLen < len
+        then runResultData len repResType resData'
+        else return (True, resData')
     else return (False, resData)
   where
     upd (Prep expResId) (ResultData (ResultDataPrep k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do

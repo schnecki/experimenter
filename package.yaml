@@ -41,6 +41,8 @@ dependencies:
 - directory
 - process
 - matrix
+- unix
+- hostname
 
 library:
   source-dirs: src
