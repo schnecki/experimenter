@@ -41,7 +41,9 @@ import           Experimenter.StepResult
 import           Experimenter.Util
 
 
-loadExperiments :: (ExperimentDef a, MonadLogger m, MonadIO m) => ExperimentSetup -> InputState a -> a -> ReaderT SqlBackend m (Experiments a)
+import           Debug.Trace
+
+loadExperiments :: (ExperimentDef a) => ExperimentSetup -> InputState a -> a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Experiments a)
 loadExperiments setup initInpSt initSt = do
   eExp <- getOrCreateExps setup initInpSt initSt
   let e = entityVal eExp
@@ -50,7 +52,7 @@ loadExperiments setup initInpSt initSt = do
   return $ Experiments (entityKey eExp) (view expsName e) (view expsStartTime e) (view expsEndTime e) (entityVal eSetup) (parameters initSt) initSt initInpSt exps
 
 
-loadExperimentList :: (ExperimentDef a, MonadLogger m, MonadIO m) => Key Exps -> ReaderT SqlBackend m [Experiment a]
+loadExperimentList :: (ExperimentDef a) => Key Exps -> ReaderT SqlBackend (LoggingT (ExpM a)) [Experiment a]
 loadExperimentList expsKey = selectList [ExpExps ==. expsKey] [] >>= mapM mkExperiment
     where mkExperiment (Entity k exp) = do
             paramSetting <- loadParamSetup k
@@ -72,22 +74,20 @@ deserialise n bs =
         Right r -> return $ Just r
 
 
-loadExperimentResults :: (ExperimentDef a, MonadLogger m, MonadIO m) => Key Exp -> ReaderT SqlBackend m [ExperimentResult a]
+loadExperimentResults :: (ExperimentDef a) => Key Exp -> ReaderT SqlBackend (LoggingT (ExpM a)) [ExperimentResult a]
 loadExperimentResults kExp = do
   xs <- selectList [ExpResultExp ==. kExp] []
   mapM loadExperimentResult xs
 
 
-loadExperimentResult :: forall a m . (ExperimentDef a, MonadLogger m, MonadIO m) => Entity ExpResult -> ReaderT SqlBackend m (ExperimentResult a)
+loadExperimentResult :: forall a m . (ExperimentDef a) => Entity ExpResult -> ReaderT SqlBackend (LoggingT (ExpM a)) (ExperimentResult a)
 loadExperimentResult (Entity k (ExpResult _ rep mPrepResDataId)) = do
   mEPrepResData <- fmap join $ sequence $ P.getEntity <$> mPrepResDataId
   prepRes <- case mEPrepResData of
     Nothing -> return Nothing
     Just (Entity resDataKey (PrepResultData startT endT startRandGen endRandGen startStBS endStBS startInpStBS endInpStBS)) -> do
-      -- mInputVals <- loadPreparationInput resDataKey
-      -- results <- loadPrepartionMeasures resDataKey
-      mStartSt <- fmap deserialisable <$> deserialise "prep start state" startStBS
-      mEndSt <- fmap (fmap deserialisable) <$> mDeserialise "prep end state" endStBS
+      mStartSt <- deserialise "prep start state" startStBS >>= lift . lift . sequence . fmap deserialisable
+      mEndSt <- mDeserialise "prep end state" endStBS >>= lift . lift . sequence . fmap sequence . fmap (fmap deserialisable)
       mStartInpSt <- deserialise "prep start input state" startInpStBS
       mEndInpSt <- mDeserialise "prep end input state" endInpStBS
       return $ do
@@ -140,13 +140,13 @@ loadPrepartionMeasures kExpRes = do
     combineMeasures xs@(Measure p _:_) = Measure p (concatMap (view measureResults) xs)
     combineMeasures _                  = error "not possible"
 
-loadReplicationResults :: (ExperimentDef a, MonadLogger m, MonadIO m) => Key ExpResult -> ReaderT SqlBackend m [ReplicationResult a]
+loadReplicationResults :: (ExperimentDef a) => Key ExpResult -> ReaderT SqlBackend (LoggingT (ExpM a)) [ReplicationResult a]
 loadReplicationResults kExpRes = do
   xs <- selectList [RepResultExpResult ==. kExpRes] []
   L.sortBy (compare `on` view replicationNumber) <$> mapM loadReplicationResult xs
 
 
-loadReplicationResult :: (ExperimentDef a, MonadLogger m, MonadIO m) => Entity RepResult -> ReaderT SqlBackend m (ReplicationResult a)
+loadReplicationResult :: (ExperimentDef a) => Entity RepResult -> ReaderT SqlBackend (LoggingT (ExpM a)) (ReplicationResult a)
 loadReplicationResult (Entity k (RepResult _ repNr mWmUpResId mRepResId)) = do
   mWmUpRes <- fmap join $ sequence $ P.getEntity <$> mWmUpResId
   mRepRes <- fmap join $ sequence $ P.getEntity <$> mRepResId
@@ -167,8 +167,8 @@ loadReplicationResult (Entity k (RepResult _ repNr mWmUpResId mRepResId)) = do
       let wmUpEndRandGen = tread <$> view warmUpResultDataEndRandGen wmUpRes
       -- mWmUpInpVals <- loadReplicationWarmUpInput wmUpResKey
       -- wmUpMeasures <- loadReplicationWarmUpMeasures wmUpResKey
-      mWmUpStartSt <- fmap deserialisable <$> deserialise "warm up start state" (view warmUpResultDataStartState wmUpRes)
-      mWmUpEndSt <- fmap (fmap deserialisable) <$> mDeserialise "warm up end state" (view warmUpResultDataEndState wmUpRes)
+      mWmUpStartSt <- deserialise "warm up start state" (view warmUpResultDataStartState wmUpRes) >>= lift . lift . sequence . fmap deserialisable
+      mWmUpEndSt <- mDeserialise "warm up end state" (view warmUpResultDataEndState wmUpRes) >>= lift .lift . sequence . fmap sequence . fmap (fmap deserialisable)
       mWmUpStartInpSt <- deserialise "warm up start input state" (view warmUpResultDataStartInputState wmUpRes)
       mWmUpEndInpSt <- mDeserialise "warm up end input state" (view warmUpResultDataEndInputState wmUpRes)
       return $ do
@@ -199,8 +199,8 @@ loadReplicationResult (Entity k (RepResult _ repNr mWmUpResId mRepResId)) = do
       let repEndRandGen = tread <$> view repResultDataEndRandGen repRes
       -- mRepInpVals <- loadReplicationInput repResKey
       repMeasures <- loadReplicationMeasures repResKey
-      mRepStartSt <- fmap deserialisable <$> deserialise "rep start state" (view repResultDataStartState repRes)
-      mRepEndSt <- fmap (fmap deserialisable) <$> mDeserialise "rep end state" (view repResultDataEndState repRes)
+      mRepStartSt <- deserialise "rep start state" (view repResultDataStartState repRes) >>= lift . lift . sequence . fmap deserialisable
+      mRepEndSt <- mDeserialise "rep end state" (view repResultDataEndState repRes) >>= lift . lift . sequence . fmap sequence . fmap (fmap deserialisable)
       mRepStartInpSt <- deserialise "rep start input state" (view repResultDataStartInputState repRes)
       mRepEndInpSt <- mDeserialise "rep end input state" (view repResultDataEndInputState repRes)
       return $ do
@@ -274,27 +274,30 @@ loadReplicationMeasures kExpRes = do
     combineMeasures xs@(Measure p _:_) = Measure p (concatMap (view measureResults) xs)
     combineMeasures _                  = error "not possible"
 
-getOrCreateExps :: forall m a . (ExperimentDef a, MonadLogger m, MonadIO m) => ExperimentSetup -> InputState a -> a -> ReaderT SqlBackend m (Entity Exps)
+getOrCreateExps :: forall a . (ExperimentDef a) => ExperimentSetup -> InputState a -> a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Entity Exps)
 getOrCreateExps setup initInpSt initSt = do
   let name = view experimentBaseName setup
   -- expsList <- selectList [ExpsName ==. name, ExpsInitialInputState ==. runPut (put initInpSt), ExpsInitialState ==. runPut (put initSt)] []
   expsList <- selectList [ExpsName ==. name] []
-  let exps =
-        filter
-          (\(Entity _ (Exps _ _ _ s iS)) ->
-             let other = (,) <$> deserialisable <$> runGet S.get s <*> runGet S.get iS
-              in fromEither False (equalExperiments (initSt, initInpSt) <$> other))
-          expsList
+  exps <-
+    filterM
+      (\(Entity _ (Exps _ _ _ s iS)) -> do
+          serSt <- lift $ lift $ sequence $ deserialisable <$> (runGet S.get s)
+          let other = (,) <$> serSt <*> runGet S.get iS
+          return $ fromEither False (equalExperiments (initSt, initInpSt) <$> other))
+      expsList
   params <- mapM (\e -> selectList [ParamExps ==. entityKey e] [Asc ParamName]) exps
   let mkParamTpl (Param _ n minB maxB) = (n, minB, maxB)
   let myParams = L.sortBy (compare `on` (\(x, _, _) -> x)) $ map (mkParamTpl . convertParameterSetup (entityKey (head exps))) (parameters initSt)
   case L.find ((== myParams) . map (mkParamTpl . entityVal) . snd) (zip exps params) of
     Nothing -> do
       $(logInfo) "Starting new experiment..."
-      time <- liftIO getCurrentTime
-      eExp <- insertEntity $ Exps name time Nothing (runPut $ put $ serialisable initSt) (runPut $ put initInpSt)
+      time <- trace ("put") $ liftIO getCurrentTime
+      serInitSt <- lift $ lift $ serialisable initSt
+      eExp <- insertEntity $ Exps name time Nothing (runPut $ put serInitSt) (runPut $ put initInpSt)
       void $ insert $ mkExpSetup eExp
       mapM_ (insertParam (entityKey eExp)) (parameters initSt)
+      trace ("DONE insert") $ $(logInfo) "ASDF"
       return eExp
     Just (eExp, _) -> do
       $(logInfo) "Found experiment with same name and parameter settings. Continuing experiment ..."
@@ -310,6 +313,6 @@ getOrCreateExps setup initInpSt initSt = do
         (max 0 $ view evaluationSteps setup)
         (max 1 $ view evaluationReplications setup)
         (max 1 $ view maximumParallelEvaluations setup)
-    insertParam :: Key Exps -> ParameterSetup a -> ReaderT SqlBackend m (Key Param)
+    insertParam :: Key Exps -> ParameterSetup a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Key Param)
     insertParam eExp (ParameterSetup n _ _ _ (Just (minVal, maxVal)) drp _) = insert $ Param eExp n (Just $ runPut $ put minVal) (Just $ runPut $ put maxVal)
     insertParam eExp (ParameterSetup n _ _ _ Nothing drp _) = insert $ Param eExp n Nothing Nothing

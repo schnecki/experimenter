@@ -27,14 +27,16 @@ instance Serialize Dice where
     mD <- get
     return $ Dice mD
 
+instance NFData StdGen where
+  rnf _ = ()
 
 instance ExperimentDef Dice where
   type ExpM Dice = IO
   type InputValue Dice = StdGen
   type InputState Dice = ()
   type Serializable Dice = Dice
-  serialisable = id
-  deserialisable = id
+  serialisable = return
+  deserialisable = return
 
   generateInput g _ _ _ = return (g, ())
   runStep (Dice mD) g _ =

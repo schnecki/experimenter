@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns         #-}
 {-# LANGUAGE FlexibleContexts     #-}
 {-# LANGUAGE FlexibleInstances    #-}
 {-# LANGUAGE GADTs                #-}
@@ -64,6 +65,7 @@ import           Debug.Trace
 
 
 type Updated = Bool
+
 
 execExperiments :: (ExperimentDef a) => (ExpM a (Bool, Experiments a) -> IO (Bool, Experiments a)) -> DatabaseSetup -> ExperimentSetup -> InputState a -> a -> IO (Experiments a)
 execExperiments runExpM dbSetup setup initInpSt initSt = snd <$> runExperiments runExpM dbSetup setup initInpSt initSt
@@ -196,7 +198,7 @@ mkNewExps exp expsDone = do
       startTime <- liftIO getCurrentTime
       let sortParamSettings = map (L.sortBy (compare `on` view parameterSettingName))
       existParamSettings <- sortParamSettings <$> existingParamSettings exp
-      $(logDebug) $ "Existing Param settings: " <> tshow (map (map showVal) $ map (\xs -> zip (L.sortBy (compare `on` parameterName) params) xs) existParamSettings)
+      $(logInfo) $ "Existing Parameter settings: " <> tshow (map (map showVal) $ map (\xs -> zip (L.sortBy (compare `on` parameterName) params) xs) existParamSettings)
       paramSettings <- mapM (mkParamModifications exp) params
       let paramCombs = combinations paramSettings
       let paramSingleInstances = map (filter ((== SingleInstance) . view parameterSettingExperimentDesign)) paramSettings
@@ -269,36 +271,13 @@ existingParamSettings exp = do
         Nothing -> []
         _       -> [ParameterSetting n vBs drp (toEnum dsgn)]
 
--- filterParamSettings :: (MonadIO m) => Experiments a -> ParameterSetup a -> [ParameterSetting a] -> [ParameterSetting a] -> ReaderT SqlBackend m [ParameterSetting a]
--- filterParamSettings exp p otherParams paramSettings = do
---   expIds <- map entityKey <$> selectList [ExpExps ==. exp ^. experimentsKey] []
---   pExists <-
---     map (map (view paramSettingExp . entityVal)) <$>
---     mapM (\v -> selectList [ParamSettingExp <-. expIds, ParamSettingName ==. parameterName p, ParamSettingValue ==. view parameterSettingValue v] []) paramSettings
---   paramSettingsExists <-
---     map or <$>
---     mapM
---       (\pValsIds ->
---          mapM
---            (\k -> do
---               ps <- map entityVal <$> selectList [ParamSettingExp ==. k] []
---               return $
---                 any isSingleInstance otherParams ||
---                 all (\(ParameterSetting n vBs _ design) -> maybe False ((vBs ==) . view paramSettingValue) $ L.find ((== n) . view paramSettingName) ps) otherParams)
---            (L.nub pValsIds))
---       pExists
---   return $ map fst $ filter (not . snd) $ zip paramSettings paramSettingsExists
---   where
---     isSingleInstance (ParameterSetting _ vBs _ FullFactory)    = False
---     isSingleInstance (ParameterSetting _ vBs _ SingleInstance) = True
-
-
 deleteExperiment :: (MonadIO m) => Experiment a -> ReaderT SqlBackend m ()
 deleteExperiment (Experiment k _ _ _ _ expRes) = mapM_ deleteExperimentResult expRes >> deleteCascade k
 
 
 deleteExperimentResult :: (MonadIO m) => ExperimentResult a -> ReaderT SqlBackend m ()
 deleteExperimentResult (ExperimentResult k _ _ repls) = mapM_ deleteReplicationResult repls >> deleteCascade k
+
 
 -- | Loads parameters of an experiment into all initial and end states of the given experiments variable.
 loadParameters  :: (ExperimentDef a) => Experiments a -> Experiment a  -> ReaderT SqlBackend (LoggingT (ExpM a)) (Experiments a)
@@ -328,11 +307,11 @@ loadParameters exps exp = foldM setParam exps (exp ^. parameterSetup)
 
 type Rands = ([StdGen],[StdGen],[StdGen]) -- ^ Preparation, Warm Up and Evaluation random generators
 
-
 continueExperiment :: (ExperimentDef a) => Rands -> Experiments a -> Experiment a  -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, Experiment a)
 continueExperiment rands exps exp = do
   -- TODO: parallelisation
   exps' <- loadParameters exps exp -- loads parameters into the init state
+  $(logInfo) "Checking if new experiments can be created"
   expResList <- getExpRes exps' (exp ^. experimentResults) >>= truncateExperiments repetits
   $(logInfo) $ "Number of experiment results loaded: " <> tshow (length expResList)
   let dropPrep = any (^. parameterSettingDropPrepeationPhase) (exp ^. parameterSetup)
@@ -342,8 +321,8 @@ continueExperiment rands exps exp = do
   if updated
     then do endTime <- return <$> liftIO getCurrentTime
             update (exp ^. experimentKey) [ExpEndTime =. endTime]
-            return (updated, set experimentResults res $ set experimentEndTime endTime exp)
-    else return (updated, set experimentResults res exp)
+            return $ (updated, set experimentResults res $ set experimentEndTime endTime exp)
+    else return $ (updated, set experimentResults res exp)
 
   where
     repetits = exps ^. experimentsSetup . expsSetupRepetitions
@@ -370,20 +349,23 @@ data RepResultType
   | Rep (Key RepResult)
 
 
-newResultData :: (ExperimentDef a, MonadLogger m, MonadIO m) => StdGen -> RepResultType -> a -> InputState a -> ReaderT SqlBackend m (ResultData a)
+newResultData :: (ExperimentDef a) => StdGen -> RepResultType -> a -> InputState a -> ReaderT SqlBackend (LoggingT (ExpM a)) (ResultData a)
 newResultData g repResType st inpSt = do
   time <- liftIO getCurrentTime
   k <- case repResType of
           Prep expResId   -> do
-            prepId <- insert (PrepResultData time Nothing (tshow g) Nothing (runPut $ put $ serialisable st) Nothing (runPut $ put inpSt) Nothing)
+            serSt <- lift $ lift $ serialisable st
+            prepId <- insert (PrepResultData time Nothing (tshow g) Nothing (runPut $ put serSt) Nothing (runPut $ put inpSt) Nothing)
             update expResId [ExpResultPrepResultData =. Just prepId]
             return $ ResultDataPrep prepId
           WarmUp repResId -> do
-            wmUpId <- insert (WarmUpResultData time Nothing (tshow g) Nothing  (runPut $ put $ serialisable st) Nothing (runPut $ put inpSt) Nothing)
+            serSt <- lift $ lift $ serialisable st
+            wmUpId <- insert (WarmUpResultData time Nothing (tshow g) Nothing  (runPut $ put serSt) Nothing (runPut $ put inpSt) Nothing)
             update repResId [RepResultWarmUpResultData =. Just wmUpId]
             return $ ResultDataWarmUp wmUpId
           Rep repResId    -> do
-            repResDataId <- insert (RepResultData time Nothing (tshow g) Nothing (runPut $ put $ serialisable st) Nothing (runPut $ put inpSt) Nothing)
+            serSt <- lift $ lift $ serialisable st
+            repResDataId <- insert (RepResultData time Nothing (tshow g) Nothing (runPut $ put serSt) Nothing (runPut $ put inpSt) Nothing)
             update repResId [RepResultRepResultData =. Just repResDataId]
             return $ ResultDataRep repResDataId
   return $ ResultData k time Nothing g Nothing (Available []) (Available []) st Nothing inpSt Nothing
@@ -396,8 +378,8 @@ runExperimentResult dropPrep rands@(prepRands, _, _) exps expRes = do
   (prepUpdated, prepRes) <-
     if dropPrep
       then do
-      $(logInfo) "Skipping preparation phase as provided by the parameter setting (dropPreparationPhase)."
-      return (False, Nothing)
+        $(logInfo) "Skipping preparation phase as provided by the parameter setting (dropPreparationPhase)."
+        return (False, Nothing)
       else runPreparation (prepRands !! (expRes ^. repetitionNumber - 1)) exps expResId (expRes ^. preparationResults)
   repsDone <-
     if prepUpdated
@@ -406,7 +388,6 @@ runExperimentResult dropPrep rands@(prepRands, _, _) exps expRes = do
         return []
       else return (expRes ^. evaluationResults)
   transactionSave
-
   let initSt = afterPreparationPhase $ fromMaybe (exps ^. experimentsInitialState) (view endState =<< prepRes)
       initInpSt = fromMaybe (exps ^. experimentsInitialInputState) (view endInputState =<< prepRes)
   let runRepl e repRess = do
@@ -589,13 +570,10 @@ runResultData len repResType resData = do
   let stInp = fromMaybe (resData ^. startInputState) (resData ^. endInputState)
   let g = fromMaybe (resData ^. startRandGen) (resData ^. endRandGen)
   let periodsToRun = [1 + curLen .. curLen + min 1000 len]
-  $(logInfo) $
-    trace ("Number of steps already run is " <> show curLen <> ", thus still need to run " <> show (len - curLen) <> " steps...") $
-    "Number of steps already run is " <> tshow curLen <> ", thus still need to run " <> tshow (len - curLen) <> " steps..."
+  $(logInfo) $ "Number of steps already run is " <> tshow curLen <> ", thus still need to run " <> tshow (len - curLen) <> " steps..."
   let updated = not (null periodsToRun)
   sTime <- liftIO getCurrentTime
-  (g', force -> st', stInp', inputs, force -> measures) <- foldM run (g, st, stInp, [], []) periodsToRun
-
+  (g', force -> st', force -> stInp', force -> inputs, force -> measures) <- foldM run (g, st, stInp, [], []) periodsToRun
   if updated
     then do
       eTime <- pure <$> liftIO getCurrentTime
@@ -631,19 +609,23 @@ runResultData len repResType resData = do
         return $ results .~ AvailableFromDB (loadReplicationMeasures key) $ inputValues .~ AvailableFromDB (fromMaybe [] <$> loadReplicationInput key) $ resData
 
 
-    upd (Prep expResId) (ResultData (ResultDataPrep k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) =
-      replace k (PrepResultData sTime eTime (tshow sG) (tshow <$> eG) (runPut . put $ serialisable sSt) (runPut . put . serialisable <$> eSt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
-    upd (WarmUp repResId) (ResultData (ResultDataWarmUp k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) =
-      replace k (WarmUpResultData sTime eTime (tshow sG) (tshow <$> eG) (runPut . put $ serialisable sSt) (runPut . put . serialisable <$> eSt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
-    upd (Rep repResId) (ResultData (ResultDataRep k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) =
-      replace k (RepResultData sTime eTime (tshow sG) (tshow <$> eG) (runPut . put $ serialisable sSt) (runPut . put . serialisable <$> eSt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
+    upd (Prep expResId) (ResultData (ResultDataPrep k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do
+      serSt <- lift $ lift $ serialisable sSt
+      serESt <- lift $ lift $ sequence $ fmap serialisable eSt
+      replace k (PrepResultData sTime eTime (tshow sG) (tshow <$> eG) (runPut . put $ serSt) (runPut . put <$> serESt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
+    upd (WarmUp repResId) (ResultData (ResultDataWarmUp k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do
+      serSt <- lift $ lift $ serialisable sSt
+      serESt <- lift $ lift $ sequence $ fmap serialisable eSt
+      replace k (WarmUpResultData sTime eTime (tshow sG) (tshow <$> eG) (runPut . put $ serSt) (runPut . put <$> serESt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
+    upd (Rep repResId) (ResultData (ResultDataRep k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do
+
+      serSt <- lift $ lift $ serialisable sSt
+      serESt <- lift $ lift $ sequence $ fmap serialisable eSt
+      replace k (RepResultData sTime eTime (tshow sG) (tshow <$> eG) (runPut . put $ serSt) (runPut . put <$> serESt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
     upd _ _ = error "Unexpected update combination. This is a bug, please report it!"
 
 
-run :: (ExperimentDef a)
-  => (StdGen, a, InputState a, [Input a], [Measure])
-  -> Int
-  -> ReaderT SqlBackend (LoggingT (ExpM a)) (StdGen, a, InputState a, [Input a], [Measure])
+run :: (ExperimentDef a) => (StdGen, a, InputState a, [Input a], [Measure]) -> Int -> ReaderT SqlBackend (LoggingT (ExpM a)) (StdGen, a, InputState a, [Input a], [Measure])
 run (g, st, stInp, inpVals, res) period = do
   let (randGen, g') = split g
   (inpVal', inpSt') <- lift $ lift $ generateInput randGen st stInp period

@@ -36,8 +36,8 @@ instance ExperimentDef Dice where
   type InputValue Dice = ()
   type InputState Dice = ()
   type Serializable Dice = Dice
-  serialisable = id
-  deserialisable = id
+  serialisable = return
+  deserialisable = return
 
   generateInput _ _ _ _ = return ((), ())
   runStep (Dice g mD) _ p =

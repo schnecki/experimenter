@@ -1,20 +1,24 @@
 {-# LANGUAGE DefaultSignatures         #-}
+{-# LANGUAGE DeriveAnyClass            #-}
+{-# LANGUAGE DeriveGeneric             #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FlexibleInstances         #-}
 {-# LANGUAGE TemplateHaskell           #-}
 {-# LANGUAGE UndecidableInstances      #-}
 module Experimenter.Parameter.Type where
 
+import           Control.DeepSeq
 import           Control.Lens
 import qualified Data.ByteString as BS
 import           Data.Serialize  as S
 import qualified Data.Text       as T
+import           GHC.Generics
 
 
 data ExperimentDesign
   = FullFactory
   | SingleInstance
-  deriving (Bounded, Enum, Eq, Ord)
+  deriving (Bounded, Enum, Eq, Ord, Generic, NFData)
 
 data ParameterSetup a =
   forall b . (Show b, Ord b, Serialize b) =>
@@ -36,7 +40,7 @@ data ParameterSetting a =
   , _parameterSettingValue               :: BS.ByteString
   , _parameterSettingDropPrepeationPhase :: Bool
   , _parameterSettingExperimentDesign    :: ExperimentDesign
-  } deriving (Eq)
+  } deriving (Eq, Generic, NFData)
 makeLenses ''ParameterSetting
 
 

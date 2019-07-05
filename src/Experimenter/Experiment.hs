@@ -18,17 +18,18 @@ import           Experimenter.StepResult
 type Period = Int
 
 
-class (MonadUnliftIO (ExpM a), NFData a, Serialize (InputValue a), Serialize (InputState a), Serialize (Serializable a)) => ExperimentDef a where
+class (MonadUnliftIO (ExpM a), NFData a, NFData (InputValue a), NFData (InputState a), Serialize (InputValue a), Serialize (InputState a), Serialize (Serializable a)) => ExperimentDef a where
 
   type ExpM a :: (* -> *)
 
   type Serializable a :: *      -- ^ Type that is used to serialize the current state.
 
+
   -- ^ Function to convert to a serializable object
-  serialisable :: a -> Serializable a
+  serialisable :: a -> ExpM a (Serializable a)
 
   -- ^ Function to convert from a serializable object
-  deserialisable :: Serializable a -> a
+  deserialisable :: Serializable a -> ExpM a a
 
 
   -- ^ Type of input values to the experiment.
