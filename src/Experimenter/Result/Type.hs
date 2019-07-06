@@ -14,19 +14,15 @@ import           Experimenter.Input
 import           Experimenter.Measure
 import           Experimenter.Models
 import           Experimenter.Parameter
-import           Experimenter.Setup
 
 import           Control.DeepSeq
 import           Control.Lens
-import           Control.Monad.IO.Class
 import           Control.Monad.Logger
 import           Control.Monad.Reader
-import           Data.Int
 import           Data.Serialize
 import qualified Data.Text                   as T
 import           Data.Time
 import           Database.Persist.Postgresql (SqlBackend)
-import           GHC.Generics
 import           System.Random
 
 data ResultDataKey
@@ -41,8 +37,23 @@ data Availability a b
   | AvailableFromDB (ReaderT SqlBackend (LoggingT (ExpM a)) b)
 
 instance NFData b => NFData (Availability a b) where
-  rnf (Available b)            = rnf b
-  rnf (AvailableFromDB !query) = ()
+  rnf (Available b)        = rnf b
+  rnf (AvailableFromDB !_) = ()
+
+type AvailabilityList a b = (Int, Availability a b)
+
+mkAvailableList :: (Foldable t, ExperimentDef a) => (Int, Availability a (t b)) -> ReaderT SqlBackend (LoggingT (ExpM a)) (Int, Availability a (t b))
+mkAvailableList (nr, Available xs)         = return (nr, Available xs)
+mkAvailableList (_, AvailableFromDB query) = (\xs -> (length xs, Available xs)) <$> query
+
+mkAvailable :: (ExperimentDef a) => Availability a b -> ReaderT SqlBackend (LoggingT (ExpM a)) (Availability a b)
+mkAvailable (Available xs)          = return (Available xs)
+mkAvailable (AvailableFromDB query) = Available <$> query
+
+mkTransientlyAvailable :: Availability a b -> ReaderT SqlBackend (LoggingT (ExpM a)) b
+mkTransientlyAvailable (Available xs)          = return xs
+mkTransientlyAvailable (AvailableFromDB query) = query
+
 
 data ResultData a = ResultData
   { _resultDataKey   :: !ResultDataKey
@@ -50,10 +61,10 @@ data ResultData a = ResultData
   , _endTime         :: !(Maybe UTCTime)
   , _startRandGen    :: !StdGen
   , _endRandGen      :: !(Maybe StdGen)
-  , _inputValues     :: !(Int, Availability a [Input a])
-  , _results         :: !(Int, Availability a [Measure])
-  , _startState      :: !a         -- TODO: Availability for startState & endState
-  , _endState        :: !(Maybe a)    -- ^ state at end of warm-up phase
+  , _inputValues     :: !(AvailabilityList a [Input a])
+  , _results         :: !(AvailabilityList a [Measure])
+  , _startState      :: !(Availability a a)         -- TODO: Availability for startState & endState
+  , _endState        :: !(Availability a (Maybe a))    -- ^ state at end of warm-up phase
   , _startInputState :: !(InputState a)
   , _endInputState   :: !(Maybe (InputState a))
   }

@@ -33,15 +33,12 @@ import           Experimenter.Util
 
 makeResDataAvailable :: (ExperimentDef a) => Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Experiments a)
 makeResDataAvailable exps =
-  (experiments . traversed . experimentResults . traversed . evaluationResults . traversed . evalResults . traversed . results) mkAvailable exps >>=
-  mapMOf (experiments . traversed . experimentResults . traversed . evaluationResults . traversed . evalResults . traversed . inputValues) mkAvailable
+  (experiments . traversed . experimentResults . traversed . evaluationResults . traversed . evalResults . traversed . results) mkAvailableList exps >>=
+  mapMOf (experiments . traversed . experimentResults . traversed . evaluationResults . traversed . evalResults . traversed . inputValues) mkAvailableList
   -- mapMOf (experiments . traversed . experimentResults . traversed . warmUpResults . traversed . evalResults . traversed . results) mkAvailable >>=
   -- mapMOf (experiments . traversed . experimentResults . traversed . warmUpResults . traversed . evalResults . traversed . inputValues) mkAvailable >>=
   -- mapMOf (experiments . traversed . preparationResults . traversed . evalResults . traversed . results) mkAvailable >>=
   -- mapMOf (experiments . traversed . preparationResults . traversed . evalResults . traversed . inputValues) mkAvailable
-  where
-    mkAvailable (nr, Available xs)          = return (nr, Available xs)
-    mkAvailable (nr, AvailableFromDB query) = (\xs -> (length xs, Available xs)) <$> query
 
 runner :: (ExperimentDef a) => (ExpM a (Experiments a) -> IO (Experiments a)) -> DatabaseSetup -> Experiments a -> IO (Experiments a)
 runner runExpM dbSetup exps =

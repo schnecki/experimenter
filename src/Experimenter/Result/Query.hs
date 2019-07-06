@@ -1,8 +1,10 @@
 {-# LANGUAGE FlexibleContexts    #-}
+{-# LANGUAGE GADTs               #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell     #-}
+{-# LANGUAGE TypeFamilies        #-}
 module Experimenter.Result.Query
     ( loadExperiments
     , loadPrepartionMeasures
@@ -11,6 +13,8 @@ module Experimenter.Result.Query
     , loadReplicationWarmUpInput
     , loadReplicationInput
     , loadReplicationMeasures
+    , loadResDataEndState
+    , loadResDataStartState
     ) where
 
 
@@ -82,24 +86,48 @@ loadExperimentResults kExp = do
   mapM loadExperimentResult xs
 
 
+loadResDataEndState ::
+     (PersistStoreRead backend, PersistEntity resData, ExperimentDef a, PersistEntityBackend resData ~ BaseBackend backend)
+  => (resData -> Maybe ByteString)
+  -> Key resData
+  -> ReaderT backend (LoggingT (ExpM a)) (Maybe a)
+loadResDataEndState acc k = do
+  mResData <- P.get k
+  case mResData of
+    Nothing  -> error "Could not get preparation start state"
+    Just resData -> do
+      mSer <- maybe (return Nothing) (deserialise "prep start state") (acc resData)
+      lift $ lift $ traverse deserialisable mSer
+
+
+loadResDataStartState ::
+     (PersistStoreRead backend, PersistEntity resData, ExperimentDef a, PersistEntityBackend resData ~ BaseBackend backend)
+  => (resData -> ByteString)
+  -> Key resData
+  -> ReaderT backend (LoggingT (ExpM a)) a
+loadResDataStartState acc k = do
+  mResData <- P.get k
+  case mResData of
+    Nothing -> error "Could not get preparation start state"
+    Just resData -> do
+      ser <- fromMaybe (error "Could not deserialise preparation start state ") <$> deserialise "prep start state" (acc resData)
+      lift $ lift $ deserialisable ser
+
 loadExperimentResult :: forall a m . (ExperimentDef a) => Entity ExpResult -> ReaderT SqlBackend (LoggingT (ExpM a)) (ExperimentResult a)
 loadExperimentResult (Entity k (ExpResult _ rep mPrepResDataId)) = do
   mEPrepResData <- fmap join $ sequence $ P.getEntity <$> mPrepResDataId
   prepRes <- case mEPrepResData of
     Nothing -> return Nothing
     Just (Entity resDataKey (PrepResultData startT endT startRandGen endRandGen startStBS endStBS startInpStBS endInpStBS)) -> do
-      mStartSt <- deserialise "prep start state" startStBS >>= lift . lift . sequence . fmap deserialisable
-      mEndSt <- mDeserialise "prep end state" endStBS >>= lift . lift . sequence . fmap sequence . fmap (fmap deserialisable)
+      let startSt = AvailableFromDB (loadResDataStartState (view prepResultDataStartState) resDataKey)
+      let endSt = AvailableFromDB (loadResDataEndState (view prepResultDataEndState) resDataKey)
       mStartInpSt <- deserialise "prep start input state" startInpStBS
       mEndInpSt <- mDeserialise "prep end input state" endInpStBS
       inpCount <- loadPreparationInputCount resDataKey
       resultCount <- loadPrepartionMeasuresCount resDataKey
       return $ do
-        startSt <- mStartSt
-        endSt <- mEndSt
         endInpSt <- mEndInpSt
         startInpSt <- mStartInpSt
-        -- inputVals <- mInputVals
         let inputVals = AvailableFromDB (fromMaybe [] <$> loadPreparationInput resDataKey)
         let results = AvailableFromDB (loadPrepartionMeasures resDataKey)
         return $ ResultData (ResultDataPrep resDataKey) startT endT (tread startRandGen) (tread <$> endRandGen) (inpCount, inputVals) (resultCount, results) startSt endSt startInpSt endInpSt
@@ -175,10 +203,8 @@ loadReplicationResult (Entity k (RepResult _ repNr mWmUpResId mRepResId)) = do
       let wmUpEndTime = view warmUpResultDataEndTime wmUpRes
       let wmUpStartRandGen = tread $ view warmUpResultDataStartRandGen wmUpRes
       let wmUpEndRandGen = tread <$> view warmUpResultDataEndRandGen wmUpRes
-      -- mWmUpInpVals <- loadReplicationWarmUpInput wmUpResKey
-      -- wmUpMeasures <- loadReplicationWarmUpMeasures wmUpResKey
-      mWmUpStartSt <- deserialise "warm up start state" (view warmUpResultDataStartState wmUpRes) >>= lift . lift . sequence . fmap deserialisable
-      mWmUpEndSt <- mDeserialise "warm up end state" (view warmUpResultDataEndState wmUpRes) >>= lift . lift . sequence . fmap sequence . fmap (fmap deserialisable)
+      let wmUpStartSt = AvailableFromDB (loadResDataStartState (view warmUpResultDataStartState) wmUpResKey)
+      let wmUpEndSt = AvailableFromDB (loadResDataEndState (view warmUpResultDataEndState) wmUpResKey)
       mWmUpStartInpSt <- deserialise "warm up start input state" (view warmUpResultDataStartInputState wmUpRes)
       mWmUpEndInpSt <- mDeserialise "warm up end input state" (view warmUpResultDataEndInputState wmUpRes)
       wmUpInpValsCount <- loadReplicationWarmUpInputCount wmUpResKey
@@ -186,9 +212,6 @@ loadReplicationResult (Entity k (RepResult _ repNr mWmUpResId mRepResId)) = do
       return $ do
         let wmUpInpVals = AvailableFromDB (fromMaybe [] <$> loadReplicationWarmUpInput wmUpResKey)
             wmUpMeasures = AvailableFromDB (loadReplicationWarmUpMeasures wmUpResKey)
-        -- wmUpInpVals <- mWmUpInpVals
-        wmUpStartSt <- mWmUpStartSt
-        wmUpEndSt <- mWmUpEndSt
         wmUpStartInpSt <- mWmUpStartInpSt
         wmUpEndInpSt <- mWmUpEndInpSt
         return $
@@ -209,21 +232,15 @@ loadReplicationResult (Entity k (RepResult _ repNr mWmUpResId mRepResId)) = do
       let repEndTime = view repResultDataEndTime repRes
       let repStartRandGen = tread $ view repResultDataStartRandGen repRes
       let repEndRandGen = tread <$> view repResultDataEndRandGen repRes
-      -- mRepInpVals <- loadReplicationInput repResKey
-      -- repMeasures <- loadReplicationMeasures repResKey
-      mRepStartSt <- deserialise "rep start state" (view repResultDataStartState repRes) >>= lift . lift . sequence . fmap deserialisable
-      mRepEndSt <- mDeserialise "rep end state" (view repResultDataEndState repRes) >>= lift . lift . sequence . fmap sequence . fmap (fmap deserialisable)
       mRepStartInpSt <- deserialise "rep start input state" (view repResultDataStartInputState repRes)
       mRepEndInpSt <- mDeserialise "rep end input state" (view repResultDataEndInputState repRes)
       repInpValsCount <- loadReplicationInputCount repResKey
       repMeasuresCount <- loadReplicationMeasuresCount repResKey
-      return $
-        -- repInpVals <- mRepInpVals
-       do
+      return $ do
         let repInpVals = AvailableFromDB (fromMaybe [] <$> loadReplicationInput repResKey)
             repMeasures = AvailableFromDB (loadReplicationMeasures repResKey)
-        repStartSt <- mRepStartSt
-        repEndSt <- mRepEndSt
+        let repStartSt = AvailableFromDB (loadResDataStartState (view repResultDataStartState) repResKey)
+        let repEndSt = AvailableFromDB (loadResDataEndState (view repResultDataEndState) repResKey)
         repStartInpSt <- mRepStartInpSt
         repEndInpSt <- mRepEndInpSt
         return $
