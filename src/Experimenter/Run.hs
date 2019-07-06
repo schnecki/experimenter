@@ -293,15 +293,7 @@ loadParameters exps exp = foldM setParam exps (exp ^. parameterSetup)
             Left err -> error $ "Could not read value of parameter " <> T.unpack n <> ". Aborting! Serializtion error was: " ++ err
             Right val -> do
               $(logInfo) $ "Loaded parameter '" <> n <> "' value: " <> tshow val
-              return $ foldl' (\e stSet -> over stSet (setter val) e) e
-                [ experimentsInitialState
-                -- , experiments.traversed.experimentResults.traversed.preparationResults.traversed.startState
-                -- , experiments.traversed.experimentResults.traversed.preparationResults.traversed.endState.traversed
-                -- , experiments.traversed.experimentResults.traversed.evaluationResults.traversed.warmUpResults.traversed.startState
-                -- , experiments.traversed.experimentResults.traversed.evaluationResults.traversed.warmUpResults.traversed.endState.traversed
-                -- , experiments.traversed.experimentResults.traversed.evaluationResults.traversed.evalResults.traversed.startState
-                -- , experiments.traversed.experimentResults.traversed.evaluationResults.traversed.evalResults.traversed.endState.traversed
-                ]
+              return $ over experimentsInitialState (setter val) e
     parameterSetups = parameters (exps ^. experimentsInitialState)
 
 
@@ -315,7 +307,7 @@ continueExperiment rands exps exp = do
   expResList <- getExpRes exps' (exp ^. experimentResults) >>= truncateExperiments repetits
   $(logInfo) $ "Number of experiment results loaded: " <> tshow (length expResList)
   let dropPrep = any (^. parameterSettingDropPrepeationPhase) (exp ^. parameterSetup)
-  expRes <- mapM (runExperimentResult dropPrep rands exps') expResList
+  expRes <- mapM (runExperimentResult dropPrep rands exps' expId) expResList
   let updated = any fst expRes
       res = map snd expRes
   if updated
@@ -325,6 +317,7 @@ continueExperiment rands exps exp = do
     else return $ (updated, set experimentResults res exp)
 
   where
+    expId = exp ^. experimentKey
     repetits = exps ^. experimentsSetup . expsSetupRepetitions
     getExpRes :: (MonadIO m) => Experiments a -> [ExperimentResult a] -> ReaderT SqlBackend m [ExperimentResult a]
     getExpRes exps expResDone =
@@ -374,14 +367,14 @@ newResultData g repResType st inpSt = do
 type DropPreparation = Bool
 
 
-runExperimentResult :: (ExperimentDef a) => DropPreparation -> Rands -> Experiments a -> ExperimentResult a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, ExperimentResult a)
-runExperimentResult dropPrep rands@(prepRands, _, _) exps expRes = do
+runExperimentResult :: (ExperimentDef a) => DropPreparation -> Rands -> Experiments a -> Key Exp -> ExperimentResult a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, ExperimentResult a)
+runExperimentResult dropPrep rands@(prepRands, _, _) exps expId expRes = do
   (prepUpdated, prepRes) <-
     if dropPrep
       then do
         $(logInfo) "Skipping preparation phase as provided by the parameter setting (dropPreparationPhase)."
         return (False, Nothing)
-      else runPreparation (prepRands !! (expRes ^. repetitionNumber - 1)) exps expResId (expRes ^. preparationResults)
+      else runPreparation (prepRands !! (expRes ^. repetitionNumber - 1)) exps expId expResId (expRes ^. preparationResults)
   repsDone <-
     if prepUpdated
       then do
@@ -393,7 +386,7 @@ runExperimentResult dropPrep rands@(prepRands, _, _) exps expRes = do
   let initSt = afterPreparationPhase $ fromMaybe (exps ^. experimentsInitialState) mEndSt
       initInpSt = fromMaybe (exps ^. experimentsInitialInputState) (view endInputState =<< prepRes)
   let runRepl e repRess = do
-        res <- runReplicationResult rands e (expRes ^. repetitionNumber) initSt initInpSt repRess
+        res <- runReplicationResult rands e expId (expRes ^. repetitionNumber) initSt initInpSt repRess
         transactionSave
         return res
   repRes <- getRepRes exps repsDone >>= mapM (runRepl exps)
@@ -414,8 +407,8 @@ runExperimentResult dropPrep rands@(prepRands, _, _) exps expRes = do
              return $ ReplicationResult kRepRes nr Nothing Nothing)
 
 
-runPreparation :: (ExperimentDef a) => StdGen -> Experiments a -> Key ExpResult -> Maybe (ResultData a) -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, Maybe (ResultData a))
-runPreparation g exps expResId mResData = do
+runPreparation :: (ExperimentDef a) => StdGen -> Experiments a -> Key Exp -> Key ExpResult -> Maybe (ResultData a) -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, Maybe (ResultData a))
+runPreparation g exps expId expResId mResData = do
   let len = maybe 0 (view (results._1)) mResData
   mResData' <-
     if delNeeded len
@@ -434,7 +427,7 @@ runPreparation g exps expResId mResData = do
     initSt = exps ^. experimentsInitialState
     initInpSt = exps ^. experimentsInitialInputState
     new = newResultData g (Prep expResId) initSt initInpSt
-    run len rD = ((delNeeded len ||) *** Just) <$> runResultData prepSteps (Prep expResId) rD
+    run len rD = ((delNeeded len ||) *** Just) <$> runResultData expId prepSteps (Prep expResId) rD
 
 
 type RepetitionNr = Int
@@ -446,13 +439,14 @@ runReplicationResult ::
      (ExperimentDef a)
   => Rands
   -> Experiments a
+  -> Key Exp
   -> RepetitionNr
   -> InitialState a
   -> InitialInputState a
   -> ReplicationResult a
   -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, ReplicationResult a)
-runReplicationResult (_, wmUpRands, replRands) exps repetNr initSt initInpSt repRes = do
-  (wmUpChange, mWmUp) <- runWarmUp (wmUpRands !! ((repetNr - 1) * replicats + (repRes ^. replicationNumber - 1))) exps (repRes ^. replicationResultKey) initSt initInpSt (repRes ^. warmUpResults)
+runReplicationResult (_, wmUpRands, replRands) exps expId repetNr initSt initInpSt repRes = do
+  (wmUpChange, mWmUp) <- runWarmUp (wmUpRands !! ((repetNr - 1) * replicats + (repRes ^. replicationNumber - 1))) exps expId (repRes ^. replicationResultKey) initSt initInpSt (repRes ^. warmUpResults)
   initStEval <- maybe (return initSt) (\res -> fmap (fromMaybe initSt) $ mkTransientlyAvailable $ view endState res) mWmUp
   let initInpStEval = fromMaybe initInpSt (view endInputState =<< mWmUp)
   mEval <-
@@ -460,7 +454,7 @@ runReplicationResult (_, wmUpRands, replRands) exps repetNr initSt initInpSt rep
       then deleteResultData (Rep repResId) >> return Nothing
       else return (repRes ^. evalResults)
   -- when wmUpChange $ $(logInfo) $ error $ "A change in the settings of the warm up phase occurred. Discarding the result data."
-  (evalChange, mEval') <- runEval (replRands !! ((repetNr - 1) * replicats + (repRes ^. replicationNumber - 1))) exps wmUpChange (repRes ^. replicationResultKey) initStEval initInpStEval mEval
+  (evalChange, mEval') <- runEval (replRands !! ((repetNr - 1) * replicats + (repRes ^. replicationNumber - 1))) exps expId wmUpChange (repRes ^. replicationResultKey) initStEval initInpStEval mEval
   return (wmUpChange || evalChange, set warmUpResults mWmUp $ set evalResults mEval' repRes)
   where
     repResId = repRes ^. replicationResultKey
@@ -471,12 +465,13 @@ runWarmUp ::
      (ExperimentDef a)
   => StdGen
   -> Experiments a
+  -> Key Exp
   -> Key RepResult
   -> InitialState a
   -> InitialInputState a
   -> Maybe (ResultData a)
   -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, Maybe (ResultData a))
-runWarmUp g exps repResId initSt initInpSt mResData = do
+runWarmUp g exps expId repResId initSt initInpSt mResData = do
   let len = maybe 0 (view (results._1)) mResData
   --   $(logDebug) $ "Warm up periods already run: " <> tshow len <> " Deletion needed: " <> tshow (delNeeded len)
   when (len > 0 && delNeeded len) $ $(logInfo) "Deletion of warm up data needed"
@@ -496,20 +491,21 @@ runWarmUp g exps repResId initSt initInpSt mResData = do
     runNeeded len = maybe (wmUpSteps > 0) (\r -> wmUpSteps > len || (delNeeded len && wmUpSteps > 0)) mResData
     wmUpSteps = exps ^. experimentsSetup . expsSetupEvaluationWarmUpSteps
     new = newResultData g (WarmUp repResId) initSt initInpSt
-    run len rD = ((delNeeded len ||) *** Just) <$> runResultData wmUpSteps (WarmUp repResId) rD
+    run len rD = ((delNeeded len ||) *** Just) <$> runResultData expId wmUpSteps (WarmUp repResId) rD
 
 
 runEval ::
      (ExperimentDef a)
   => StdGen
   -> Experiments a
+  -> Key Exp
   -> Updated
   -> Key RepResult
   -> InitialState a
   -> InitialInputState a
   -> Maybe (ResultData a)
   -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, Maybe (ResultData a))
-runEval g exps warmUpUpdated repResId initSt initInpSt mResData = do
+runEval g exps expId warmUpUpdated repResId initSt initInpSt mResData = do
   let len = maybe 0 (view (results._1)) mResData
   mResData' <-
     if delNeeded len
@@ -530,7 +526,7 @@ runEval g exps warmUpUpdated repResId initSt initInpSt mResData = do
     runNeeded len = maybe (evalSteps > 0) (\r -> evalSteps > len) mResData
     evalSteps = exps ^. experimentsSetup . expsSetupEvaluationSteps
     new = newResultData g (Rep repResId) initSt initInpSt
-    run len rD = ((delNeeded len ||) *** Just) <$> runResultData evalSteps (Rep repResId) rD
+    run len rD = ((delNeeded len ||) *** Just) <$> runResultData expId evalSteps (Rep repResId) rD
 
 
 deleteReplicationResult :: (MonadIO m) => ReplicationResult a -> ReaderT SqlBackend m ()
@@ -557,15 +553,13 @@ deleteResultData repResType = do
       sequence_ $ deleteCascade <$> (view repResultRepResultData =<< repRes)
 
 
-runResultData :: (ExperimentDef a) => Int -> RepResultType -> ResultData a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, ResultData a)
-runResultData len repResType resData = do
+runResultData :: (ExperimentDef a) => Key Exp -> Int -> RepResultType -> ResultData a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, ResultData a)
+runResultData expId len repResType resData = do
   startStAvail <- mkAvailable (resData ^. startState)
-  st <- do
-    mEndSt <- mkTransientlyAvailable (resData ^. endState)
-    startSt <- mkTransientlyAvailable startStAvail
-    return $ fromMaybe startSt mEndSt
-
-
+  st <-
+    do mEndSt <- mkTransientlyAvailable (resData ^. endState)
+       startSt <- mkTransientlyAvailable startStAvail
+       return $ fromMaybe startSt mEndSt
   let stInp = fromMaybe (resData ^. startInputState) (resData ^. endInputState)
   let g = fromMaybe (resData ^. startRandGen) (resData ^. endRandGen)
   $(logInfo) $ "Number of steps already run is " <> tshow curLen <> ", thus still need to run " <> tshow (len - curLen) <> " steps..."
@@ -588,29 +582,26 @@ runResultData len repResType resData = do
       upd repResType resData'
       transactionSave
       if len - curLen - length periodsToRun > 0
-        then runResultData len repResType resData'
+        then runResultData expId len repResType resData'
         else do
-          $(logInfo) "Done"
-          return (True,
-                  set endState mkEndStateAvailableFromDb $
-                  set startState mkStartStateAvailableFromDb $
-                  resData')
+          $(logInfo) "Done and saved. Releasing memory."
+          return (True, set endState mkEndStateAvailableOnDemand $ set startState mkStartStateAvailableOnDemand resData')
     else return (False, resData)
   where
     curLen = resData ^. results . _1
     isNew = curLen == 0
     periodsToRun = [1 + curLen .. curLen + min 1000 len]
     periodsToRunLen = length periodsToRun
-    mkEndStateAvailableFromDb =
+    mkEndStateAvailableOnDemand =
       case resData ^. resultDataKey of
-        ResultDataPrep key -> AvailableFromDB $ loadResDataEndState (view prepResultDataEndState) key
-        ResultDataWarmUp key -> AvailableFromDB $ loadResDataEndState (view warmUpResultDataEndState) key
-        ResultDataRep key -> AvailableFromDB $ loadResDataEndState (view repResultDataEndState) key
-    mkStartStateAvailableFromDb =
+        ResultDataPrep key -> AvailableOnDemand $ loadResDataEndState expId (view prepResultDataEndState) key
+        ResultDataWarmUp key -> AvailableOnDemand $ loadResDataEndState expId (view warmUpResultDataEndState) key
+        ResultDataRep key -> AvailableOnDemand $ loadResDataEndState expId (view repResultDataEndState) key
+    mkStartStateAvailableOnDemand =
       case resData ^. resultDataKey of
-        ResultDataPrep key -> AvailableFromDB $ loadResDataStartState (view prepResultDataStartState) key
-        ResultDataWarmUp key -> AvailableFromDB $ loadResDataStartState (view warmUpResultDataStartState) key
-        ResultDataRep key -> AvailableFromDB $ loadResDataStartState (view repResultDataStartState) key
+        ResultDataPrep key -> AvailableOnDemand $ loadResDataStartState expId (view prepResultDataStartState) key
+        ResultDataWarmUp key -> AvailableOnDemand $ loadResDataStartState expId (view warmUpResultDataStartState) key
+        ResultDataRep key -> AvailableOnDemand $ loadResDataStartState expId (view repResultDataStartState) key
     addInputValsAndMeasure inputVals measures resData =
       let countResults' = resData ^. results . _1 + length measures
           countInputValues' = resData ^. inputValues . _1 + length inputVals
@@ -620,24 +611,24 @@ runResultData len repResType resData = do
               zipWithM_ (\k v -> insert $ PrepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
               measureKeys <- mapM (insert . PrepMeasure key . view measurePeriod) measures
               zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ PrepResultStep k n mX y) xs) measureKeys measures
-              return $ results .~ (countResults', AvailableFromDB (loadPrepartionMeasures key)) $ inputValues .~
-                (countInputValues', AvailableFromDB (fromMaybe [] <$> loadPreparationInput key)) $
+              return $ results .~ (countResults', AvailableOnDemand (loadPrepartionMeasures key)) $ inputValues .~
+                (countInputValues', AvailableOnDemand (fromMaybe [] <$> loadPreparationInput key)) $
                 resData
             ResultDataWarmUp key -> do
               inpKeys <- mapM (insert . WarmUpInput key . view inputValuePeriod) inputVals
               zipWithM_ (\k v -> insert $ WarmUpInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
               measureKeys <- mapM (insert . WarmUpMeasure key . view measurePeriod) measures
               zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ WarmUpResultStep k n mX y) xs) measureKeys measures
-              return $ results .~ (countResults', AvailableFromDB (loadReplicationWarmUpMeasures key)) $ inputValues .~
-                (countInputValues', AvailableFromDB (fromMaybe [] <$> loadReplicationWarmUpInput key)) $
+              return $ results .~ (countResults', AvailableOnDemand (loadReplicationWarmUpMeasures key)) $ inputValues .~
+                (countInputValues', AvailableOnDemand (fromMaybe [] <$> loadReplicationWarmUpInput key)) $
                 resData
             ResultDataRep key -> do
               inpKeys <- mapM (insert . RepInput key . view inputValuePeriod) inputVals
               zipWithM_ (\k v -> insert $ RepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
               measureKeys <- mapM (insert . RepMeasure key . view measurePeriod) measures
               zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ RepResultStep k n mX y) xs) measureKeys measures
-              return $ results .~ (countResults', AvailableFromDB (loadReplicationMeasures key)) $ inputValues .~
-                (countInputValues', AvailableFromDB (fromMaybe [] <$> loadReplicationInput key)) $
+              return $ results .~ (countResults', AvailableOnDemand (loadReplicationMeasures key)) $ inputValues .~
+                (countInputValues', AvailableOnDemand (fromMaybe [] <$> loadReplicationInput key)) $
                 resData
     upd :: (ExperimentDef a) => RepResultType -> ResultData a -> ReaderT SqlBackend (LoggingT (ExpM a)) ()
     upd (Prep expResId) (ResultData (ResultDataPrep k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do
@@ -645,7 +636,7 @@ runResultData len repResType resData = do
       serESt <- mkTransientlyAvailable eSt >>= lift . lift . sequence . fmap serialisable
       replace k (PrepResultData sTime eTime (tshow sG) (tshow <$> eG) (runPut . put $ serSt) (runPut . put <$> serESt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
     upd (WarmUp repResId) (ResultData (ResultDataWarmUp k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do
-      serSt <- mkTransientlyAvailable  sSt >>= lift . lift . serialisable
+      serSt <- mkTransientlyAvailable sSt >>= lift . lift . serialisable
       serESt <- mkTransientlyAvailable eSt >>= lift . lift . sequence . fmap serialisable
       replace k (WarmUpResultData sTime eTime (tshow sG) (tshow <$> eG) (runPut . put $ serSt) (runPut . put <$> serESt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
     upd (Rep repResId) (ResultData (ResultDataRep k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do

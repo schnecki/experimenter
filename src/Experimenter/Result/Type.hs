@@ -34,25 +34,25 @@ data ResultDataKey
 data Availability a b
   = (ExperimentDef a) =>
     Available b
-  | AvailableFromDB (ReaderT SqlBackend (LoggingT (ExpM a)) b)
+  | AvailableOnDemand (ReaderT SqlBackend (LoggingT (ExpM a)) b)
 
 instance NFData b => NFData (Availability a b) where
-  rnf (Available b)        = rnf b
-  rnf (AvailableFromDB !_) = ()
+  rnf (Available b)          = rnf b
+  rnf (AvailableOnDemand !_) = ()
 
 type AvailabilityList a b = (Int, Availability a b)
 
 mkAvailableList :: (Foldable t, ExperimentDef a) => (Int, Availability a (t b)) -> ReaderT SqlBackend (LoggingT (ExpM a)) (Int, Availability a (t b))
 mkAvailableList (nr, Available xs)         = return (nr, Available xs)
-mkAvailableList (_, AvailableFromDB query) = (\xs -> (length xs, Available xs)) <$> query
+mkAvailableList (_, AvailableOnDemand query) = (\xs -> (length xs, Available xs)) <$> query
 
 mkAvailable :: (ExperimentDef a) => Availability a b -> ReaderT SqlBackend (LoggingT (ExpM a)) (Availability a b)
-mkAvailable (Available xs)          = return (Available xs)
-mkAvailable (AvailableFromDB query) = Available <$> query
+mkAvailable (Available xs)            = return (Available xs)
+mkAvailable (AvailableOnDemand query) = Available <$> query
 
 mkTransientlyAvailable :: Availability a b -> ReaderT SqlBackend (LoggingT (ExpM a)) b
-mkTransientlyAvailable (Available xs)          = return xs
-mkTransientlyAvailable (AvailableFromDB query) = query
+mkTransientlyAvailable (Available xs)            = return xs
+mkTransientlyAvailable (AvailableOnDemand query) = query
 
 
 data ResultData a = ResultData

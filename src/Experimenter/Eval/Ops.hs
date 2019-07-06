@@ -30,15 +30,12 @@ import           Experimenter.Result.Type
 import           Experimenter.StepResult
 import           Experimenter.Util
 
-
+-- | This function makes only the needed data available, as otherwise the memory requirement is huge for no reason. In
+-- case needed data is not available an `error` will indicate this bug.
 makeResDataAvailable :: (ExperimentDef a) => Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Experiments a)
 makeResDataAvailable exps =
-  (experiments . traversed . experimentResults . traversed . evaluationResults . traversed . evalResults . traversed . results) mkAvailableList exps >>=
+  mapMOf (experiments . traversed . experimentResults . traversed . evaluationResults . traversed . evalResults . traversed . results) mkAvailableList exps >>=
   mapMOf (experiments . traversed . experimentResults . traversed . evaluationResults . traversed . evalResults . traversed . inputValues) mkAvailableList
-  -- mapMOf (experiments . traversed . experimentResults . traversed . warmUpResults . traversed . evalResults . traversed . results) mkAvailable >>=
-  -- mapMOf (experiments . traversed . experimentResults . traversed . warmUpResults . traversed . evalResults . traversed . inputValues) mkAvailable >>=
-  -- mapMOf (experiments . traversed . preparationResults . traversed . evalResults . traversed . results) mkAvailable >>=
-  -- mapMOf (experiments . traversed . preparationResults . traversed . evalResults . traversed . inputValues) mkAvailable
 
 runner :: (ExperimentDef a) => (ExpM a (Experiments a) -> IO (Experiments a)) -> DatabaseSetup -> Experiments a -> IO (Experiments a)
 runner runExpM dbSetup exps =
@@ -113,7 +110,7 @@ genResultData exp eval repl =
 
 fromAvailable :: Availability a b -> b
 fromAvailable (Available b) = b
-fromAvailable (AvailableFromDB _) = error "Data was not loaded from DB. Need to load data before running the evaluation!"
+fromAvailable (AvailableOnDemand _) = error "Data was not loaded from DB. Need to load data before running the evaluation!"
 
 evalOf :: Experiment a -> Of a -> ResultData a -> IO (EvalResults a)
 evalOf exp eval resData =

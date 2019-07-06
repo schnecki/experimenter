@@ -18,7 +18,7 @@ module Experimenter.Result.Query
     ) where
 
 
-import           Control.Lens                         (view)
+import           Control.Lens                         (over, view)
 import           Control.Monad.Logger
 import           Control.Monad.Reader
 import           Data.ByteString                      (ByteString)
@@ -49,17 +49,18 @@ import           Experimenter.Util
 
 import           Debug.Trace
 
+
 loadExperiments :: (ExperimentDef a) => ExperimentSetup -> InputState a -> a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Experiments a)
 loadExperiments setup initInpSt initSt = do
   eExp <- getOrCreateExps setup initInpSt initSt
   let e = entityVal eExp
-  exps <- L.sortBy (compare `on` view experimentNumber) <$> loadExperimentList (entityKey eExp)
+  exps <- L.sortBy (compare `on` view experimentNumber) <$> loadExperimentList (parameters initSt) (entityKey eExp)
   eSetup <- fromMaybe (error "Setup not found. Your DB is corrupted!") <$> getBy (UniqueExpsSetup (entityKey eExp))
   return $ Experiments (entityKey eExp) (view expsName e) (view expsStartTime e) (view expsEndTime e) (entityVal eSetup) (parameters initSt) initSt initInpSt exps
 
 
-loadExperimentList :: (ExperimentDef a) => Key Exps -> ReaderT SqlBackend (LoggingT (ExpM a)) [Experiment a]
-loadExperimentList expsKey = selectList [ExpExps ==. expsKey] [] >>= mapM mkExperiment
+loadExperimentList :: (ExperimentDef a) => [ParameterSetup a] -> Key Exps -> ReaderT SqlBackend (LoggingT (ExpM a)) [Experiment a]
+loadExperimentList paramSetup expsKey = selectList [ExpExps ==. expsKey] [] >>= mapM mkExperiment
     where mkExperiment (Entity k exp) = do
             paramSetting <- loadParamSetup k
             Experiment k (view expNumber exp) (view expStartTime exp) (view expEndTime exp) paramSetting <$> loadExperimentResults k
@@ -87,40 +88,60 @@ loadExperimentResults kExp = do
 
 
 loadResDataEndState ::
-     (PersistStoreRead backend, PersistEntity resData, ExperimentDef a, PersistEntityBackend resData ~ BaseBackend backend)
-  => (resData -> Maybe ByteString)
+     (PersistUniqueRead backend, PersistQueryRead backend, BackendCompatible SqlBackend backend, PersistEntity resData, ExperimentDef a, PersistEntityBackend resData ~ BaseBackend backend)
+  => Key Exp
+  -> (resData -> Maybe ByteString)
   -> Key resData
   -> ReaderT backend (LoggingT (ExpM a)) (Maybe a)
-loadResDataEndState acc k = do
+loadResDataEndState expId acc k = do
   mResData <- P.get k
-  case mResData of
+  res <- case mResData of
     Nothing  -> error "Could not get preparation start state"
     Just resData -> do
       mSer <- maybe (return Nothing) (deserialise "prep start state") (acc resData)
       lift $ lift $ traverse deserialisable mSer
-
+  traverse (setParams expId) res
 
 loadResDataStartState ::
-     (PersistStoreRead backend, PersistEntity resData, ExperimentDef a, PersistEntityBackend resData ~ BaseBackend backend)
-  => (resData -> ByteString)
+     (PersistUniqueRead backend, PersistQueryRead backend, BackendCompatible SqlBackend backend, PersistEntity resData, ExperimentDef a, PersistEntityBackend resData ~ BaseBackend backend)
+  => Key Exp
+  -> (resData -> ByteString)
   -> Key resData
   -> ReaderT backend (LoggingT (ExpM a)) a
-loadResDataStartState acc k = do
+loadResDataStartState expId acc k = do
   mResData <- P.get k
-  case mResData of
+  res <- case mResData of
     Nothing -> error "Could not get preparation start state"
     Just resData -> do
       ser <- fromMaybe (error "Could not deserialise preparation start state ") <$> deserialise "prep start state" (acc resData)
       lift $ lift $ deserialisable ser
+  setParams expId res
+
+setParams :: (PersistUniqueRead backend, PersistQueryRead backend, BackendCompatible SqlBackend backend, ExperimentDef a) => Key Exp -> a -> ReaderT backend (LoggingT (ExpM a)) a
+setParams expId st = do
+  paramSettings <- loadParamSetup expId
+  foldM setParams' st paramSettings
+  where setParams' st (ParameterSetting n bs drp _) =
+           case L.find (\(ParameterSetup name _ _ _ _ _ _) -> name == n) parameterSetup of
+             Nothing -> do
+               $(logError) $ "Could not find parameter with name " <> n <> " in the current parameter setting. Thus it cannot be modified!"
+               return st
+             Just (ParameterSetup _ setter _ _ _ drp _) ->
+               case runGet S.get bs of
+                 Left err -> error $ "Could not read value of parameter " <> T.unpack n <> ". Aborting! Serializtion error was: " ++ err
+                 Right val -> do
+                   $(logInfo) $ "Loaded parameter '" <> n <> "' value: " <> tshow val
+                   return $ setter val st
+        parameterSetup = parameters st
 
 loadExperimentResult :: forall a m . (ExperimentDef a) => Entity ExpResult -> ReaderT SqlBackend (LoggingT (ExpM a)) (ExperimentResult a)
-loadExperimentResult (Entity k (ExpResult _ rep mPrepResDataId)) = do
+loadExperimentResult (Entity k (ExpResult expId rep mPrepResDataId)) = do
   mEPrepResData <- fmap join $ sequence $ P.getEntity <$> mPrepResDataId
   prepRes <- case mEPrepResData of
     Nothing -> return Nothing
     Just (Entity resDataKey (PrepResultData startT endT startRandGen endRandGen startStBS endStBS startInpStBS endInpStBS)) -> do
-      let startSt = AvailableFromDB (loadResDataStartState (view prepResultDataStartState) resDataKey)
-      let endSt = AvailableFromDB (loadResDataEndState (view prepResultDataEndState) resDataKey)
+      let startSt = AvailableOnDemand (loadResDataStartState expId (view prepResultDataStartState) resDataKey)
+      let endSt = AvailableOnDemand (loadResDataEndState expId (view prepResultDataEndState) resDataKey)
       mStartInpSt <- deserialise "prep start input state" startInpStBS
       mEndInpSt <- mDeserialise "prep end input state" endInpStBS
       inpCount <- loadPreparationInputCount resDataKey
@@ -128,14 +149,15 @@ loadExperimentResult (Entity k (ExpResult _ rep mPrepResDataId)) = do
       return $ do
         endInpSt <- mEndInpSt
         startInpSt <- mStartInpSt
-        let inputVals = AvailableFromDB (fromMaybe [] <$> loadPreparationInput resDataKey)
-        let results = AvailableFromDB (loadPrepartionMeasures resDataKey)
+        let inputVals = AvailableOnDemand (fromMaybe [] <$> loadPreparationInput resDataKey)
+        let results = AvailableOnDemand (loadPrepartionMeasures resDataKey)
         return $ ResultData (ResultDataPrep resDataKey) startT endT (tread startRandGen) (tread <$> endRandGen) (inpCount, inputVals) (resultCount, results) startSt endSt startInpSt endInpSt
-  evalResults <- loadReplicationResults k
+  evalResults <- loadReplicationResults expId k
   return $ ExperimentResult k rep prepRes evalResults
 
-loadParamSetup :: (MonadLogger m, MonadIO m) => Key Exp -> ReaderT SqlBackend m [ParameterSetting a]
-loadParamSetup kExp = L.sortBy (compare `on` view parameterSettingName) . map (mkParameterSetting' . entityVal) <$> selectList [ParamSettingExp ==. kExp] []
+-- loadParamSetup :: (PersistStoreRead backend, ExperimentDef a) => Key Exp -> ReaderT backend (LoggingT (ExpM a)) [ParameterSetting a]
+-- loadParamSetup kExp = L.sortBy (compare `on` view parameterSettingName) . map (mkParameterSetting' . entityVal) <$> selectList [ParamSettingExp ==. kExp] []
+loadParamSetup kExp = L.sortBy (compare `on` view parameterSettingName) . map (mkParameterSetting' . entityVal) <$> (E.select $ E.from $ \pm -> E.where_ (pm E.^. ParamSettingExp E.==. E.val kExp) >> return pm)
   where
     mkParameterSetting' (ParamSetting _ n v b design) = ParameterSetting n v b (toEnum design)
 
@@ -178,14 +200,14 @@ loadPrepartionMeasures kExpRes = do
     combineMeasures xs@(Measure p _:_) = Measure p (concatMap (view measureResults) xs)
     combineMeasures _                  = error "not possible"
 
-loadReplicationResults :: (ExperimentDef a) => Key ExpResult -> ReaderT SqlBackend (LoggingT (ExpM a)) [ReplicationResult a]
-loadReplicationResults kExpRes = do
+loadReplicationResults :: (ExperimentDef a) => Key Exp -> Key ExpResult -> ReaderT SqlBackend (LoggingT (ExpM a)) [ReplicationResult a]
+loadReplicationResults expId kExpRes = do
   xs <- selectList [RepResultExpResult ==. kExpRes] []
-  L.sortBy (compare `on` view replicationNumber) <$> mapM loadReplicationResult xs
+  L.sortBy (compare `on` view replicationNumber) <$> mapM (loadReplicationResult expId) xs
 
 
-loadReplicationResult :: (ExperimentDef a) => Entity RepResult -> ReaderT SqlBackend (LoggingT (ExpM a)) (ReplicationResult a)
-loadReplicationResult (Entity k (RepResult _ repNr mWmUpResId mRepResId)) = do
+loadReplicationResult :: (ExperimentDef a) => Key Exp -> Entity RepResult -> ReaderT SqlBackend (LoggingT (ExpM a)) (ReplicationResult a)
+loadReplicationResult expId (Entity k (RepResult _ repNr mWmUpResId mRepResId)) = do
   mWmUpRes <- fmap join $ sequence $ P.getEntity <$> mWmUpResId
   mRepRes <- fmap join $ sequence $ P.getEntity <$> mRepResId
   wmUp <-
@@ -203,15 +225,15 @@ loadReplicationResult (Entity k (RepResult _ repNr mWmUpResId mRepResId)) = do
       let wmUpEndTime = view warmUpResultDataEndTime wmUpRes
       let wmUpStartRandGen = tread $ view warmUpResultDataStartRandGen wmUpRes
       let wmUpEndRandGen = tread <$> view warmUpResultDataEndRandGen wmUpRes
-      let wmUpStartSt = AvailableFromDB (loadResDataStartState (view warmUpResultDataStartState) wmUpResKey)
-      let wmUpEndSt = AvailableFromDB (loadResDataEndState (view warmUpResultDataEndState) wmUpResKey)
+      let wmUpStartSt = AvailableOnDemand (loadResDataStartState expId (view warmUpResultDataStartState) wmUpResKey)
+      let wmUpEndSt = AvailableOnDemand (loadResDataEndState expId (view warmUpResultDataEndState) wmUpResKey)
       mWmUpStartInpSt <- deserialise "warm up start input state" (view warmUpResultDataStartInputState wmUpRes)
       mWmUpEndInpSt <- mDeserialise "warm up end input state" (view warmUpResultDataEndInputState wmUpRes)
       wmUpInpValsCount <- loadReplicationWarmUpInputCount wmUpResKey
       wmUpMeasuresCount <- loadReplicationWarmUpMeasuresCount wmUpResKey
       return $ do
-        let wmUpInpVals = AvailableFromDB (fromMaybe [] <$> loadReplicationWarmUpInput wmUpResKey)
-            wmUpMeasures = AvailableFromDB (loadReplicationWarmUpMeasures wmUpResKey)
+        let wmUpInpVals = AvailableOnDemand (fromMaybe [] <$> loadReplicationWarmUpInput wmUpResKey)
+            wmUpMeasures = AvailableOnDemand (loadReplicationWarmUpMeasures wmUpResKey)
         wmUpStartInpSt <- mWmUpStartInpSt
         wmUpEndInpSt <- mWmUpEndInpSt
         return $
@@ -237,10 +259,10 @@ loadReplicationResult (Entity k (RepResult _ repNr mWmUpResId mRepResId)) = do
       repInpValsCount <- loadReplicationInputCount repResKey
       repMeasuresCount <- loadReplicationMeasuresCount repResKey
       return $ do
-        let repInpVals = AvailableFromDB (fromMaybe [] <$> loadReplicationInput repResKey)
-            repMeasures = AvailableFromDB (loadReplicationMeasures repResKey)
-        let repStartSt = AvailableFromDB (loadResDataStartState (view repResultDataStartState) repResKey)
-        let repEndSt = AvailableFromDB (loadResDataEndState (view repResultDataEndState) repResKey)
+        let repInpVals = AvailableOnDemand (fromMaybe [] <$> loadReplicationInput repResKey)
+            repMeasures = AvailableOnDemand (loadReplicationMeasures repResKey)
+        let repStartSt = AvailableOnDemand (loadResDataStartState expId (view repResultDataStartState) repResKey)
+        let repEndSt = AvailableOnDemand (loadResDataEndState expId (view repResultDataEndState) repResKey)
         repStartInpSt <- mRepStartInpSt
         repEndInpSt <- mRepEndInpSt
         return $
