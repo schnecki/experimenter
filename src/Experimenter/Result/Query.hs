@@ -45,11 +45,6 @@ import           Experimenter.Util
 
 import           Debug.Trace
 
--- selectCount :: (MonadIO m) => (E.From E.SqlQuery E.SqlExpr SqlBackend a) => (a -> E.SqlQuery ()) -> ReaderT SqlBackend m Int
--- selectCount q = do
---   res <- E.select $ E.from (\x -> q x >> return E.countRows)
---   return $ fromMaybe 0 . listToMaybe . fmap (\(E.Value v) -> v) $ res
-
 loadExperiments :: (ExperimentDef a) => ExperimentSetup -> InputState a -> a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Experiments a)
 loadExperiments setup initInpSt initSt = do
   eExp <- getOrCreateExps setup initInpSt initSt
@@ -120,11 +115,7 @@ fromCount :: [E.Value Int] -> Int
 fromCount = fromMaybe 0 . listToMaybe . fmap (\(E.Value v) -> v)
 
 loadPreparationInputCount  :: (MonadIO m) => Key PrepResultData -> ReaderT SqlBackend m Int
-loadPreparationInputCount kExpRes =
-  fmap fromCount $ E.select $ E.from $ \(prepI, prepIV) -> do
-    E.where_ (prepI E.^. PrepInputId E.==. prepIV E.^. PrepInputValuePrepInput)
-    E.where_ (prepI E.^. PrepInputPrepResultData E.==. E.val kExpRes)
-    return E.countRows
+loadPreparationInputCount kExpRes = count [PrepInputPrepResultData ==. kExpRes]
 
 loadPreparationInput :: (ExperimentDef a) => Key PrepResultData -> ReaderT SqlBackend (LoggingT (ExpM a)) (Maybe [Input a])
 loadPreparationInput kExpRes = do
@@ -142,11 +133,7 @@ loadPreparationInput kExpRes = do
       return $ Input p <$> v'
 
 loadPrepartionMeasuresCount :: (MonadIO m) => Key PrepResultData -> ReaderT SqlBackend m Int
-loadPrepartionMeasuresCount kExpRes =
-  fmap fromCount $ E.select $ E.from $ \(prepM, prepRS) -> do
-      E.where_ (prepM E.^. PrepMeasureId E.==. prepRS E.^. PrepResultStepMeasure)
-      E.where_ (prepM E.^. PrepMeasurePrepResultData E.==. E.val kExpRes)
-      return E.countRows
+loadPrepartionMeasuresCount kExpRes = count [PrepMeasurePrepResultData ==. kExpRes]
 
 loadPrepartionMeasures :: (MonadLogger m, MonadIO m) => Key PrepResultData -> ReaderT SqlBackend m [Measure]
 loadPrepartionMeasures kExpRes = do
@@ -255,11 +242,8 @@ loadReplicationResult (Entity k (RepResult _ repNr mWmUpResId mRepResId)) = do
 
 
 loadReplicationWarmUpInputCount :: (MonadIO m) => Key WarmUpResultData -> ReaderT SqlBackend m Int
-loadReplicationWarmUpInputCount kExpRes =
-  fmap fromCount $ E.select $ E.from $ \(warmUpI, warmUpIV) -> do
-    E.where_ (warmUpI E.^. WarmUpInputId E.==. warmUpIV E.^. WarmUpInputValueWarmUpInput)
-    E.where_ (warmUpI E.^. WarmUpInputRepResult E.==. E.val kExpRes)
-    return E.countRows
+loadReplicationWarmUpInputCount kExpRes = count [WarmUpInputRepResult ==. kExpRes]
+
 
 loadReplicationWarmUpInput :: (ExperimentDef a, MonadLogger m, MonadIO m) => Key WarmUpResultData -> ReaderT SqlBackend m (Maybe [Input a])
 loadReplicationWarmUpInput kExpRes = do
@@ -277,11 +261,7 @@ loadReplicationWarmUpInput kExpRes = do
 
 
 loadReplicationWarmUpMeasuresCount :: (MonadIO m) => Key WarmUpResultData -> ReaderT SqlBackend m Int
-loadReplicationWarmUpMeasuresCount kExpRes =
-  fmap fromCount $ E.select $ E.from $ \(warmUpM, warmUpRS) -> do
-    E.where_ (warmUpM E.^. WarmUpMeasureId E.==. warmUpRS E.^. WarmUpResultStepMeasure)
-    E.where_ (warmUpM E.^. WarmUpMeasureRepResult E.==. E.val kExpRes)
-    return E.countRows
+loadReplicationWarmUpMeasuresCount kExpRes = count [WarmUpMeasureRepResult ==. kExpRes]
 
 loadReplicationWarmUpMeasures :: (MonadLogger m, MonadIO m) => Key WarmUpResultData -> ReaderT SqlBackend m [Measure]
 loadReplicationWarmUpMeasures kExpRes = do
@@ -299,11 +279,7 @@ loadReplicationWarmUpMeasures kExpRes = do
     combineMeasures _                  = error "not possible"
 
 loadReplicationInputCount :: (MonadIO m) => Key RepResultData -> ReaderT SqlBackend m Int
-loadReplicationInputCount kExpRes =
-  fmap fromCount $ E.select $ E.from $ \(repI, repIV) -> do
-    E.where_ (repI E.^. RepInputId E.==. repIV E.^. RepInputValueRepInput)
-    E.where_ (repI E.^. RepInputRepResult E.==. E.val kExpRes)
-    return E.countRows
+loadReplicationInputCount kExpRes = count [RepInputRepResult ==. kExpRes]
 
 loadReplicationInput :: (ExperimentDef a, MonadLogger m, MonadIO m) => Key RepResultData -> ReaderT SqlBackend m (Maybe [Input a])
 loadReplicationInput kExpRes = do
@@ -321,11 +297,7 @@ loadReplicationInput kExpRes = do
 
 
 loadReplicationMeasuresCount :: (MonadIO m) => Key RepResultData -> ReaderT SqlBackend m Int
-loadReplicationMeasuresCount kExpRes =
-  fmap fromCount $ E.select $ E.from $ \(repM, repRS) -> do
-    E.where_ (repM E.^. RepMeasureId E.==. repRS E.^. RepResultStepMeasure)
-    E.where_ (repM E.^. RepMeasureRepResult E.==. E.val kExpRes)
-    return E.countRows
+loadReplicationMeasuresCount kExpRes = count [RepMeasureRepResult ==. kExpRes]
 
 
 loadReplicationMeasures :: (MonadLogger m, MonadIO m) => Key RepResultData -> ReaderT SqlBackend m [Measure]

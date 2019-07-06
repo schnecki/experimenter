@@ -419,7 +419,7 @@ runPreparation g exps expResId mResData = do
     if delNeeded len
       then deleteResultData (Prep expResId) >> return Nothing
       else return mResData
-  when (len > 0 && delNeeded len) $ $(logInfo) "Deletion of preparation data needed"
+  when (len > 0 && delNeeded len) $ $(logInfo) $ "Deletion of preparation data needed. Len: " <> tshow len
   when (runNeeded len) $ $(logInfo) "Preparation run is needed"
   when (not (delNeeded len) && not (runNeeded len) && prepSteps > 0) $ $(logInfo) "preparation phase needs no change"
   if runNeeded len

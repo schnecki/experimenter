@@ -70,6 +70,7 @@ PrepResultData
 PrepInput
     prepResultData PrepResultDataId
     period Int
+    UniquePrepInput prepResultData period
 
 PrepInputValue
     prepInput PrepInputId
@@ -78,6 +79,7 @@ PrepInputValue
 PrepMeasure
     prepResultData PrepResultDataId
     period Int
+    UniquePrepMeasure prepResultData period
 
 PrepResultStep
     measure PrepMeasureId
@@ -115,6 +117,7 @@ RepResultData
 WarmUpInput
     repResult WarmUpResultDataId
     period Int
+    UniqueWarmUpInput repResult period
 
 WarmUpInputValue
     warmUpInput WarmUpInputId
@@ -123,6 +126,7 @@ WarmUpInputValue
 WarmUpMeasure
     repResult WarmUpResultDataId
     period Int
+    UniqueWarmUpMeasure repResult period
 
 WarmUpResultStep
     measure WarmUpMeasureId
@@ -133,6 +137,7 @@ WarmUpResultStep
 RepInput
     repResult RepResultDataId
     period Int
+    UniqueRepInput repResult period
 
 RepInputValue
     repInput RepInputId
@@ -141,6 +146,7 @@ RepInputValue
 RepMeasure
     repResult RepResultDataId
     period Int
+    UniqueRepMeasure repResult period
 
 RepResultStep
     measure RepMeasureId
