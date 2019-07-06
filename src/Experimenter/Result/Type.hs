@@ -21,6 +21,7 @@ import           Control.Lens
 import           Control.Monad.IO.Class
 import           Control.Monad.Logger
 import           Control.Monad.Reader
+import           Data.Int
 import           Data.Serialize
 import qualified Data.Text                   as T
 import           Data.Time
@@ -49,9 +50,9 @@ data ResultData a = ResultData
   , _endTime         :: !(Maybe UTCTime)
   , _startRandGen    :: !StdGen
   , _endRandGen      :: !(Maybe StdGen)
-  , _inputValues     :: !(Availability a [Input a])
-  , _results         :: !(Availability a [Measure])
-  , _startState      :: !a
+  , _inputValues     :: !(Int, Availability a [Input a])
+  , _results         :: !(Int, Availability a [Measure])
+  , _startState      :: !a         -- TODO: Availability for startState & endState
   , _endState        :: !(Maybe a)    -- ^ state at end of warm-up phase
   , _startInputState :: !(InputState a)
   , _endInputState   :: !(Maybe (InputState a))

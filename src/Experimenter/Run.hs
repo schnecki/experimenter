@@ -368,7 +368,7 @@ newResultData g repResType st inpSt = do
             repResDataId <- insert (RepResultData time Nothing (tshow g) Nothing (runPut $ put serSt) Nothing (runPut $ put inpSt) Nothing)
             update repResId [RepResultRepResultData =. Just repResDataId]
             return $ ResultDataRep repResDataId
-  return $ ResultData k time Nothing g Nothing (Available []) (Available []) st Nothing inpSt Nothing
+  return $ ResultData k time Nothing g Nothing (0, Available []) (0, Available []) st Nothing inpSt Nothing
 
 
 type DropPreparation = Bool
@@ -414,7 +414,7 @@ runExperimentResult dropPrep rands@(prepRands, _, _) exps expRes = do
 
 runPreparation :: (ExperimentDef a) => StdGen -> Experiments a -> Key ExpResult -> Maybe (ResultData a) -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, Maybe (ResultData a))
 runPreparation g exps expResId mResData = do
-  len <- maybe (return 0) (lengthAvailability . view results) mResData
+  let len = maybe 0 (view (results._1)) mResData
   mResData' <-
     if delNeeded len
       then deleteResultData (Prep expResId) >> return Nothing
@@ -433,13 +433,6 @@ runPreparation g exps expResId mResData = do
     initInpSt = exps ^. experimentsInitialInputState
     new = newResultData g (Prep expResId) initSt initInpSt
     run len rD = ((delNeeded len ||) *** Just) <$> runResultData prepSteps (Prep expResId) rD
-
-
-lengthAvailability :: (ExperimentDef a) => Availability a [b] -> ReaderT SqlBackend (LoggingT (ExpM a)) Int
-lengthAvailability (Available xs) = return (length xs)
-lengthAvailability (AvailableFromDB sql) = do
-  res <- sql
-  return $ length res
 
 
 type RepetitionNr = Int
@@ -482,7 +475,7 @@ runWarmUp ::
   -> Maybe (ResultData a)
   -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, Maybe (ResultData a))
 runWarmUp g exps repResId initSt initInpSt mResData = do
-  len <- maybe (return 0) (lengthAvailability . view results) mResData
+  let len = maybe 0 (view (results._1)) mResData
   --   $(logDebug) $ "Warm up periods already run: " <> tshow len <> " Deletion needed: " <> tshow (delNeeded len)
   when (len > 0 && delNeeded len) $ $(logInfo) "Deletion of warm up data needed"
   when (runNeeded len) $ $(logInfo) "Warm up run is needed"
@@ -515,7 +508,7 @@ runEval ::
   -> Maybe (ResultData a)
   -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, Maybe (ResultData a))
 runEval g exps warmUpUpdated repResId initSt initInpSt mResData = do
-  len <- maybe (return 0) (lengthAvailability . view results) mResData
+  let len = maybe 0 (view (results._1)) mResData
   mResData' <-
     if delNeeded len
       then deleteResultData (Rep repResId) >> return Nothing
@@ -564,7 +557,7 @@ deleteResultData repResType = do
 
 runResultData :: (ExperimentDef a) => Int -> RepResultType -> ResultData a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, ResultData a)
 runResultData len repResType resData = do
-  curLen <- lengthAvailability (resData ^. results)
+  let curLen = resData ^. results . _1
   let isNew = curLen == 0
   let st = fromMaybe (resData ^. startState) (resData ^. endState)
   let stInp = fromMaybe (resData ^. startInputState) (resData ^. endInputState)
@@ -577,38 +570,52 @@ runResultData len repResType resData = do
   if updated
     then do
       eTime <- pure <$> liftIO getCurrentTime
-      resData' <- addInputValsAndMeasure (reverse inputs) (reverse measures) $
-            (if isNew then set startTime sTime else id) $ set endInputState (Just stInp') $ set endState (Just st') $ set endRandGen (Just g') $ set endTime eTime resData
+      resData' <-
+        addInputValsAndMeasure (reverse inputs) (reverse measures) $
+        (if isNew
+           then set startTime sTime
+           else id) $
+        set endInputState (Just stInp') $
+        set endState (Just st') $
+        set endRandGen (Just g') $
+        set endTime eTime resData
       upd repResType resData'
       transactionSave
       if len - curLen - length periodsToRun > 0
         then runResultData len repResType resData'
         else do
-        $(logInfo) "Done"
-        return (True, resData')
+          $(logInfo) "Done"
+          return (True, resData')
     else return (False, resData)
   where
-    addInputValsAndMeasure inputVals measures resData = case resData ^. resultDataKey of
-      ResultDataPrep key   -> do
-        inpKeys <- mapM (insert . PrepInput key . view inputValuePeriod) inputVals
-        zipWithM_ (\k v -> insert $ PrepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
-        measureKeys <- mapM (insert . PrepMeasure key . view measurePeriod) measures
-        zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ PrepResultStep k n mX y) xs) measureKeys measures
-        return $ results .~ AvailableFromDB (loadPrepartionMeasures key) $ inputValues .~ AvailableFromDB (fromMaybe [] <$> loadPreparationInput key) $ resData
-      ResultDataWarmUp key -> do
-        inpKeys <- mapM (insert . WarmUpInput key . view inputValuePeriod) inputVals
-        zipWithM_ (\k v -> insert $ WarmUpInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
-        measureKeys <- mapM (insert . WarmUpMeasure key . view measurePeriod) measures
-        zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ WarmUpResultStep k n mX y) xs) measureKeys measures
-        return $ results .~ AvailableFromDB (loadReplicationWarmUpMeasures key) $ inputValues .~ AvailableFromDB (fromMaybe [] <$> loadReplicationWarmUpInput key) $ resData
-      ResultDataRep key -> do
-        inpKeys <- mapM (insert . RepInput key . view inputValuePeriod) inputVals
-        zipWithM_ (\k v -> insert $ RepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
-        measureKeys <- mapM (insert . RepMeasure key . view measurePeriod) measures
-        zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ RepResultStep k n mX y) xs) measureKeys measures
-        return $ results .~ AvailableFromDB (loadReplicationMeasures key) $ inputValues .~ AvailableFromDB (fromMaybe [] <$> loadReplicationInput key) $ resData
-
-
+    addInputValsAndMeasure inputVals measures resData =
+      let countResults' = resData ^. results . _1 + length measures
+          countInputValues' = resData ^. inputValues . _1 + length inputVals
+       in case resData ^. resultDataKey of
+            ResultDataPrep key -> do
+              inpKeys <- mapM (insert . PrepInput key . view inputValuePeriod) inputVals
+              zipWithM_ (\k v -> insert $ PrepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
+              measureKeys <- mapM (insert . PrepMeasure key . view measurePeriod) measures
+              zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ PrepResultStep k n mX y) xs) measureKeys measures
+              return $ results .~ (countResults', AvailableFromDB (loadPrepartionMeasures key)) $ inputValues .~
+                (countInputValues', AvailableFromDB (fromMaybe [] <$> loadPreparationInput key)) $
+                resData
+            ResultDataWarmUp key -> do
+              inpKeys <- mapM (insert . WarmUpInput key . view inputValuePeriod) inputVals
+              zipWithM_ (\k v -> insert $ WarmUpInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
+              measureKeys <- mapM (insert . WarmUpMeasure key . view measurePeriod) measures
+              zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ WarmUpResultStep k n mX y) xs) measureKeys measures
+              return $ results .~ (countResults', AvailableFromDB (loadReplicationWarmUpMeasures key)) $ inputValues .~
+                (countInputValues', AvailableFromDB (fromMaybe [] <$> loadReplicationWarmUpInput key)) $
+                resData
+            ResultDataRep key -> do
+              inpKeys <- mapM (insert . RepInput key . view inputValuePeriod) inputVals
+              zipWithM_ (\k v -> insert $ RepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
+              measureKeys <- mapM (insert . RepMeasure key . view measurePeriod) measures
+              zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ RepResultStep k n mX y) xs) measureKeys measures
+              return $ results .~ (countResults', AvailableFromDB (loadReplicationMeasures key)) $ inputValues .~
+                (countInputValues', AvailableFromDB (fromMaybe [] <$> loadReplicationInput key)) $
+                resData
     upd (Prep expResId) (ResultData (ResultDataPrep k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do
       serSt <- lift $ lift $ serialisable sSt
       serESt <- lift $ lift $ sequence $ fmap serialisable eSt
@@ -618,7 +625,6 @@ runResultData len repResType resData = do
       serESt <- lift $ lift $ sequence $ fmap serialisable eSt
       replace k (WarmUpResultData sTime eTime (tshow sG) (tshow <$> eG) (runPut . put $ serSt) (runPut . put <$> serESt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
     upd (Rep repResId) (ResultData (ResultDataRep k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do
-
       serSt <- lift $ lift $ serialisable sSt
       serESt <- lift $ lift $ sequence $ fmap serialisable eSt
       replace k (RepResultData sTime eTime (tshow sG) (tshow <$> eG) (runPut . put $ serSt) (runPut . put <$> serESt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))

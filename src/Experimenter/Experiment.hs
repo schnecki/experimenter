@@ -24,7 +24,6 @@ class (MonadUnliftIO (ExpM a), NFData a, NFData (InputValue a), NFData (InputSta
 
   type Serializable a :: *      -- ^ Type that is used to serialize the current state.
 
-
   -- ^ Function to convert to a serializable object
   serialisable :: a -> ExpM a (Serializable a)
 
@@ -60,13 +59,4 @@ class (MonadUnliftIO (ExpM a), NFData a, NFData (InputValue a), NFData (InputSta
   equalExperiments :: (a, InputState a) -> (a, InputState a) -> Bool
   default equalExperiments :: (Eq a, Eq (InputState a)) => (a, InputState a) -> (a, InputState a) -> Bool
   equalExperiments x y = x == y
-
-
--- fromObjective :: Objective a -> StatsDef a
--- fromObjective (MaxMean   ov o) = Mean ov o
--- fromObjective (MaxStdDev ov o) = StdDev ov o
--- fromObjective (MaxSum    ov o) = Sum ov o
--- fromObjective (MinMean   ov o) = Mean ov o
--- fromObjective (MinStdDev ov o) = StdDev ov o
--- fromObjective (MinSum    ov o) = Sum ov o
 

@@ -14,21 +14,23 @@ module Experimenter.Result.Query
     ) where
 
 
-import           Control.Lens                (view)
+import           Control.Lens                         (view)
 import           Control.Monad.Logger
 import           Control.Monad.Reader
-import           Data.ByteString             (ByteString)
-import qualified Data.ByteString             as B
-import           Data.Function               (on)
-import qualified Data.List                   as L
-import           Data.Maybe                  (fromMaybe)
-import           Data.Serialize              as S (Serialize, get, put, runGet, runPut)
-import qualified Data.Text                   as T
-import           Data.Time                   (getCurrentTime)
-import qualified Database.Esqueleto          as E
-import           Database.Persist            as P
-import           Database.Persist.Postgresql (SqlBackend)
-import           System.Exit                 (exitFailure)
+import           Data.ByteString                      (ByteString)
+import qualified Data.ByteString                      as B
+import           Data.Function                        (on)
+import qualified Data.List                            as L
+import           Data.Maybe                           (fromMaybe, listToMaybe)
+import           Data.Serialize                       as S (Serialize, get, put, runGet,
+                                                            runPut)
+import qualified Data.Text                            as T
+import           Data.Time                            (getCurrentTime)
+import qualified Database.Esqueleto                   as E
+import qualified Database.Esqueleto.Internal.Language as E
+import           Database.Persist                     as P
+import           Database.Persist.Postgresql          (SqlBackend)
+import           System.Exit                          (exitFailure)
 
 import           Experimenter.Experiment
 import           Experimenter.Input
@@ -42,6 +44,11 @@ import           Experimenter.Util
 
 
 import           Debug.Trace
+
+selectCount :: (MonadIO m) => (E.From E.SqlQuery E.SqlExpr SqlBackend a) => (a -> E.SqlQuery ()) -> ReaderT SqlBackend m Int
+selectCount q = do
+  res <- E.select $ E.from (\x -> q x >> return E.countRows)
+  return $ fromMaybe 0 . listToMaybe . fmap (\(E.Value v) -> v) $ res
 
 loadExperiments :: (ExperimentDef a) => ExperimentSetup -> InputState a -> a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Experiments a)
 loadExperiments setup initInpSt initSt = do
@@ -90,6 +97,8 @@ loadExperimentResult (Entity k (ExpResult _ rep mPrepResDataId)) = do
       mEndSt <- mDeserialise "prep end state" endStBS >>= lift . lift . sequence . fmap sequence . fmap (fmap deserialisable)
       mStartInpSt <- deserialise "prep start input state" startInpStBS
       mEndInpSt <- mDeserialise "prep end input state" endInpStBS
+      inpCount <- loadPreparationInputCount resDataKey
+      resultCount <- loadPrepartionMeasuresCount resDataKey
       return $ do
         startSt <- mStartSt
         endSt <- mEndSt
@@ -98,7 +107,7 @@ loadExperimentResult (Entity k (ExpResult _ rep mPrepResDataId)) = do
         -- inputVals <- mInputVals
         let inputVals = AvailableFromDB (fromMaybe [] <$> loadPreparationInput resDataKey)
         let results = AvailableFromDB (loadPrepartionMeasures resDataKey)
-        return $ ResultData (ResultDataPrep resDataKey) startT endT (tread startRandGen) (tread <$> endRandGen) inputVals results startSt endSt startInpSt endInpSt
+        return $ ResultData (ResultDataPrep resDataKey) startT endT (tread startRandGen) (tread <$> endRandGen) (inpCount, inputVals) (resultCount, results) startSt endSt startInpSt endInpSt
   evalResults <- loadReplicationResults k
   return $ ExperimentResult k rep prepRes evalResults
 
@@ -108,6 +117,12 @@ loadParamSetup kExp = L.sortBy (compare `on` view parameterSettingName) . map (m
     mkParameterSetting' (ParamSetting _ n v b design) = ParameterSetting n v b (toEnum design)
 
 
+loadPreparationInputCount  :: (MonadIO m) => Key PrepResultData -> ReaderT SqlBackend m Int
+loadPreparationInputCount kExpRes =
+  selectCount $ \(prepI, prepIV) -> do
+    E.where_ (prepI E.^. PrepInputId E.==. prepIV E.^. PrepInputValuePrepInput)
+    E.where_ (prepI E.^. PrepInputPrepResultData E.==. E.val kExpRes)
+
 loadPreparationInput :: (ExperimentDef a) => Key PrepResultData -> ReaderT SqlBackend (LoggingT (ExpM a)) (Maybe [Input a])
 loadPreparationInput kExpRes = do
   res <-
@@ -115,7 +130,6 @@ loadPreparationInput kExpRes = do
     E.from $ \(prepI, prepIV) -> do
       E.where_ (prepI E.^. PrepInputId E.==. prepIV E.^. PrepInputValuePrepInput)
       E.where_ (prepI E.^. PrepInputPrepResultData E.==. E.val kExpRes)
-
       return (prepI, prepIV)
   sequence <$> mapM mkInput res
   where
@@ -124,6 +138,11 @@ loadPreparationInput kExpRes = do
       v' <- deserialise "prep input value" v
       return $ Input p <$> v'
 
+loadPrepartionMeasuresCount :: (MonadIO m) => Key PrepResultData -> ReaderT SqlBackend m Int
+loadPrepartionMeasuresCount kExpRes =
+  selectCount $ \(prepM, prepRS) -> do
+      E.where_ (prepM E.^. PrepMeasureId E.==. prepRS E.^. PrepResultStepMeasure)
+      E.where_ (prepM E.^. PrepMeasurePrepResultData E.==. E.val kExpRes)
 
 loadPrepartionMeasures :: (MonadLogger m, MonadIO m) => Key PrepResultData -> ReaderT SqlBackend m [Measure]
 loadPrepartionMeasures kExpRes = do
@@ -168,9 +187,11 @@ loadReplicationResult (Entity k (RepResult _ repNr mWmUpResId mRepResId)) = do
       -- mWmUpInpVals <- loadReplicationWarmUpInput wmUpResKey
       -- wmUpMeasures <- loadReplicationWarmUpMeasures wmUpResKey
       mWmUpStartSt <- deserialise "warm up start state" (view warmUpResultDataStartState wmUpRes) >>= lift . lift . sequence . fmap deserialisable
-      mWmUpEndSt <- mDeserialise "warm up end state" (view warmUpResultDataEndState wmUpRes) >>= lift .lift . sequence . fmap sequence . fmap (fmap deserialisable)
+      mWmUpEndSt <- mDeserialise "warm up end state" (view warmUpResultDataEndState wmUpRes) >>= lift . lift . sequence . fmap sequence . fmap (fmap deserialisable)
       mWmUpStartInpSt <- deserialise "warm up start input state" (view warmUpResultDataStartInputState wmUpRes)
       mWmUpEndInpSt <- mDeserialise "warm up end input state" (view warmUpResultDataEndInputState wmUpRes)
+      wmUpInpValsCount <- loadReplicationWarmUpInputCount wmUpResKey
+      wmUpMeasuresCount <- loadReplicationWarmUpMeasuresCount wmUpResKey
       return $ do
         let wmUpInpVals = AvailableFromDB (fromMaybe [] <$> loadReplicationWarmUpInput wmUpResKey)
             wmUpMeasures = AvailableFromDB (loadReplicationWarmUpMeasures wmUpResKey)
@@ -186,8 +207,8 @@ loadReplicationResult (Entity k (RepResult _ repNr mWmUpResId mRepResId)) = do
             wmUpEndTime
             wmUpStartRandGen
             wmUpEndRandGen
-            wmUpInpVals
-            wmUpMeasures
+            (wmUpInpValsCount, wmUpInpVals)
+            (wmUpMeasuresCount, wmUpMeasures)
             wmUpStartSt
             wmUpEndSt
             wmUpStartInpSt
@@ -198,20 +219,42 @@ loadReplicationResult (Entity k (RepResult _ repNr mWmUpResId mRepResId)) = do
       let repStartRandGen = tread $ view repResultDataStartRandGen repRes
       let repEndRandGen = tread <$> view repResultDataEndRandGen repRes
       -- mRepInpVals <- loadReplicationInput repResKey
-      repMeasures <- loadReplicationMeasures repResKey
+      -- repMeasures <- loadReplicationMeasures repResKey
       mRepStartSt <- deserialise "rep start state" (view repResultDataStartState repRes) >>= lift . lift . sequence . fmap deserialisable
       mRepEndSt <- mDeserialise "rep end state" (view repResultDataEndState repRes) >>= lift . lift . sequence . fmap sequence . fmap (fmap deserialisable)
       mRepStartInpSt <- deserialise "rep start input state" (view repResultDataStartInputState repRes)
       mRepEndInpSt <- mDeserialise "rep end input state" (view repResultDataEndInputState repRes)
-      return $ do
+      repInpValsCount <- loadReplicationInputCount repResKey
+      repMeasuresCount <- loadReplicationMeasuresCount repResKey
+      return $
         -- repInpVals <- mRepInpVals
+       do
         let repInpVals = AvailableFromDB (fromMaybe [] <$> loadReplicationInput repResKey)
+            repMeasures = AvailableFromDB (loadReplicationMeasures repResKey)
         repStartSt <- mRepStartSt
         repEndSt <- mRepEndSt
         repStartInpSt <- mRepStartInpSt
         repEndInpSt <- mRepEndInpSt
-        return $ ResultData (ResultDataRep repResKey) repStartTime repEndTime repStartRandGen repEndRandGen repInpVals (Available repMeasures) repStartSt repEndSt repStartInpSt repEndInpSt
+        return $
+          ResultData
+            (ResultDataRep repResKey)
+            repStartTime
+            repEndTime
+            repStartRandGen
+            repEndRandGen
+            (repInpValsCount, repInpVals)
+            (repMeasuresCount, repMeasures)
+            repStartSt
+            repEndSt
+            repStartInpSt
+            repEndInpSt
 
+
+loadReplicationWarmUpInputCount :: (MonadIO m) => Key WarmUpResultData -> ReaderT SqlBackend m Int
+loadReplicationWarmUpInputCount kExpRes =
+  selectCount $ \(warmUpI, warmUpIV) -> do
+    E.where_ (warmUpI E.^. WarmUpInputId E.==. warmUpIV E.^. WarmUpInputValueWarmUpInput)
+    E.where_ (warmUpI E.^. WarmUpInputRepResult E.==. E.val kExpRes)
 
 loadReplicationWarmUpInput :: (ExperimentDef a, MonadLogger m, MonadIO m) => Key WarmUpResultData -> ReaderT SqlBackend m (Maybe [Input a])
 loadReplicationWarmUpInput kExpRes = do
@@ -228,6 +271,12 @@ loadReplicationWarmUpInput kExpRes = do
       return $ Input p <$> v'
 
 
+loadReplicationWarmUpMeasuresCount :: (MonadIO m) => Key WarmUpResultData -> ReaderT SqlBackend m Int
+loadReplicationWarmUpMeasuresCount kExpRes =
+  selectCount $ \(warmUpM, warmUpRS) -> do
+    E.where_ (warmUpM E.^. WarmUpMeasureId E.==. warmUpRS E.^. WarmUpResultStepMeasure)
+    E.where_ (warmUpM E.^. WarmUpMeasureRepResult E.==. E.val kExpRes)
+
 loadReplicationWarmUpMeasures :: (MonadLogger m, MonadIO m) => Key WarmUpResultData -> ReaderT SqlBackend m [Measure]
 loadReplicationWarmUpMeasures kExpRes = do
   res <-
@@ -243,6 +292,11 @@ loadReplicationWarmUpMeasures kExpRes = do
     combineMeasures xs@(Measure p _:_) = Measure p (concatMap (view measureResults) xs)
     combineMeasures _                  = error "not possible"
 
+loadReplicationInputCount :: (MonadIO m) => Key RepResultData -> ReaderT SqlBackend m Int
+loadReplicationInputCount kExpRes =
+  selectCount $ \(repI, repIV) -> do
+    E.where_ (repI E.^. RepInputId E.==. repIV E.^. RepInputValueRepInput)
+    E.where_ (repI E.^. RepInputRepResult E.==. E.val kExpRes)
 
 loadReplicationInput :: (ExperimentDef a, MonadLogger m, MonadIO m) => Key RepResultData -> ReaderT SqlBackend m (Maybe [Input a])
 loadReplicationInput kExpRes = do
@@ -257,6 +311,13 @@ loadReplicationInput kExpRes = do
     mkInput (Entity _ (RepInput _ p), Entity _ (RepInputValue _ v)) = do
       v' <- deserialise "eval input value" v
       return $ Input p <$> v'
+
+
+loadReplicationMeasuresCount :: (MonadIO m) => Key RepResultData -> ReaderT SqlBackend m Int
+loadReplicationMeasuresCount kExpRes =
+  selectCount $ \(repM, repRS) -> do
+    E.where_ (repM E.^. RepMeasureId E.==. repRS E.^. RepResultStepMeasure)
+    E.where_ (repM E.^. RepMeasureRepResult E.==. E.val kExpRes)
 
 
 loadReplicationMeasures :: (MonadLogger m, MonadIO m) => Key RepResultData -> ReaderT SqlBackend m [Measure]
@@ -293,8 +354,8 @@ getOrCreateExps setup initInpSt initSt = do
     Nothing -> do
       $(logInfo) "Starting new experiment..."
       time <- trace ("put") $ liftIO getCurrentTime
-      serInitSt <- lift $ lift $ serialisable initSt
-      eExp <- insertEntity $ Exps name time Nothing (runPut $ put serInitSt) (runPut $ put initInpSt)
+      serInitSt <- trace ("ser") $ lift $ lift $ serialisable initSt
+      eExp <- trace ("insert") $ insertEntity $ Exps name time Nothing (runPut $ put serInitSt) (runPut $ put initInpSt)
       void $ insert $ mkExpSetup eExp
       mapM_ (insertParam (entityKey eExp)) (parameters initSt)
       trace ("DONE insert") $ $(logInfo) "ASDF"

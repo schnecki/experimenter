@@ -9,6 +9,7 @@ module Experimenter.Eval.Ops
     , genEvalsIO
     ) where
 
+import           Control.Arrow               ((&&&), (***))
 import           Control.Lens                hiding (Cons, Over, over)
 import           Control.Monad               (unless)
 import           Control.Monad.Logger        (logDebug)
@@ -39,8 +40,8 @@ makeResDataAvailable exps =
   -- mapMOf (experiments . traversed . preparationResults . traversed . evalResults . traversed . results) mkAvailable >>=
   -- mapMOf (experiments . traversed . preparationResults . traversed . evalResults . traversed . inputValues) mkAvailable
   where
-    mkAvailable (Available xs)          = return $ Available xs
-    mkAvailable (AvailableFromDB query) = Available <$> query
+    mkAvailable (nr, Available xs)          = return (nr, Available xs)
+    mkAvailable (nr, AvailableFromDB query) = (\xs -> (length xs, Available xs)) <$> query
 
 runner :: (ExperimentDef a) => (ExpM a (Experiments a) -> IO (Experiments a)) -> DatabaseSetup -> Experiments a -> IO (Experiments a)
 runner runExpM dbSetup exps =
@@ -120,7 +121,7 @@ fromAvailable (AvailableFromDB _) = error "Data was not loaded from DB. Need to 
 evalOf :: Experiment a -> Of a -> ResultData a -> IO (EvalResults a)
 evalOf exp eval resData =
   case eval of
-    Of name              -> return $ EvalVector (Id $ Of name) UnitPeriods $  sortBy (compare `on` (^?! evalX)) $ map (fromMeasure name) (fromAvailable $ resData ^. results)
+    Of name              -> return $ EvalVector (Id $ Of name) UnitPeriods $  sortBy (compare `on` (^?! evalX)) $ map (fromMeasure name) (fromAvailable $ snd $ resData ^. results)
     Stats def            -> genExperiment exp def
     Div eval1 eval2      -> reduceBinaryOf eval <$> evalOf exp eval1 resData <*> evalOf exp eval2 resData
     Add eval1 eval2      -> reduceBinaryOf eval <$> evalOf exp eval1 resData <*> evalOf exp eval2 resData
