@@ -24,7 +24,8 @@ spec :: Spec
 spec = do
   describe "Serialise and deserialisation properties" $
     do it "serialises & deserialises a start state" $ property prop_serialiseStartSt
-       it "serialises & deserialises a end state (Just st)" $ property prop_serialiseEndSt
+       it "serialises & deserialises an end state (Just st)" $ property prop_serialiseEndSt
+       it "serialises & deserialises an end state with serialisable/deserialisable conversions" $ property prop_serialisableEndSt
 
 
 prop_serialiseStartSt :: St -> Property

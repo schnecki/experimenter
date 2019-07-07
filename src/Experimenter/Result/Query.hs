@@ -19,6 +19,8 @@ module Experimenter.Result.Query
     , mDeserialise
     , fromRandGen
     , toRandGen
+    , serialiseSeed
+    , deserialiseSeed
     ) where
 
 
@@ -161,6 +163,15 @@ loadExperimentResult (Entity k (ExpResult expId rep mPrepResDataId)) = do
         return $ ResultData (ResultDataPrep resDataKey) startT endT startRandGen endRandGen (inpCount, inputVals) (resultCount, results) startSt endSt startInpSt endInpSt
   evalResults <- loadReplicationResults expId k
   return $ ExperimentResult k rep prepRes evalResults
+
+
+serialiseSeed :: Seed -> ByteString
+serialiseSeed seed = S.runPut $ S.put (fromSeed seed :: V.Vector Word32)
+
+deserialiseSeed :: ByteString -> Seed
+deserialiseSeed bs = toSeed (fromRight $ S.runGet S.get bs :: V.Vector Word32)
+  where fromRight (Right s) = s
+        fromRight (Left err) = error $ "Could not deserialise random generator. Error Message: " <> err
 
 fromRandGen :: (MonadIO m) => GenIO -> m ByteString
 fromRandGen ran = do

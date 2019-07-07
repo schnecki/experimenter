@@ -16,6 +16,8 @@ import           Experimenter.StepResult
 
 
 type Period = Int
+type RepetitionNumber = Int
+type ReplicationNumber = Int
 
 
 class (MonadUnliftIO (ExpM a), NFData a, NFData (InputState a), Serialize (InputValue a), Serialize (InputState a), Serialize (Serializable a)) => ExperimentDef a where
@@ -57,19 +59,19 @@ class (MonadUnliftIO (ExpM a), NFData a, NFData (InputState a), Serialize (Input
 
   -- ^ Function to call on the state before the preparation. This function is only executed if the preparation phase
   -- exists (that is >0 preparation steps) and is started from period 0!
-  beforePreparationHook :: GenIO -> a -> ExpM a a
-  default beforePreparationHook :: GenIO -> a -> ExpM a a
-  beforePreparationHook _ = return
+  beforePreparationHook :: RepetitionNumber -> GenIO -> a -> ExpM a a
+  default beforePreparationHook :: RepetitionNumber -> GenIO -> a -> ExpM a a
+  beforePreparationHook _ _ = return
 
   -- ^ Function to call on the state before the warm up phase. This function is only executed if a warm up phase exists
   -- (that is >0 warm-up steps) and is initialised, which happens on the first time it is started!
-  beforeWarmUpHook :: GenIO -> a -> ExpM a a
-  default beforeWarmUpHook :: GenIO -> a -> ExpM a a
-  beforeWarmUpHook _ = return
+  beforeWarmUpHook :: RepetitionNumber -> ReplicationNumber -> GenIO -> a -> ExpM a a
+  default beforeWarmUpHook :: RepetitionNumber -> ReplicationNumber -> GenIO -> a -> ExpM a a
+  beforeWarmUpHook _ _ _ = return
 
 
   -- ^ Function to call on the state before the evaluation phase. This function is only executed if the evaluation phase
   -- exists (that is >0 evaluation steps) and is initialised which happens on the first time it is started!
-  beforeEvaluationHook :: GenIO -> a -> ExpM a a
-  default beforeEvaluationHook :: GenIO -> a -> ExpM a a
-  beforeEvaluationHook _ = return
+  beforeEvaluationHook :: RepetitionNumber -> ReplicationNumber -> GenIO -> a -> ExpM a a
+  default beforeEvaluationHook :: RepetitionNumber -> ReplicationNumber -> GenIO -> a -> ExpM a a
+  beforeEvaluationHook _ _ _ = return
