@@ -17,6 +17,8 @@ module Experimenter.Result.Query
     , loadResDataStartState
     , deserialise
     , mDeserialise
+    , fromRandGen
+    , toRandGen
     ) where
 
 
@@ -32,11 +34,15 @@ import           Data.Serialize                       as S (Serialize, get, put,
                                                             runPut)
 import qualified Data.Text                            as T
 import           Data.Time                            (getCurrentTime)
+import           Data.Vector.Serialize                ()
+import qualified Data.Vector.Unboxed                  as V
+import           Data.Word                            (Word32)
 import qualified Database.Esqueleto                   as E
 import qualified Database.Esqueleto.Internal.Language as E
 import           Database.Persist                     as P
 import           Database.Persist.Postgresql          (SqlBackend)
 import           System.Exit                          (exitFailure)
+import           System.Random.MWC
 
 import           Experimenter.Experiment
 import           Experimenter.Input
@@ -138,21 +144,35 @@ loadExperimentResult (Entity k (ExpResult expId rep mPrepResDataId)) = do
   mEPrepResData <- fmap join $ sequence $ P.getEntity <$> mPrepResDataId
   prepRes <- case mEPrepResData of
     Nothing -> return Nothing
-    Just (Entity resDataKey (PrepResultData startT endT startRandGen endRandGen startStBS endStBS startInpStBS endInpStBS)) -> do
+    Just (Entity resDataKey (PrepResultData startT endT startRandGenBS endRandGenBS startStBS endStBS startInpStBS endInpStBS)) -> do
       let startSt = AvailableOnDemand (loadResDataStartState expId (view prepResultDataStartState) resDataKey)
       let endSt = AvailableOnDemand (loadResDataEndState expId (view prepResultDataEndState) resDataKey)
       mStartInpSt <- deserialise "prep start input state" startInpStBS
       mEndInpSt <- mDeserialise "prep end input state" endInpStBS
       inpCount <- loadPreparationInputCount resDataKey
       resultCount <- loadPrepartionMeasuresCount resDataKey
+      startRandGen <- toRandGen startRandGenBS
+      endRandGen <- maybe (return Nothing) (fmap Just . toRandGen) endRandGenBS
       return $ do
         endInpSt <- mEndInpSt
         startInpSt <- mStartInpSt
         let inputVals = AvailableOnDemand (fromMaybe [] <$> loadPreparationInput resDataKey)
         let results = AvailableOnDemand (loadPrepartionMeasures resDataKey)
-        return $ ResultData (ResultDataPrep resDataKey) startT endT (tread startRandGen) (tread <$> endRandGen) (inpCount, inputVals) (resultCount, results) startSt endSt startInpSt endInpSt
+        return $ ResultData (ResultDataPrep resDataKey) startT endT startRandGen endRandGen (inpCount, inputVals) (resultCount, results) startSt endSt startInpSt endInpSt
   evalResults <- loadReplicationResults expId k
   return $ ExperimentResult k rep prepRes evalResults
+
+fromRandGen :: (MonadIO m) => GenIO -> m ByteString
+fromRandGen ran = do
+  vec <- liftIO (fromSeed <$> save ran)
+  return $ S.runPut (S.put vec)
+
+
+toRandGen :: (MonadIO m) => ByteString -> m GenIO
+toRandGen bs = do
+  case S.runGet S.get bs of
+    Left err -> error $ "Could not deserialise random generator. Error Message: " <> err
+    Right (vec :: V.Vector Word32) -> liftIO (restore $ toSeed vec)
 
 -- loadParamSetup :: (PersistStoreRead backend, ExperimentDef a) => Key Exp -> ReaderT backend (LoggingT (ExpM a)) [ParameterSetting a]
 -- loadParamSetup kExp = L.sortBy (compare `on` view parameterSettingName) . map (mkParameterSetting' . entityVal) <$> selectList [ParamSettingExp ==. kExp] []
@@ -222,8 +242,8 @@ loadReplicationResult expId (Entity k (RepResult _ repNr mWmUpResId mRepResId)) 
     mkWmUp (Entity wmUpResKey wmUpRes) = do
       let wmUpStartTime = view warmUpResultDataStartTime wmUpRes
       let wmUpEndTime = view warmUpResultDataEndTime wmUpRes
-      let wmUpStartRandGen = tread $ view warmUpResultDataStartRandGen wmUpRes
-      let wmUpEndRandGen = tread <$> view warmUpResultDataEndRandGen wmUpRes
+      wmUpStartRandGen <- toRandGen (view warmUpResultDataStartRandGen wmUpRes)
+      wmUpEndRandGen <- maybe (return Nothing) (fmap Just . toRandGen) (view warmUpResultDataEndRandGen wmUpRes)
       let wmUpStartSt = AvailableOnDemand (loadResDataStartState expId (view warmUpResultDataStartState) wmUpResKey)
       let wmUpEndSt = AvailableOnDemand (loadResDataEndState expId (view warmUpResultDataEndState) wmUpResKey)
       mWmUpStartInpSt <- deserialise "warm up start input state" (view warmUpResultDataStartInputState wmUpRes)
@@ -251,8 +271,8 @@ loadReplicationResult expId (Entity k (RepResult _ repNr mWmUpResId mRepResId)) 
     mkRep (Entity repResKey repRes) = do
       let repStartTime = view repResultDataStartTime repRes
       let repEndTime = view repResultDataEndTime repRes
-      let repStartRandGen = tread $ view repResultDataStartRandGen repRes
-      let repEndRandGen = tread <$> view repResultDataEndRandGen repRes
+      repStartRandGen <- toRandGen (view repResultDataStartRandGen repRes)
+      repEndRandGen <- maybe (return Nothing) (fmap Just . toRandGen) (view repResultDataEndRandGen repRes)
       mRepStartInpSt <- deserialise "rep start input state" (view repResultDataStartInputState repRes)
       mRepEndInpSt <- mDeserialise "rep end input state" (view repResultDataEndInputState repRes)
       repInpValsCount <- loadReplicationInputCount repResKey

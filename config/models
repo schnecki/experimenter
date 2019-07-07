@@ -60,8 +60,8 @@ ExpResult
 PrepResultData
     startTime                       UTCTime
     endTime                         UTCTime Maybe
-    startRandGen                    Text
-    endRandGen                      Text Maybe
+    startRandGen                    ByteString
+    endRandGen                      ByteString Maybe
     startState                      ByteString
     endState                        ByteString Maybe
     startInputState                 ByteString
@@ -97,8 +97,8 @@ RepResult
 WarmUpResultData
     startTime                       UTCTime
     endTime                         UTCTime Maybe
-    startRandGen                    Text
-    endRandGen                      Text Maybe
+    startRandGen                    ByteString
+    endRandGen                      ByteString Maybe
     startState                      ByteString
     endState                        ByteString Maybe
     startInputState                 ByteString
@@ -107,8 +107,8 @@ WarmUpResultData
 RepResultData
     startTime                       UTCTime
     endTime                         UTCTime Maybe
-    startRandGen                    Text
-    endRandGen                      Text Maybe
+    startRandGen                    ByteString
+    endRandGen                      ByteString Maybe
     startState                      ByteString
     endState                        ByteString Maybe
     startInputState                 ByteString

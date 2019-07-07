@@ -20,30 +20,32 @@ extra-source-files:
 description:         Please see the README on GitHub at <https://github.com/githubuser/experimenter#readme>
 
 dependencies:
-- base >= 4.7 && < 5
-- persistent                    >= 2.0
-- persistent-postgresql         >= 2.1.1
-- persistent-template           >= 2.0
-- lens
-- text
-- cereal
-- monad-logger
-- resource-pool
-- resourcet
-- mtl
-- time
-- random
-- bytestring
-- aeson
-- esqueleto
-- unliftio-core
-- HaTeX
-- directory
-- process
-- matrix
-- unix
-- hostname
-- deepseq
+  - base >= 4.7 && < 5
+  - persistent                    >= 2.0
+  - persistent-postgresql         >= 2.1.1
+  - persistent-template           >= 2.0
+  - lens
+  - text
+  - cereal
+  - monad-logger
+  - resource-pool
+  - resourcet
+  - mtl
+  - time
+  - mwc-random
+  - bytestring
+  - aeson
+  - esqueleto
+  - unliftio-core
+  - HaTeX
+  - directory
+  - process
+  - matrix
+  - unix
+  - hostname
+  - deepseq
+  - cereal-vector
+  - vector
 
 library:
   source-dirs: src
@@ -73,6 +75,7 @@ executables:
     - -with-rtsopts=-N
     dependencies:
       - experimenter
+      - random
 
   dice-stateless:
     main:                DiceStateless.hs
@@ -84,6 +87,7 @@ executables:
     - -with-rtsopts=-N
     dependencies:
       - experimenter
+      - random
 
 
 tests:

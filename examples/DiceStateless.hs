@@ -1,19 +1,26 @@
-{-# LANGUAGE DeriveAnyClass    #-}
-{-# LANGUAGE DeriveGeneric     #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RankNTypes        #-}
-{-# LANGUAGE TypeFamilies      #-}
+{-# LANGUAGE DeriveAnyClass       #-}
+{-# LANGUAGE DeriveGeneric        #-}
+{-# LANGUAGE FlexibleInstances    #-}
+{-# LANGUAGE OverloadedStrings    #-}
+{-# LANGUAGE RankNTypes           #-}
+{-# LANGUAGE ScopedTypeVariables  #-}
+{-# LANGUAGE TypeFamilies         #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 
 module Main where
 
 import           Control.DeepSeq
-import           Control.Lens    (view)
+import           Control.Lens        (view)
 import           Data.Ratio
 import           Data.Serialize
-import qualified Data.Text       as T
+import qualified Data.Text           as T
+import qualified Data.Vector.Unboxed as V
+import           Data.Word           (Word32)
 import           GHC.Generics
-import           System.Random
+import           System.IO.Unsafe
+import           System.Random.MWC
 
 import           Experimenter
 
@@ -27,22 +34,28 @@ instance Serialize Dice where
     mD <- get
     return $ Dice mD
 
-instance NFData StdGen where
-  rnf _ = ()
+instance Serialize Seed where
+  put s = put $ fromSeed s
+  get = do
+    (vec :: V.Vector Word32) <- get
+    return $ toSeed vec
 
 instance ExperimentDef Dice where
   type ExpM Dice = IO
-  type InputValue Dice = StdGen
+  type InputValue Dice = Seed
   type InputState Dice = ()
   type Serializable Dice = Dice
   serialisable = return
   deserialisable = return
 
-  generateInput g _ _ _ = return (g, ())
-  runStep (Dice mD) g _ =
-    let (nr, _) = next g
-        result = StepResult "draw" Nothing (fromIntegral $ 1 + nr `mod` 6)
-    in return ([result], Dice mD)
+  generateInput g _ _ _ = do
+    seed <- save g
+    return (seed, ())
+  runStep (Dice mD) seed _ = do
+    g <- restore seed
+    (nr :: Int) <- uniformR (1,6) g
+    let result = StepResult "draw" Nothing (fromIntegral $ 1 + nr `mod` 6)
+    return ([result], Dice mD)
   parameters _ = [fakeParam]
 
   -- Either compare params or do not compare them, but for sure do not compare random generators! As they are never

@@ -3,9 +3,11 @@
 {-# LANGUAGE DeriveGeneric             #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FlexibleContexts          #-}
+{-# LANGUAGE FlexibleInstances         #-}
 {-# LANGUAGE GADTs                     #-}
 {-# LANGUAGE RankNTypes                #-}
 {-# LANGUAGE TemplateHaskell           #-}
+{-# LANGUAGE TypeSynonymInstances      #-}
 
 module Experimenter.Result.Type where
 
@@ -23,7 +25,7 @@ import           Data.Serialize
 import qualified Data.Text                   as T
 import           Data.Time
 import           Database.Persist.Postgresql (SqlBackend)
-import           System.Random
+import           System.Random.MWC
 
 data ResultDataKey
   = ResultDataPrep (Key PrepResultData)
@@ -59,8 +61,8 @@ data ResultData a = ResultData
   { _resultDataKey   :: !ResultDataKey
   , _startTime       :: !UTCTime
   , _endTime         :: !(Maybe UTCTime)
-  , _startRandGen    :: !StdGen
-  , _endRandGen      :: !(Maybe StdGen)
+  , _startRandGen    :: !GenIO
+  , _endRandGen      :: !(Maybe GenIO)
   , _inputValues     :: !(AvailabilityList a (Input a))
   , _results         :: !(AvailabilityList a Measure)
   , _startState      :: !(Availability a a)
@@ -127,10 +129,10 @@ makeLenses ''Experiments
 instance NFData a => NFData (Experiments a) where
   rnf (Experiments !k name stT endT set param !initSt !initInp exps) = rnf name `seq` rnf stT `seq` rnf endT `seq` rnf initSt `seq` rnf exps
 
-instance Serialize StdGen where
-  put g = put (show g)
-  get = do
-    gTxt <- get
-    return (read gTxt)
+-- instance Serialize GenIO where
+--   put g = put (show g)
+--   get = do
+--     gTxt <- get
+--     return (read gTxt)
 
 

@@ -9,7 +9,7 @@ module Experimenter.Experiment where
 import           Control.DeepSeq
 import           Control.Monad.IO.Unlift
 import           Data.Serialize          (Serialize)
-import           System.Random
+import           System.Random.MWC
 
 import           Experimenter.Parameter
 import           Experimenter.StepResult
@@ -18,7 +18,7 @@ import           Experimenter.StepResult
 type Period = Int
 
 
-class (MonadUnliftIO (ExpM a), NFData a, NFData (InputValue a), NFData (InputState a), Serialize (InputValue a), Serialize (InputState a), Serialize (Serializable a)) => ExperimentDef a where
+class (MonadUnliftIO (ExpM a), NFData a, NFData (InputState a), Serialize (InputValue a), Serialize (InputState a), Serialize (Serializable a)) => ExperimentDef a where
 
   type ExpM a :: (* -> *)
 
@@ -38,7 +38,7 @@ class (MonadUnliftIO (ExpM a), NFData a, NFData (InputValue a), NFData (InputSta
 
   -- ^ Generate some input values and possibly modify state. This function can be used to change the state. It is called
   -- before `runStep` and its output is used to call `runStep`.
-  generateInput :: StdGen -> a -> InputState a -> Period -> (ExpM a) (InputValue a, InputState a)
+  generateInput :: GenIO -> a -> InputState a -> Period -> (ExpM a) (InputValue a, InputState a)
 
   -- ^ Run a step of the environment and return new state and result.
   runStep :: a -> InputValue a -> Period -> (ExpM a) ([StepResult], a)
@@ -46,17 +46,30 @@ class (MonadUnliftIO (ExpM a), NFData a, NFData (InputValue a), NFData (InputSta
   -- ^ Provides the parameter setting.
   parameters :: a -> [ParameterSetup a]
 
-  -- ^ Function to call on the state after the preparation, that is before the warm-up, or in case of no warm-up phase,
-  -- the evaluation phase is started. This function can be useful to set different parameters for the evaluation phase
-  -- as compared to the preparation (e.g. learning) phase. The default implementation is `id`.
-  afterPreparationPhase :: a -> a
-  default afterPreparationPhase :: a -> a
-  afterPreparationPhase = id
-
-
   -- ^ This function defines how to find experiments that can be resumed. Note that the experiments name is always a
   -- comparison factor, that is, experiments with different names are unequal.
   equalExperiments :: (a, InputState a) -> (a, InputState a) -> Bool
   default equalExperiments :: (Eq a, Eq (InputState a)) => (a, InputState a) -> (a, InputState a) -> Bool
   equalExperiments x y = x == y
 
+
+  -- HOOKS
+
+  -- ^ Function to call on the state before the preparation. This function is only executed if the preparation phase
+  -- exists (that is >0 preparation steps) and is started from period 0!
+  beforePreparationHook :: GenIO -> a -> ExpM a a
+  default beforePreparationHook :: GenIO -> a -> ExpM a a
+  beforePreparationHook _ = return
+
+  -- ^ Function to call on the state before the warm up phase. This function is only executed if a warm up phase exists
+  -- (that is >0 warm-up steps) and is initialised, which happens on the first time it is started!
+  beforeWarmUpHook :: GenIO -> a -> ExpM a a
+  default beforeWarmUpHook :: GenIO -> a -> ExpM a a
+  beforeWarmUpHook _ = return
+
+
+  -- ^ Function to call on the state before the evaluation phase. This function is only executed if the evaluation phase
+  -- exists (that is >0 evaluation steps) and is initialised which happens on the first time it is started!
+  beforeEvaluationHook :: GenIO -> a -> ExpM a a
+  default beforeEvaluationHook :: GenIO -> a -> ExpM a a
+  beforeEvaluationHook _ = return
