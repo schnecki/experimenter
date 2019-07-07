@@ -40,7 +40,7 @@ instance NFData b => NFData (Availability a b) where
   rnf (Available b)          = rnf b
   rnf (AvailableOnDemand !_) = ()
 
-type AvailabilityList a b = (Int, Availability a b)
+type AvailabilityList a b = (Int, Availability a [b]) -- ^ Demand availability of a list with the length fetched.
 
 mkAvailableList :: (Foldable t, ExperimentDef a) => (Int, Availability a (t b)) -> ReaderT SqlBackend (LoggingT (ExpM a)) (Int, Availability a (t b))
 mkAvailableList (nr, Available xs)         = return (nr, Available xs)
@@ -61,9 +61,9 @@ data ResultData a = ResultData
   , _endTime         :: !(Maybe UTCTime)
   , _startRandGen    :: !StdGen
   , _endRandGen      :: !(Maybe StdGen)
-  , _inputValues     :: !(AvailabilityList a [Input a])
-  , _results         :: !(AvailabilityList a [Measure])
-  , _startState      :: !(Availability a a)         -- TODO: Availability for startState & endState
+  , _inputValues     :: !(AvailabilityList a (Input a))
+  , _results         :: !(AvailabilityList a Measure)
+  , _startState      :: !(Availability a a)
   , _endState        :: !(Availability a (Maybe a))    -- ^ state at end of warm-up phase
   , _startInputState :: !(InputState a)
   , _endInputState   :: !(Maybe (InputState a))

@@ -14,6 +14,7 @@ module Experimenter.Run
     ( DatabaseSetup (..)
     , execExperiments
     , runExperiments
+    , runExperimentsM
     , runExperimentsIO
     ) where
 
@@ -61,8 +62,6 @@ import           Experimenter.Setup
 import           Experimenter.StepResult
 import           Experimenter.Util
 
-import           Debug.Trace
-
 
 type Updated = Bool
 
@@ -70,19 +69,23 @@ type Updated = Bool
 execExperiments :: (ExperimentDef a) => (ExpM a (Bool, Experiments a) -> IO (Bool, Experiments a)) -> DatabaseSetup -> ExperimentSetup -> InputState a -> a -> IO (Experiments a)
 execExperiments runExpM dbSetup setup initInpSt initSt = snd <$> runExperiments runExpM dbSetup setup initInpSt initSt
 
+-- | Run an experiment with non-monadic initial state. In case the initial state requires monadic effect (e.g. building
+-- a Tensorflow model), use `runExperimentsM`!
 runExperiments :: (ExperimentDef a) => (ExpM a (Bool, Experiments a) -> IO (Bool, Experiments a)) -> DatabaseSetup -> ExperimentSetup -> InputState a -> a -> IO (Bool, Experiments a)
-runExperiments = runner
+runExperiments runExpM dbSetup setup initInpSt initSt = runner runExpM dbSetup setup initInpSt (return initSt)
+
+runExperimentsM :: (ExperimentDef a) => (ExpM a (Bool, Experiments a) -> IO (Bool, Experiments a)) -> DatabaseSetup -> ExperimentSetup -> InputState a -> ExpM a a -> IO (Bool, Experiments a)
+runExperimentsM = runner
 
 runExperimentsIO :: (ExperimentDef a, IO ~ ExpM a) => DatabaseSetup -> ExperimentSetup -> InputState a -> a -> IO (Bool, Experiments a)
-runExperimentsIO = runner id
+runExperimentsIO dbSetup setup initInpSt initSt = runner id dbSetup setup initInpSt (return initSt)
 
-
-runner :: (ExperimentDef a) => (ExpM a (Bool, Experiments a) -> IO (Bool, Experiments a)) -> DatabaseSetup -> ExperimentSetup -> InputState a -> a -> IO (Bool, Experiments a)
-runner runExpM dbSetup setup initInpSt initSt = do
+runner :: (ExperimentDef a) => (ExpM a (Bool, Experiments a) -> IO (Bool, Experiments a)) -> DatabaseSetup -> ExperimentSetup -> InputState a -> ExpM a a -> IO (Bool, Experiments a)
+runner runExpM dbSetup setup initInpSt mkInitSt = do
   runStdoutLoggingT $ withPostgresqlPool (connectionString dbSetup) (parallelConnections dbSetup) $ liftSqlPersistMPool $ runMigration migrateAll
   runExpM $
     (runStdoutLoggingT . filterLogger (\s _ -> s /= "SQL")) $
-    withPostgresqlConn (connectionString dbSetup) $ \backend -> flip runSqlConn backend $ loadExperiments setup initInpSt initSt >>= checkUniqueParamNames >>= runExperimenter
+    withPostgresqlConn (connectionString dbSetup) $ \backend -> flip runSqlConn backend $ lift (lift mkInitSt) >>= loadExperiments setup initInpSt >>= checkUniqueParamNames >>= runExperimenter
 
 timeout :: Num t => t
 timeout = 10
@@ -562,7 +565,7 @@ runResultData expId len repResType resData = do
        return $ fromMaybe startSt mEndSt
   let stInp = fromMaybe (resData ^. startInputState) (resData ^. endInputState)
   let g = fromMaybe (resData ^. startRandGen) (resData ^. endRandGen)
-  $(logInfo) $ "Number of steps already run is " <> tshow curLen <> ", thus still need to run " <> tshow (len - curLen) <> " steps..."
+  $(logInfo) $ "Number of steps already run is " <> tshow curLen <> ", thus still need to run " <> tshow (len - curLen) <> " steps."
   let updated = not (null periodsToRun)
   sTime <- liftIO getCurrentTime
   (g', force -> st', force -> stInp', force -> inputs, force -> measures) <- foldM run (g, st, stInp, [], []) periodsToRun
@@ -582,16 +585,18 @@ runResultData expId len repResType resData = do
       upd repResType resData'
       transactionSave
       if len - curLen - length periodsToRun > 0
-        then runResultData expId len repResType resData'
+        then do
+          $(logInfo) $ "Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow (diffUTCTime (fromJust eTime) sTime) <> "."
+          runResultData expId len repResType resData'
         else do
-          $(logInfo) "Done and saved. Releasing memory."
+          $(logInfo) $ "Done and saved. Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow (diffUTCTime (fromJust eTime) sTime) <> ". Releasing memory."
           return (True, set endState mkEndStateAvailableOnDemand $ set startState mkStartStateAvailableOnDemand resData')
     else return (False, resData)
   where
     curLen = resData ^. results . _1
     isNew = curLen == 0
-    periodsToRun = [1 + curLen .. curLen + min 1000 len]
-    periodsToRunLen = length periodsToRun
+    splitPeriods = 1000
+    periodsToRun = map (+curLen) [1 .. min splitPeriods (len - curLen)]
     mkEndStateAvailableOnDemand =
       case resData ^. resultDataKey of
         ResultDataPrep key -> AvailableOnDemand $ loadResDataEndState expId (view prepResultDataEndState) key

@@ -20,6 +20,7 @@ import           System.Directory
 import           System.Process
 import           Text.LaTeX
 import           Text.LaTeX.Packages.AMSMath
+import           Text.LaTeX.Packages.Hyperref
 import           Text.LaTeX.Packages.Inputenc
 
 import           Experimenter.Eval.Table
@@ -78,6 +79,7 @@ thePreamble evals = do
   usepackage [] "fullpage"
   usepackage [] "array"
   usepackage [] amsmath
+  usepackage [pdftex] hyperref
 
 -- Body with a section.
 theBody :: (MonadLogger m) => Evals a -> LaTeXT m ()

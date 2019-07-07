@@ -47,20 +47,17 @@ import           Experimenter.StepResult
 import           Experimenter.Util
 
 
-import           Debug.Trace
-
-
 loadExperiments :: (ExperimentDef a) => ExperimentSetup -> InputState a -> a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Experiments a)
 loadExperiments setup initInpSt initSt = do
   eExp <- getOrCreateExps setup initInpSt initSt
   let e = entityVal eExp
-  exps <- L.sortBy (compare `on` view experimentNumber) <$> loadExperimentList (parameters initSt) (entityKey eExp)
+  exps <- L.sortBy (compare `on` view experimentNumber) <$> loadExperimentList (entityKey eExp)
   eSetup <- fromMaybe (error "Setup not found. Your DB is corrupted!") <$> getBy (UniqueExpsSetup (entityKey eExp))
   return $ Experiments (entityKey eExp) (view expsName e) (view expsStartTime e) (view expsEndTime e) (entityVal eSetup) (parameters initSt) initSt initInpSt exps
 
 
-loadExperimentList :: (ExperimentDef a) => [ParameterSetup a] -> Key Exps -> ReaderT SqlBackend (LoggingT (ExpM a)) [Experiment a]
-loadExperimentList paramSetup expsKey = selectList [ExpExps ==. expsKey] [] >>= mapM mkExperiment
+loadExperimentList :: (ExperimentDef a) => Key Exps -> ReaderT SqlBackend (LoggingT (ExpM a)) [Experiment a]
+loadExperimentList expsKey = selectList [ExpExps ==. expsKey] [] >>= mapM mkExperiment
     where mkExperiment (Entity k exp) = do
             paramSetting <- loadParamSetup k
             Experiment k (view expNumber exp) (view expStartTime exp) (view expEndTime exp) paramSetting <$> loadExperimentResults k
@@ -87,7 +84,7 @@ loadExperimentResults kExp = do
   mapM loadExperimentResult xs
 
 
-loadResDataEndState ::
+loadResDataEndState :: forall backend resData a .
      (PersistUniqueRead backend, PersistQueryRead backend, BackendCompatible SqlBackend backend, PersistEntity resData, ExperimentDef a, PersistEntityBackend resData ~ BaseBackend backend)
   => Key Exp
   -> (resData -> Maybe ByteString)
@@ -96,10 +93,11 @@ loadResDataEndState ::
 loadResDataEndState expId acc k = do
   mResData <- P.get k
   res <- case mResData of
-    Nothing  -> error "Could not get preparation start state"
+    Nothing  -> error "Could not get end state"
     Just resData -> do
-      mSer <- maybe (return Nothing) (deserialise "prep start state") (acc resData)
-      lift $ lift $ traverse deserialisable mSer
+
+      mSer :: Maybe (Maybe (Serializable a)) <- fromMaybe (error "could not deserialize end state") <$> mDeserialise "end state" (acc resData)
+      lift $ lift $ traverse deserialisable (join mSer)
   traverse (setParams expId) res
 
 loadResDataStartState ::
@@ -111,7 +109,7 @@ loadResDataStartState ::
 loadResDataStartState expId acc k = do
   mResData <- P.get k
   res <- case mResData of
-    Nothing -> error "Could not get preparation start state"
+    Nothing -> error "Could not get start state"
     Just resData -> do
       ser <- fromMaybe (error "Could not deserialise preparation start state ") <$> deserialise "prep start state" (acc resData)
       lift $ lift $ deserialisable ser
@@ -372,12 +370,11 @@ getOrCreateExps setup initInpSt initSt = do
   case L.find ((== myParams) . map (mkParamTpl . entityVal) . snd) (zip exps params) of
     Nothing -> do
       $(logInfo) "Starting new experiment..."
-      time <- trace ("put") $ liftIO getCurrentTime
-      serInitSt <- trace ("ser") $ lift $ lift $ serialisable initSt
-      eExp <- trace ("insert") $ insertEntity $ Exps name time Nothing (runPut $ put serInitSt) (runPut $ put initInpSt)
+      time <-  liftIO getCurrentTime
+      serInitSt <- lift $ lift $ serialisable initSt
+      eExp <- insertEntity $ Exps name time Nothing (runPut $ put serInitSt) (runPut $ put initInpSt)
       void $ insert $ mkExpSetup eExp
       mapM_ (insertParam (entityKey eExp)) (parameters initSt)
-      trace ("DONE insert") $ $(logInfo) "ASDF"
       return eExp
     Just (eExp, _) -> do
       $(logInfo) "Found experiment with same name and parameter settings. Continuing experiment ..."

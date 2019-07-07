@@ -3,10 +3,7 @@ module Experimenter.Setup where
 
 
 import           Control.Lens
-import qualified Data.Text           as T
-
-import           Experimenter.Models
-
+import qualified Data.Text    as T
 
 data ExperimentSetup = ExperimentSetup
   { _experimentBaseName         :: T.Text         -- ^ Base name of experiment.

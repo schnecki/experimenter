@@ -69,7 +69,7 @@ reduceUnaryOf (EveryXthElem nr _) (EvalVector tp unit vals) =
     (EvalVector {}:_)          -> EvalVector (Id $ EveryXthElem nr $ Stats tp) unit (extractEvery nr vals)
     (EvalValue _ _ _ _ v:_)    -> EvalVector (Id $ EveryXthElem nr $ Stats tp) unit (extractEvery nr vals)
     (EvalReducedValue _ _ v:_) -> EvalVector (Id $ EveryXthElem nr $ Stats tp) unit (extractEvery nr vals)
-    []                         -> error "empty elements in reduceUnaryOf Last{}"
+    []                         -> error "empty elements in reduceUnaryOf EveryXthElem{}"
   where
     extractEvery m = map snd . filter (\(x, _) -> mod x m == 0) . zip [1 ..]
 reduceUnaryOf Length {} (EvalVector tp unit vals) = EvalReducedValue (Id $ Length $ Stats tp) UnitScalar (fromIntegral $ length vals)
