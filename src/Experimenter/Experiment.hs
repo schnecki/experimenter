@@ -16,6 +16,7 @@ import           Experimenter.StepResult
 
 
 type Period = Int
+type ExperimentNumber = Int
 type RepetitionNumber = Int
 type ReplicationNumber = Int
 
@@ -59,19 +60,42 @@ class (MonadUnliftIO (ExpM a), NFData a, NFData (InputState a), Serialize (Input
 
   -- ^ Function to call on the state before the preparation. This function is only executed if the preparation phase
   -- exists (that is >0 preparation steps) and is started from period 0!
-  beforePreparationHook :: RepetitionNumber -> GenIO -> a -> ExpM a a
-  default beforePreparationHook :: RepetitionNumber -> GenIO -> a -> ExpM a a
-  beforePreparationHook _ _ = return
+  beforePreparationHook :: ExperimentNumber -> RepetitionNumber -> GenIO -> a -> ExpM a a
+  default beforePreparationHook :: ExperimentNumber -> RepetitionNumber -> GenIO -> a -> ExpM a a
+  beforePreparationHook _ _ _ = return
 
   -- ^ Function to call on the state before the warm up phase. This function is only executed if a warm up phase exists
   -- (that is >0 warm-up steps) and is initialised, which happens on the first time it is started!
-  beforeWarmUpHook :: RepetitionNumber -> ReplicationNumber -> GenIO -> a -> ExpM a a
-  default beforeWarmUpHook :: RepetitionNumber -> ReplicationNumber -> GenIO -> a -> ExpM a a
-  beforeWarmUpHook _ _ _ = return
+  beforeWarmUpHook :: ExperimentNumber -> RepetitionNumber -> ReplicationNumber -> GenIO -> a -> ExpM a a
+  default beforeWarmUpHook :: ExperimentNumber -> RepetitionNumber -> ReplicationNumber -> GenIO -> a -> ExpM a a
+  beforeWarmUpHook _ _ _ _ = return
 
 
   -- ^ Function to call on the state before the evaluation phase. This function is only executed if the evaluation phase
   -- exists (that is >0 evaluation steps) and is initialised which happens on the first time it is started!
-  beforeEvaluationHook :: RepetitionNumber -> ReplicationNumber -> GenIO -> a -> ExpM a a
-  default beforeEvaluationHook :: RepetitionNumber -> ReplicationNumber -> GenIO -> a -> ExpM a a
-  beforeEvaluationHook _ _ _ = return
+  beforeEvaluationHook :: ExperimentNumber -> RepetitionNumber -> ReplicationNumber -> GenIO -> a -> ExpM a a
+  default beforeEvaluationHook :: ExperimentNumber -> RepetitionNumber -> ReplicationNumber -> GenIO -> a -> ExpM a a
+  beforeEvaluationHook _ _ _ _ = return
+
+
+  -- ^ Function to call after the preparation phase, e.g. it can be used to move files. This function is only executed if
+  -- the preparation phase is updated. The first parameter is the input state and is only used for type checking.
+  afterPreparationHook :: a -> ExperimentNumber -> RepetitionNumber -> IO ()
+  default afterPreparationHook :: a -> ExperimentNumber -> RepetitionNumber -> IO ()
+  afterPreparationHook _ _ _ = return ()
+
+
+  -- ^ Function to call after the warmUp phase, e.g. it can be used to move files. This function is only executed if
+  -- the warmUp phase is updated. The first parameter is the input state and is only used for type checking.
+  afterWarmUpHook :: a -> ExperimentNumber -> RepetitionNumber -> ReplicationNumber -> IO ()
+  default afterWarmUpHook :: a -> ExperimentNumber -> RepetitionNumber -> ReplicationNumber -> IO ()
+  afterWarmUpHook _ _ _ _ = return ()
+
+
+  -- ^ Function to call after the evaluation phase, e.g. it can be used to move files. This function is only executed if
+  -- the evaluation phase is updated. The first parameter is the input state and is only used for type checking.
+  afterEvaluationHook :: a -> ExperimentNumber -> RepetitionNumber -> ReplicationNumber -> IO ()
+  default afterEvaluationHook :: a -> ExperimentNumber -> RepetitionNumber -> ReplicationNumber -> IO ()
+  afterEvaluationHook _ _ _ _ = return ()
+
+
