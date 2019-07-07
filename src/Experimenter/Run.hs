@@ -638,15 +638,15 @@ runResultData expId len repResType resData = do
     upd :: (ExperimentDef a) => RepResultType -> ResultData a -> ReaderT SqlBackend (LoggingT (ExpM a)) ()
     upd (Prep expResId) (ResultData (ResultDataPrep k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do
       serSt <- mkTransientlyAvailable sSt >>= lift . lift . serialisable
-      serESt <- mkTransientlyAvailable eSt >>= lift . lift . sequence . fmap serialisable
+      serESt <- mkTransientlyAvailable eSt >>= lift . lift . traverse serialisable
       replace k (PrepResultData sTime eTime (tshow sG) (tshow <$> eG) (runPut . put $ serSt) (runPut . put <$> serESt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
     upd (WarmUp repResId) (ResultData (ResultDataWarmUp k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do
       serSt <- mkTransientlyAvailable sSt >>= lift . lift . serialisable
-      serESt <- mkTransientlyAvailable eSt >>= lift . lift . sequence . fmap serialisable
+      serESt <- mkTransientlyAvailable eSt >>= lift . lift . traverse serialisable
       replace k (WarmUpResultData sTime eTime (tshow sG) (tshow <$> eG) (runPut . put $ serSt) (runPut . put <$> serESt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
     upd (Rep repResId) (ResultData (ResultDataRep k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do
       serSt <- mkTransientlyAvailable sSt >>= lift . lift . serialisable
-      serESt <- mkTransientlyAvailable eSt >>= lift . lift . sequence . fmap serialisable
+      serESt <- mkTransientlyAvailable eSt >>= lift . lift . traverse serialisable
       replace k (RepResultData sTime eTime (tshow sG) (tshow <$> eG) (runPut . put $ serSt) (runPut . put <$> serESt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
     upd _ _ = error "Unexpected update combination. This is a bug, please report it!"
 

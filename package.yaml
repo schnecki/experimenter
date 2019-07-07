@@ -96,3 +96,6 @@ tests:
     - -with-rtsopts=-N
     dependencies:
     - experimenter
+    - foundation
+    - hspec
+    - QuickCheck

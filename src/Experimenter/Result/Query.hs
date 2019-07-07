@@ -15,6 +15,8 @@ module Experimenter.Result.Query
     , loadReplicationMeasures
     , loadResDataEndState
     , loadResDataStartState
+    , deserialise
+    , mDeserialise
     ) where
 
 
@@ -25,7 +27,7 @@ import           Data.ByteString                      (ByteString)
 import qualified Data.ByteString                      as B
 import           Data.Function                        (on)
 import qualified Data.List                            as L
-import           Data.Maybe                           (fromMaybe, listToMaybe)
+import           Data.Maybe                           (fromMaybe, isNothing, listToMaybe)
 import           Data.Serialize                       as S (Serialize, get, put, runGet,
                                                             runPut)
 import qualified Data.Text                            as T
@@ -95,9 +97,8 @@ loadResDataEndState expId acc k = do
   res <- case mResData of
     Nothing  -> error "Could not get end state"
     Just resData -> do
-
-      mSer :: Maybe (Maybe (Serializable a)) <- fromMaybe (error "could not deserialize end state") <$> mDeserialise "end state" (acc resData)
-      lift $ lift $ traverse deserialisable (join mSer)
+      (mmSer :: Maybe (Maybe (Serializable a))) <- mDeserialise (T.pack "prop_serialiseEndSt") (acc resData)
+      lift $ lift $ maybe (return Nothing) (fmap Just . deserialisable) (join mmSer)
   traverse (setParams expId) res
 
 loadResDataStartState ::
