@@ -45,6 +45,7 @@ import           Database.Persist                     as P
 import           Database.Persist.Postgresql          (SqlBackend)
 import           System.Exit                          (exitFailure)
 import           System.Random.MWC
+import System.IO
 
 import           Experimenter.Experiment
 import           Experimenter.Input
@@ -55,6 +56,9 @@ import           Experimenter.Result.Type
 import           Experimenter.Setup
 import           Experimenter.StepResult
 import           Experimenter.Util
+
+
+import Debug.Trace
 
 
 loadExperiments :: (ExperimentDef a) => ExperimentSetup -> InputState a -> a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Experiments a)
@@ -83,6 +87,8 @@ deserialise n bs =
    in case res of
         Left err -> do
           $(logError) $ "Could not deserialise " <> n <> "! Discarding saved experiment result. Data length: " <> tshow (B.length bs) <> ". Error Message: " <> tshow err
+          liftIO $ hFlush stdout
+          liftIO $ hFlush stderr
           liftIO exitFailure
           -- return Nothing
         Right r -> return $ Just r
@@ -105,7 +111,7 @@ loadResDataEndState expId acc k = do
   res <- case mResData of
     Nothing  -> error "Could not get end state"
     Just resData -> do
-      (mmSer :: Maybe (Maybe (Serializable a))) <- mDeserialise (T.pack "prop_serialiseEndSt") (acc resData)
+      (mmSer :: Maybe (Maybe (Serializable a))) <- mDeserialise (T.pack "end state") (acc resData)
       lift $ lift $ maybe (return Nothing) (fmap Just . deserialisable) (join mmSer)
   traverse (setParams expId) res
 
@@ -392,7 +398,7 @@ getOrCreateExps setup initInpSt initSt = do
   exps <-
     filterM
       (\(Entity _ (Exps _ _ _ s iS)) -> do
-          serSt <- lift $ lift $ sequence $ deserialisable <$> (runGet S.get s)
+          serSt <- lift $ lift $ sequence $ deserialisable <$> runGet S.get s
           let other = (,) <$> serSt <*> runGet S.get iS
           return $ fromEither False (equalExperiments (initSt, initInpSt) <$> other))
       expsList

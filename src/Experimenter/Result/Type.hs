@@ -27,6 +27,8 @@ import           Data.Time
 import           Database.Persist.Postgresql (SqlBackend)
 import           System.Random.MWC
 
+import           Debug.Trace
+
 data ResultDataKey
   = ResultDataPrep (Key PrepResultData)
   | ResultDataWarmUp (Key WarmUpResultData)

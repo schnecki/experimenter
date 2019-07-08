@@ -1,4 +1,3 @@
-{-# LANGUAGE BangPatterns         #-}
 {-# LANGUAGE FlexibleContexts     #-}
 {-# LANGUAGE FlexibleInstances    #-}
 {-# LANGUAGE GADTs                #-}
@@ -25,12 +24,14 @@ import           Control.Monad                (forM)
 import           Control.Monad.IO.Class
 import           Control.Monad.IO.Unlift
 import           Control.Monad.Logger         (LogLevel (..), LoggingT, MonadLogger,
-                                               WriterLoggingT, defaultLoc, filterLogger,
-                                               logDebug, logError, logInfo,
+                                               NoLoggingT, WriterLoggingT, defaultLoc,
+                                               filterLogger, logDebug, logError, logInfo,
                                                runFileLoggingT, runLoggingT, runNoLoggingT,
                                                runStderrLoggingT, runStdoutLoggingT)
+import           Data.IORef
 import           Data.List                    (foldl')
 
+import           Control.Concurrent           (forkIO, threadDelay)
 import           Control.Monad.Reader
 import           Control.Monad.Trans.Resource
 import qualified Data.ByteString              as BS
@@ -41,9 +42,11 @@ import           Data.Pool                    as P
 import           Data.Serialize               hiding (get)
 import qualified Data.Serialize               as S
 import qualified Data.Text                    as T
-import           Data.Time                    (diffUTCTime, getCurrentTime)
+import           Data.Time                    (UTCTime, addUTCTime, diffUTCTime,
+                                               getCurrentTime)
 import qualified Database.Esqueleto           as E
 import           Database.Persist.Postgresql
+import           Database.Persist.Sql         (fromSqlKey)
 import           Network.HostName             (HostName, getHostName)
 import           System.IO
 import           System.Posix.Process
@@ -54,6 +57,7 @@ import           System.Random.MWC
 import           Experimenter.DatabaseSetup
 import           Experimenter.Experiment
 import           Experimenter.Input
+import           Experimenter.MasterSlave
 import           Experimenter.Measure
 import           Experimenter.Models
 import           Experimenter.Parameter
@@ -63,10 +67,16 @@ import           Experimenter.StepResult
 import           Experimenter.Util
 
 
+import           Debug.Trace
+
 type Updated = Bool
 type InitialState a = a
 type InitialInputState a = InputState a
 type DropPreparation = Bool
+type Rands = ([Seed],[Seed],[Seed]) -- ^ Preparation, Warm Up and Evaluation random generators
+
+data Mode = Master | Slave
+  deriving (Eq, Show)
 
 
 execExperiments :: (ExperimentDef a) => (ExpM a (Bool, Experiments a) -> IO (Bool, Experiments a)) -> DatabaseSetup -> ExperimentSetup -> InputState a -> a -> IO (Experiments a)
@@ -88,38 +98,8 @@ runner runExpM dbSetup setup initInpSt mkInitSt = do
   runStdoutLoggingT $ withPostgresqlPool (connectionString dbSetup) (parallelConnections dbSetup) $ liftSqlPersistMPool $ runMigration migrateAll
   runExpM $
     (runStdoutLoggingT . filterLogger (\s _ -> s /= "SQL")) $
-    withPostgresqlConn (connectionString dbSetup) $ \backend -> flip runSqlConn backend $ lift (lift mkInitSt) >>= loadExperiments setup initInpSt >>= checkUniqueParamNames >>= runExperimenter
-
-timeout :: Num t => t
-timeout = 10
-
-runExperimenter :: (ExperimentDef a) => Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Bool, Experiments a)
-runExperimenter exps = do
-  pid <- liftIO getProcessID
-  hostName <- liftIO getHostName
-  time <- liftIO getCurrentTime
-  maybeMaster <- insertUnique $ ExpsMaster (exps ^. experimentsKey) (T.pack hostName) (fromIntegral pid) time
-  transactionSave
-  case maybeMaster of
-    Just master -- installHandler sigKill deleteMaster Nothing >>
-     -> runExperiment exps
-    Nothing -> do
-      mMaster <- getBy $ UniqueExpsMaster (exps ^. experimentsKey)
-      case mMaster of
-        Nothing -> runExperimenter exps
-        Just (Entity masterId master) ->
-          if diffUTCTime time (master ^. expsMasterLastAliveSign) > 2 * timeout
-            then delete masterId >> runExperiment exps
-            else undefined
-      -- aquireExperimentLock >>= runExperimentAsClient
-
-
-runExperiment :: (ExperimentDef a) => Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Bool, Experiments a)
-runExperiment exps = do
-  (anyChange, exps') <- continueExperiments exps
-  if anyChange
-    then first (const True) <$> runExperiment exps'
-    else return (anyChange, exps')
+    withPostgresqlConn (connectionString dbSetup) $ \backend ->
+      flip runSqlConn backend $ lift (lift mkInitSt) >>= loadExperiments setup initInpSt >>= checkUniqueParamNames >>= runExperimenter dbSetup
 
 checkUniqueParamNames :: (Monad m) => Experiments a -> m (Experiments a)
 checkUniqueParamNames exps = do
@@ -128,27 +108,68 @@ checkUniqueParamNames exps = do
   return exps
 
 
-type Rands = ([Seed],[Seed],[Seed]) -- ^ Preparation, Warm Up and Evaluation random generators
+runExperimenter :: (ExperimentDef a) => DatabaseSetup -> Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Bool, Experiments a)
+runExperimenter dbSetup exps = do
+  pid <- liftIO getProcessID
+  hostName <- liftIO getHostName
+  time <- liftIO getCurrentTime
+  maybeMaster <- insertUnique $ ExpsMaster (exps ^. experimentsKey) (T.pack hostName) (fromIntegral pid) time
+  transactionSave
+  case maybeMaster of
+    Just master -> do
+      ref <- liftIO $ createKeepAliveFork dbSetup (\t -> update master [ExpsMasterLastAliveSign =. t]) (delete master)
+      $(logInfo) "Running in MASTER mode!"
+      res <- runExperiment dbSetup Master exps
+      waitResult <- waitForSlaves exps
+      if waitResult
+        then liftIO (writeIORef ref Finished) >> return res -- done!
+        else runExperimenter dbSetup exps                   -- slave died
+    Nothing -> do
+      mMaster <- getBy $ UniqueExpsMaster (exps ^. experimentsKey)
+      case mMaster of
+        Nothing -> runExperimenter dbSetup exps
+        Just (Entity masterId master) ->
+          if diffUTCTime time (master ^. expsMasterLastAliveSign) > 2 * keepAliveTimeout
+            then delete masterId >> runExperimenter dbSetup exps
+            else do
+            $(logInfo) "Running in SLAVE mode!"
+            runExperiment dbSetup Slave exps
 
-continueExperiments :: (ExperimentDef a) => Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Bool, Experiments a)
-continueExperiments exp = do
-  $(logInfo) $ "Processing experiment with ID " <> tshow (unSqlBackendKey $ unExpsKey $ exp ^. experimentsKey)
+runExperiment :: (ExperimentDef a) => DatabaseSetup -> Mode -> Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Bool, Experiments a)
+runExperiment dbSetup mode exps = do
+  (anyChange, exps') <- continueExperiments dbSetup mode exps
+  if anyChange
+    then first (const True) <$> runExperiment dbSetup mode exps'
+    else return (anyChange, exps')
+
+
+continueExperiments :: (ExperimentDef a) => DatabaseSetup -> Mode -> Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Bool, Experiments a)
+continueExperiments dbSetup mode exp = do
+  $(logInfo) $ "Processing set of experiments with ID " <> tshow (unSqlBackendKey $ unExpsKey $ exp ^. experimentsKey)
   liftIO $ hFlush stdout
   let exps = exp ^. experiments
-  rands <- liftIO $ mkRands exps
-  newExps <- mkNewExps exp exps
-  let expsList = exps ++ newExps
-  $(logInfo) $ "Number of experiments loaded: " <> tshow (length exps)
-  $(logInfo) $ "Number of new experiments: " <> tshow (length newExps)
-  expRes <- mapM (continueExperiment rands exp) expsList
-  let updated = any fst expRes
-      res = map snd expRes
-  if updated
+  if mode == Slave && null exps
     then do
-      endTime <- return <$> liftIO getCurrentTime
-      update (exp ^. experimentsKey) [ExpsEndTime =. endTime]
-      return (updated, set experiments res $ set experimentsEndTime endTime exp)
-    else return (updated, set experiments res exp)
+      $(logInfo) "No experiments found and running in slave mode. Check whether the master has initialised the experiment yet!"
+      return (False, exp)
+    else do
+      rands <- liftIO $ mkRands exps
+      newExps <-
+        if mode == Slave
+          then return []
+          else mkNewExps exp exps
+      let expsList = exps ++ newExps
+      $(logInfo) $ "Number of experiments loaded: " <> tshow (length exps)
+      $(logInfo) $ "Number of new experiments: " <> tshow (length newExps)
+      expRes <- mapM (continueExperiment dbSetup rands exp) expsList
+      let updated = any fst expRes
+          res = map snd expRes
+      if updated
+        then do
+          endTime <- return <$> liftIO getCurrentTime
+          update (exp ^. experimentsKey) [ExpsEndTime =. endTime]
+          return (updated, set experiments res $ set experimentsEndTime endTime exp)
+        else return (updated, set experiments res exp)
   where
     mkRands :: [Experiment a] -> IO Rands
     mkRands [] = do
@@ -304,23 +325,37 @@ loadParameters exps exp = foldM setParam exps (exp ^. parameterSetup)
     parameterSetups = parameters (exps ^. experimentsInitialState)
 
 
-continueExperiment :: (ExperimentDef a) => Rands -> Experiments a -> Experiment a  -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, Experiment a)
-continueExperiment rands exps exp = do
-  -- TODO: parallelisation
-  exps' <- loadParameters exps exp -- loads parameters into the init state
-  $(logInfo) "Checking if new experiments can be created"
-  expResList <- getExpRes exps' (exp ^. experimentResults) >>= truncateExperiments repetits
-  $(logInfo) $ "Number of experiment results loaded: " <> tshow (length expResList)
-  let dropPrep = any (^. parameterSettingDropPrepeationPhase) (exp ^. parameterSetup)
-  expRes <- mapM (runExperimentResult dropPrep rands exps' expId expNr) expResList
-  let updated = any fst expRes
-      res = map snd expRes
-  if updated
-    then do endTime <- return <$> liftIO getCurrentTime
-            update (exp ^. experimentKey) [ExpEndTime =. endTime]
-            return $ (updated, set experimentResults res $ set experimentEndTime endTime exp)
-    else return $ (updated, set experimentResults res exp)
-
+continueExperiment :: (ExperimentDef a) => DatabaseSetup -> Rands -> Experiments a -> Experiment a  -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, Experiment a)
+continueExperiment dbSetup rands exps exp = do
+  pid <- liftIO getProcessID
+  hostName <- liftIO getHostName
+  time <- liftIO getCurrentTime
+  deleteWhere [ExpExecutionLockLastAliveSign <=. addUTCTime (-2*keepAliveTimeout) time]
+  maybeLocked <- insertUnique $ ExpExecutionLock expId (T.pack hostName) (fromIntegral pid) time
+  transactionSave
+  case maybeLocked of
+    Nothing -> do
+      $(logInfo) $ "Skipping experiment with ID " <> tshow (fromSqlKey expId) <> " as it is currently locked by another worker."
+      return (False, exp)
+    Just lock -> do
+      $(logInfo) $ "Processing experiment with ID " <> tshow (fromSqlKey expId) <> "."
+      ref <- liftIO $ createKeepAliveFork dbSetup (\t -> update lock [ExpExecutionLockLastAliveSign =. t]) (delete lock)
+      liftIO (writeIORef ref Working)
+      exps' <- loadParameters exps exp -- loads parameters into the init state
+      $(logInfo) "Checking if new experiments can be created"
+      expResList <- getExpRes exps' (exp ^. experimentResults) >>= truncateExperiments repetits
+      $(logInfo) $ "Number of experiment results loaded: " <> tshow (length expResList)
+      let dropPrep = any (^. parameterSettingDropPrepeationPhase) (exp ^. parameterSetup)
+      expRes <- mapM (runExperimentResult dropPrep rands exps' expId expNr) expResList
+      let updated = any fst expRes
+          res = map snd expRes
+      liftIO (writeIORef ref Finished)
+      if updated
+        then do
+          eTime <- return <$> liftIO getCurrentTime
+          update (exp ^. experimentKey) [ExpEndTime =. eTime]
+          return (updated, set experimentResults res $ set experimentEndTime eTime exp)
+        else return (updated, set experimentResults res exp)
   where
     expNr = exp ^. experimentNumber
     expId = exp ^. experimentKey
@@ -334,7 +369,6 @@ continueExperiment rands exps exp = do
            startTime <- liftIO getCurrentTime
            kExpRes <- insert $ ExpResult (exp ^. experimentKey) nr Nothing
            return $ ExperimentResult kExpRes nr Nothing [])
-
     truncateExperiments nr xs = do
       let dels = drop nr xs
       unless (null dels) $ $(logInfo) $ "Number of experiment repetitions being deleted " <> tshow (length dels)
@@ -604,6 +638,7 @@ runResultData expId len repResType resData = do
   if updated
     then do
       eTime <- pure <$> liftIO getCurrentTime
+      sTime' <- liftIO getCurrentTime
       resData' <-
         addInputValsAndMeasure (reverse inputs) (reverse measures) $
         (if isNew
@@ -616,12 +651,13 @@ runResultData expId len repResType resData = do
         set endTime eTime resData
       upd repResType resData'
       transactionSave
+      eTime' <- liftIO getCurrentTime
       if len - curLen - length periodsToRun > 0
         then do
-          $(logInfo) $ "Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow (diffUTCTime (fromJust eTime) sTime) <> "."
+          $(logInfo) $ "Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow (diffUTCTime (fromJust eTime) sTime) <> ". Saving Time: " <> tshow (diffUTCTime eTime' sTime')
           runResultData expId len repResType resData'
         else do
-          $(logInfo) $ "Done and saved. Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow (diffUTCTime (fromJust eTime) sTime) <> ". Releasing memory."
+          $(logInfo) $ "Done and saved. Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow (diffUTCTime (fromJust eTime) sTime) <> ". Saving Time: " <> tshow (diffUTCTime eTime' sTime') <> ". Releasing memory."
           return (True, set endState mkEndStateAvailableOnDemand $ set startState mkStartStateAvailableOnDemand resData')
     else return (False, resData)
   where
