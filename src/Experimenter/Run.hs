@@ -5,6 +5,7 @@
 {-# LANGUAGE ScopedTypeVariables  #-}
 {-# LANGUAGE Strict               #-}
 {-# LANGUAGE TemplateHaskell      #-}
+{-# LANGUAGE TupleSections        #-}
 {-# LANGUAGE TypeFamilies         #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ViewPatterns         #-}
@@ -99,7 +100,7 @@ runner runExpM dbSetup setup initInpSt mkInitSt = do
   runExpM $
     (runStdoutLoggingT . filterLogger (\s _ -> s /= "SQL")) $
     withPostgresqlConn (connectionString dbSetup) $ \backend ->
-      flip runSqlConn backend $ lift (lift mkInitSt) >>= loadExperiments setup initInpSt >>= checkUniqueParamNames >>= runExperimenter dbSetup
+      flip runSqlConn backend $ lift (lift mkInitSt) >>= loadExperiments setup initInpSt >>= checkUniqueParamNames >>= runExperimenter dbSetup setup initInpSt mkInitSt
 
 checkUniqueParamNames :: (Monad m) => Experiments a -> m (Experiments a)
 checkUniqueParamNames exps = do
@@ -108,32 +109,34 @@ checkUniqueParamNames exps = do
   return exps
 
 
-runExperimenter :: (ExperimentDef a) => DatabaseSetup -> Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Bool, Experiments a)
-runExperimenter dbSetup exps = do
+runExperimenter :: (ExperimentDef a) => DatabaseSetup -> ExperimentSetup -> InputState a -> ExpM a a -> Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Bool, Experiments a)
+runExperimenter dbSetup setup initInpSt mkInitSt exps = do
   pid <- liftIO getProcessID
   hostName <- liftIO getHostName
   time <- liftIO getCurrentTime
   maybeMaster <- insertUnique $ ExpsMaster (exps ^. experimentsKey) (T.pack hostName) (fromIntegral pid) time
   transactionSave
   case maybeMaster of
-    Just master -> do
-      ref <- liftIO $ createKeepAliveFork dbSetup (\t -> update master [ExpsMasterLastAliveSign =. t]) (delete master)
+    Just masterId -> do
+      ref <- liftIO $ createKeepAliveFork dbSetup (\t -> update masterId [ExpsMasterLastAliveSign =. t]) (delete masterId)
       $(logInfo) "Running in MASTER mode!"
       res <- runExperiment dbSetup Master exps
       waitResult <- waitForSlaves exps
       if waitResult
-        then liftIO (writeIORef ref Finished) >> return res -- done!
-        else runExperimenter dbSetup exps                   -- slave died
+        then liftIO (writeIORef ref Finished) >> lift (lift mkInitSt) >>= fmap (fst res, ) . loadExperiments setup initInpSt -- done, reload all data!
+        else delete masterId >> restartExperimenter -- slave died
     Nothing -> do
       mMaster <- getBy $ UniqueExpsMaster (exps ^. experimentsKey)
       case mMaster of
-        Nothing -> runExperimenter dbSetup exps
+        Nothing -> restartExperimenter
         Just (Entity masterId master) ->
           if diffUTCTime time (master ^. expsMasterLastAliveSign) > 2 * keepAliveTimeout
-            then delete masterId >> runExperimenter dbSetup exps
+            then delete masterId >> restartExperimenter
             else do
-            $(logInfo) "Running in SLAVE mode!"
-            runExperiment dbSetup Slave exps
+              $(logInfo) "Running in SLAVE mode!"
+              runExperiment dbSetup Slave exps
+  where
+    restartExperimenter = lift (lift mkInitSt) >>= loadExperiments setup initInpSt >>= runExperimenter dbSetup setup initInpSt mkInitSt
 
 runExperiment :: (ExperimentDef a) => DatabaseSetup -> Mode -> Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Bool, Experiments a)
 runExperiment dbSetup mode exps = do
@@ -654,17 +657,20 @@ runResultData expId len repResType resData = do
       eTime' <- liftIO getCurrentTime
       if len - curLen - length periodsToRun > 0
         then do
-          $(logInfo) $ "Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow (diffUTCTime (fromJust eTime) sTime) <> ". Saving Time: " <> tshow (diffUTCTime eTime' sTime')
+          $(logInfo) $ "Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow (diffUTCTime (fromJust eTime) sTime) <> ". Saving Time: " <>
+            tshow (diffUTCTime eTime' sTime')
           runResultData expId len repResType resData'
         else do
-          $(logInfo) $ "Done and saved. Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow (diffUTCTime (fromJust eTime) sTime) <> ". Saving Time: " <> tshow (diffUTCTime eTime' sTime') <> ". Releasing memory."
+          $(logInfo) $ "Done and saved. Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow (diffUTCTime (fromJust eTime) sTime) <> ". Saving Time: " <>
+            tshow (diffUTCTime eTime' sTime') <>
+            ". Releasing memory."
           return (True, set endState mkEndStateAvailableOnDemand $ set startState mkStartStateAvailableOnDemand resData')
     else return (False, resData)
   where
     curLen = resData ^. results . _1
     isNew = curLen == 0
     splitPeriods = 1000
-    periodsToRun = map (+curLen) [1 .. min splitPeriods (len - curLen)]
+    periodsToRun = map (+ curLen) [1 .. min splitPeriods (len - curLen)]
     mkEndStateAvailableOnDemand =
       case resData ^. resultDataKey of
         ResultDataPrep key -> AvailableOnDemand $ loadResDataEndState expId (view prepResultDataEndState) key
@@ -678,50 +684,95 @@ runResultData expId len repResType resData = do
     addInputValsAndMeasure inputVals measures resData =
       let countResults' = resData ^. results . _1 + length measures
           countInputValues' = resData ^. inputValues . _1 + length inputVals
-       in case resData ^. resultDataKey of
-            ResultDataPrep key -> do
-              inpKeys <- mapM (insert . PrepInput key . view inputValuePeriod) inputVals
-              zipWithM_ (\k v -> insert $ PrepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
-              measureKeys <- mapM (insert . PrepMeasure key . view measurePeriod) measures
-              zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ PrepResultStep k n mX y) xs) measureKeys measures
-              return $ results .~ (countResults', AvailableOnDemand (loadPrepartionMeasures key)) $ inputValues .~
-                (countInputValues', AvailableOnDemand (fromMaybe [] <$> loadPreparationInput key)) $
-                resData
-            ResultDataWarmUp key -> do
-              inpKeys <- mapM (insert . WarmUpInput key . view inputValuePeriod) inputVals
-              zipWithM_ (\k v -> insert $ WarmUpInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
-              measureKeys <- mapM (insert . WarmUpMeasure key . view measurePeriod) measures
-              zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ WarmUpResultStep k n mX y) xs) measureKeys measures
-              return $ results .~ (countResults', AvailableOnDemand (loadReplicationWarmUpMeasures key)) $ inputValues .~
-                (countInputValues', AvailableOnDemand (fromMaybe [] <$> loadReplicationWarmUpInput key)) $
-                resData
-            ResultDataRep key -> do
-              inpKeys <- mapM (insert . RepInput key . view inputValuePeriod) inputVals
-              zipWithM_ (\k v -> insert $ RepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
-              measureKeys <- mapM (insert . RepMeasure key . view measurePeriod) measures
-              zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ RepResultStep k n mX y) xs) measureKeys measures
-              return $ results .~ (countResults', AvailableOnDemand (loadReplicationMeasures key)) $ inputValues .~
-                (countInputValues', AvailableOnDemand (fromMaybe [] <$> loadReplicationInput key)) $
-                resData
+      in case resData ^. resultDataKey of
+           ResultDataPrep key -> do
+             inpKeys <- mapM (insert . PrepInput key . view inputValuePeriod) inputVals
+             zipWithM_ (\k v -> insert $ PrepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
+             measureKeys <- mapM (insert . PrepMeasure key . view measurePeriod) measures
+             zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ PrepResultStep k n mX y) xs) measureKeys measures
+             return $ results .~ (countResults', AvailableOnDemand (loadPrepartionMeasures key)) $ inputValues .~
+               (countInputValues', AvailableOnDemand (fromMaybe [] <$> loadPreparationInput key)) $
+               resData
+           ResultDataWarmUp key -> do
+             inpKeys <- mapM (insert . WarmUpInput key . view inputValuePeriod) inputVals
+             zipWithM_ (\k v -> insert $ WarmUpInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
+             measureKeys <- mapM (insert . WarmUpMeasure key . view measurePeriod) measures
+             zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ WarmUpResultStep k n mX y) xs) measureKeys measures
+             return $ results .~ (countResults', AvailableOnDemand (loadReplicationWarmUpMeasures key)) $ inputValues .~
+               (countInputValues', AvailableOnDemand (fromMaybe [] <$> loadReplicationWarmUpInput key)) $
+               resData
+           ResultDataRep key -> do
+             inpKeys <- mapM (insert . RepInput key . view inputValuePeriod) inputVals
+             zipWithM_ (\k v -> insert $ RepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
+             measureKeys <- mapM (insert . RepMeasure key . view measurePeriod) measures
+             zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ RepResultStep k n mX y) xs) measureKeys measures
+             return $ results .~ (countResults', AvailableOnDemand (loadReplicationMeasures key)) $ inputValues .~
+               (countInputValues', AvailableOnDemand (fromMaybe [] <$> loadReplicationInput key)) $
+               resData
     upd :: (ExperimentDef a) => RepResultType -> ResultData a -> ReaderT SqlBackend (LoggingT (ExpM a)) ()
     upd (Prep expResId) (ResultData (ResultDataPrep k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do
-      serSt <- mkTransientlyAvailable sSt >>= lift . lift . serialisable
-      serESt <- mkTransientlyAvailable eSt >>= lift . lift . traverse serialisable
       sGBS <- liftIO $ fromRandGen sG
       eGBS <- liftIO $ maybe (return Nothing) (fmap Just . fromRandGen) eG
-      replace k (PrepResultData sTime eTime sGBS eGBS (runPut . put $ serSt) (runPut . put <$> serESt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
+      update
+        k
+        [ PrepResultDataStartTime =. sTime
+        , PrepResultDataEndTime =. eTime
+        , PrepResultDataStartRandGen =. sGBS
+        , PrepResultDataEndRandGen =. eGBS
+        , PrepResultDataStartInputState =. runPut (put sInpSt)
+        , PrepResultDataEndInputState =. runPut . put <$> eInpSt
+        ]
+      transactionSave
+      when (curLen == 0) $ do
+        serSt <- mkTransientlyAvailable sSt >>= lift . lift . serialisable
+        update k [PrepResultDataStartState =. runPut (put serSt)]
+        transactionSave
+      serESt <- mkTransientlyAvailable eSt >>= lift . lift . traverse serialisable
+      update k [PrepResultDataEndState =. runPut . put <$> serESt]
+      transactionSave
+      -- replace k (PrepResultData sTime eTime sGBS eGBS (runPut . put $ serSt) (runPut . put <$> serESt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
     upd (WarmUp repResId) (ResultData (ResultDataWarmUp k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do
-      serSt <- mkTransientlyAvailable sSt >>= lift . lift . serialisable
-      serESt <- mkTransientlyAvailable eSt >>= lift . lift . traverse serialisable
       sGBS <- liftIO $ fromRandGen sG
       eGBS <- liftIO $ maybe (return Nothing) (fmap Just . fromRandGen) eG
-      replace k (WarmUpResultData sTime eTime sGBS eGBS (runPut . put $ serSt) (runPut . put <$> serESt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
+      update
+        k
+        [ WarmUpResultDataStartTime =. sTime
+        , WarmUpResultDataEndTime =. eTime
+        , WarmUpResultDataStartRandGen =. sGBS
+        , WarmUpResultDataEndRandGen =. eGBS
+        , WarmUpResultDataStartInputState =. runPut (put sInpSt)
+        , WarmUpResultDataEndInputState =. runPut . put <$> eInpSt
+        ]
+      transactionSave
+      when (curLen == 0) $ do
+        serSt <- mkTransientlyAvailable sSt >>= lift . lift . serialisable
+        update k [WarmUpResultDataStartState =. runPut (put serSt)]
+        transactionSave
+      serESt <- mkTransientlyAvailable eSt >>= lift . lift . traverse serialisable
+      update k [WarmUpResultDataEndState =. runPut . put <$> serESt]
+      transactionSave
+      -- replace k (WarmUpResultData sTime eTime sGBS eGBS (runPut . put $ serSt) (runPut . put <$> serESt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
     upd (Rep repResId) (ResultData (ResultDataRep k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do
-      serSt <- mkTransientlyAvailable sSt >>= lift . lift . serialisable
-      serESt <- mkTransientlyAvailable eSt >>= lift . lift . traverse serialisable
       sGBS <- liftIO $ fromRandGen sG
       eGBS <- liftIO $ maybe (return Nothing) (fmap Just . fromRandGen) eG
-      replace k (RepResultData sTime eTime sGBS eGBS (runPut . put $ serSt) (runPut . put <$> serESt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
+      update
+        k
+        [ RepResultDataStartTime =. sTime
+        , RepResultDataEndTime =. eTime
+        , RepResultDataStartRandGen =. sGBS
+        , RepResultDataEndRandGen =. eGBS
+        , RepResultDataStartInputState =. runPut (put sInpSt)
+        , RepResultDataEndInputState =. runPut . put <$> eInpSt
+        ]
+      transactionSave
+      when (curLen == 0) $ do
+        serSt <- mkTransientlyAvailable sSt >>= lift . lift . serialisable
+        update k [RepResultDataStartState =. runPut (put serSt)]
+        transactionSave
+      serESt <- mkTransientlyAvailable eSt >>= lift . lift . traverse serialisable
+      update k [RepResultDataEndState =. runPut . put <$> serESt]
+      transactionSave
+      -- replace k (RepResultData sTime eTime sGBS eGBS (runPut . put $ serSt) (runPut . put <$> serESt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
     upd _ _ = error "Unexpected update combination. This is a bug, please report it!"
 
 
