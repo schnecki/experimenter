@@ -693,25 +693,37 @@ runResultData expId len repResType resData = do
       in case resData ^. resultDataKey of
            ResultDataPrep key -> do
              inpKeys <- mapM (insert . PrepInput key . view inputValuePeriod) inputVals
+             transactionSave
              zipWithM_ (\k v -> insert $ PrepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
+             transactionSave
              measureKeys <- mapM (insert . PrepMeasure key . view measurePeriod) measures
+             transactionSave
              zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ PrepResultStep k n mX y) xs) measureKeys measures
+             transactionSave
              return $ results .~ (countResults', AvailableOnDemand (loadPrepartionMeasures key)) $ inputValues .~
                (countInputValues', AvailableOnDemand (fromMaybe [] <$> loadPreparationInput key)) $
                resData
            ResultDataWarmUp key -> do
              inpKeys <- mapM (insert . WarmUpInput key . view inputValuePeriod) inputVals
+             transactionSave
              zipWithM_ (\k v -> insert $ WarmUpInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
+             transactionSave
              measureKeys <- mapM (insert . WarmUpMeasure key . view measurePeriod) measures
+             transactionSave
              zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ WarmUpResultStep k n mX y) xs) measureKeys measures
+             transactionSave
              return $ results .~ (countResults', AvailableOnDemand (loadReplicationWarmUpMeasures key)) $ inputValues .~
                (countInputValues', AvailableOnDemand (fromMaybe [] <$> loadReplicationWarmUpInput key)) $
                resData
            ResultDataRep key -> do
              inpKeys <- mapM (insert . RepInput key . view inputValuePeriod) inputVals
+             transactionSave
              zipWithM_ (\k v -> insert $ RepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
+             transactionSave
              measureKeys <- mapM (insert . RepMeasure key . view measurePeriod) measures
+             transactionSave
              zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ RepResultStep k n mX y) xs) measureKeys measures
+             transactionSave
              return $ results .~ (countResults', AvailableOnDemand (loadReplicationMeasures key)) $ inputValues .~
                (countInputValues', AvailableOnDemand (fromMaybe [] <$> loadReplicationInput key)) $
                resData
