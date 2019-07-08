@@ -100,7 +100,9 @@ runner runExpM dbSetup setup initInpSt mkInitSt = do
   runExpM $
     (runStdoutLoggingT . filterLogger (\s _ -> s /= "SQL")) $
     withPostgresqlConn (connectionString dbSetup) $ \backend ->
-      flip runSqlConn backend $ lift (lift mkInitSt) >>= loadExperiments setup initInpSt >>= checkUniqueParamNames >>= runExperimenter dbSetup setup initInpSt mkInitSt
+      flip runSqlConn backend $ do
+        initSt <- lift (lift mkInitSt)
+        loadExperiments setup initInpSt initSt >>= checkUniqueParamNames >>= runExperimenter dbSetup setup initInpSt initSt
 
 checkUniqueParamNames :: (Monad m) => Experiments a -> m (Experiments a)
 checkUniqueParamNames exps = do
@@ -109,11 +111,12 @@ checkUniqueParamNames exps = do
   return exps
 
 
-runExperimenter :: (ExperimentDef a) => DatabaseSetup -> ExperimentSetup -> InputState a -> ExpM a a -> Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Bool, Experiments a)
-runExperimenter dbSetup setup initInpSt mkInitSt exps = do
+runExperimenter :: (ExperimentDef a) => DatabaseSetup -> ExperimentSetup -> InputState a -> a -> Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Bool, Experiments a)
+runExperimenter dbSetup setup initInpSt initSt exps = do
   pid <- liftIO getProcessID
   hostName <- liftIO getHostName
   time <- liftIO getCurrentTime
+  deleteWhere [ExpsMasterLastAliveSign <=. addUTCTime (-2*keepAliveTimeout) time]
   maybeMaster <- insertUnique $ ExpsMaster (exps ^. experimentsKey) (T.pack hostName) (fromIntegral pid) time
   transactionSave
   case maybeMaster of
@@ -123,7 +126,10 @@ runExperimenter dbSetup setup initInpSt mkInitSt exps = do
       res <- runExperiment dbSetup Master exps
       waitResult <- waitForSlaves exps
       if waitResult
-        then liftIO (writeIORef ref Finished) >> lift (lift mkInitSt) >>= fmap (fst res, ) . loadExperiments setup initInpSt -- done, reload all data!
+        then do
+          liftIO (writeIORef ref Finished)
+          exps' <- loadExperiments setup initInpSt initSt -- done, reload all data!
+          return (fst res, exps')
         else delete masterId >> restartExperimenter -- slave died
     Nothing -> do
       mMaster <- getBy $ UniqueExpsMaster (exps ^. experimentsKey)
@@ -136,7 +142,7 @@ runExperimenter dbSetup setup initInpSt mkInitSt exps = do
               $(logInfo) "Running in SLAVE mode!"
               runExperiment dbSetup Slave exps
   where
-    restartExperimenter = lift (lift mkInitSt) >>= loadExperiments setup initInpSt >>= runExperimenter dbSetup setup initInpSt mkInitSt
+    restartExperimenter = loadExperiments setup initInpSt initSt >>= runExperimenter dbSetup setup initInpSt initSt
 
 runExperiment :: (ExperimentDef a) => DatabaseSetup -> Mode -> Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Bool, Experiments a)
 runExperiment dbSetup mode exps = do
