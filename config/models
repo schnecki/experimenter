@@ -61,10 +61,22 @@ PrepResultData
     endTime                         UTCTime Maybe
     startRandGen                    ByteString
     endRandGen                      ByteString Maybe
-    startState                      ByteString
-    endState                        ByteString Maybe
+    -- startState                      ByteString
+    -- endState                        ByteString Maybe
     startInputState                 ByteString
     endInputState                   ByteString Maybe
+
+PrepStartStatePart             -- need to split big states into pieces
+    resultData PrepResultDataId
+    number     Int
+    data       ByteString
+    UniquePrepStartStatePart resultData number
+
+PrepEndStatePart
+    resultData PrepResultDataId
+    number     Int
+    data       ByteString
+    UniquePrepEndStatePart resultData number
 
 PrepInput
     prepResultData PrepResultDataId
@@ -98,20 +110,46 @@ WarmUpResultData
     endTime                         UTCTime Maybe
     startRandGen                    ByteString
     endRandGen                      ByteString Maybe
-    startState                      ByteString
-    endState                        ByteString Maybe
+    -- startState                      ByteString
+    -- endState                        ByteString Maybe
     startInputState                 ByteString
     endInputState                   ByteString Maybe
+
+WarmUpStartStatePart             -- need to split big states into pieces
+    resultData WarmUpResultDataId
+    number     Int
+    data       ByteString
+    UniqueWarmUpStartStatePart resultData number
+
+WarmUpEndStatePart
+    resultData WarmUpResultDataId
+    number     Int
+    data       ByteString
+    UniqueWarmUpEndStatePart resultData number
 
 RepResultData
     startTime                       UTCTime
     endTime                         UTCTime Maybe
     startRandGen                    ByteString
     endRandGen                      ByteString Maybe
-    startState                      ByteString
-    endState                        ByteString Maybe
+    -- startState                      ByteString
+    -- endState                        ByteString Maybe
     startInputState                 ByteString
     endInputState                   ByteString Maybe
+
+
+RepStartStatePart             -- need to split big states into pieces
+    resultData RepResultDataId
+    number     Int
+    data       ByteString
+    UniqueRepStartStatePart resultData number
+
+RepEndStatePart
+    resultData RepResultDataId
+    number     Int
+    data       ByteString
+    UniqueRepEndStatePart resultData number
+
 
 WarmUpInput
     repResult WarmUpResultDataId

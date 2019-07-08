@@ -21,6 +21,10 @@ module Experimenter.Result.Query
     , toRandGen
     , serialiseSeed
     , deserialiseSeed
+    , StartStateType (..)
+    , EndStateType (..)
+    , setResDataStartState
+    , setResDataEndState
     ) where
 
 
@@ -44,8 +48,8 @@ import qualified Database.Esqueleto.Internal.Language as E
 import           Database.Persist                     as P
 import           Database.Persist.Postgresql          (SqlBackend)
 import           System.Exit                          (exitFailure)
+import           System.IO
 import           System.Random.MWC
-import System.IO
 
 import           Experimenter.Experiment
 import           Experimenter.Input
@@ -58,7 +62,19 @@ import           Experimenter.StepResult
 import           Experimenter.Util
 
 
-import Debug.Trace
+import           Debug.Trace
+
+
+data EndStateType
+  = EndStatePrep (Key PrepResultData)
+  | EndStateWarmUp (Key WarmUpResultData)
+  | EndStateRep (Key RepResultData)
+
+
+data StartStateType
+  = StartStatePrep (Key PrepResultData)
+  | StartStateWarmUp (Key WarmUpResultData)
+  | StartStateRep (Key RepResultData)
 
 
 loadExperiments :: (ExperimentDef a) => ExperimentSetup -> InputState a -> a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Experiments a)
@@ -100,35 +116,79 @@ loadExperimentResults kExp = do
   mapM loadExperimentResult xs
 
 
-loadResDataEndState :: forall backend resData a .
-     (PersistUniqueRead backend, PersistQueryRead backend, BackendCompatible SqlBackend backend, PersistEntity resData, ExperimentDef a, PersistEntityBackend resData ~ BaseBackend backend)
+loadResDataEndState ::
+     forall backend resData a. (ExperimentDef a)
   => Key Exp
-  -> (resData -> Maybe ByteString)
-  -> Key resData
-  -> ReaderT backend (LoggingT (ExpM a)) (Maybe a)
-loadResDataEndState expId acc k = do
-  mResData <- P.get k
-  res <- case mResData of
-    Nothing  -> error "Could not get end state"
-    Just resData -> do
-      (mmSer :: Maybe (Maybe (Serializable a))) <- mDeserialise (T.pack "end state") (acc resData)
-      lift $ lift $ maybe (return Nothing) (fmap Just . deserialisable) (join mmSer)
+  -> EndStateType
+  -> ReaderT SqlBackend (LoggingT (ExpM a)) (Maybe a)
+loadResDataEndState expId endState = do
+  parts <-
+    case endState of
+      EndStatePrep k -> fmap (view prepEndStatePartData . entityVal) <$> selectList [PrepEndStatePartResultData ==. k] [Asc PrepEndStatePartNumber]
+      EndStateWarmUp k -> fmap (view warmUpEndStatePartData . entityVal) <$> selectList [WarmUpEndStatePartResultData ==. k] [Asc WarmUpEndStatePartNumber]
+      EndStateRep k -> fmap (view repEndStatePartData . entityVal) <$> selectList [RepEndStatePartResultData ==. k] [Asc RepEndStatePartNumber]
+  res <-
+    if null parts
+      then return Nothing
+      else do
+        ser <- fromMaybe (error "Could not deserialise preparation end state ") <$> deserialise (T.pack "end state") (B.concat parts)
+        lift $ lift $ fmap Just (deserialisable ser)
   traverse (setParams expId) res
 
-loadResDataStartState ::
-     (PersistUniqueRead backend, PersistQueryRead backend, BackendCompatible SqlBackend backend, PersistEntity resData, ExperimentDef a, PersistEntityBackend resData ~ BaseBackend backend)
-  => Key Exp
-  -> (resData -> ByteString)
-  -> Key resData
-  -> ReaderT backend (LoggingT (ExpM a)) a
-loadResDataStartState expId acc k = do
-  mResData <- P.get k
-  res <- case mResData of
-    Nothing -> error "Could not get start state"
-    Just resData -> do
-      ser <- fromMaybe (error "Could not deserialise preparation start state ") <$> deserialise "prep start state" (acc resData)
-      lift $ lift $ deserialisable ser
+loadResDataStartState :: (ExperimentDef a) => Key Exp -> StartStateType -> ReaderT SqlBackend (LoggingT (ExpM a)) a
+loadResDataStartState expId startState = do
+  parts <-
+    case startState of
+      StartStatePrep k -> fmap (view prepStartStatePartData . entityVal) <$> selectList [PrepStartStatePartResultData ==. k] [Asc PrepStartStatePartNumber]
+      StartStateWarmUp k -> fmap (view warmUpStartStatePartData . entityVal) <$> selectList [WarmUpStartStatePartResultData ==. k] [Asc WarmUpStartStatePartNumber]
+      StartStateRep k -> fmap (view repStartStatePartData . entityVal) <$> selectList [RepStartStatePartResultData ==. k] [Asc RepStartStatePartNumber]
+  res <-
+    if null parts
+      then error "Could not get start state"
+      else do
+        ser <- fromMaybe (error "Could not deserialise preparation start state ") <$> deserialise "prep start state" (B.concat parts)
+        lift $ lift $ deserialisable ser
   setParams expId res
+
+
+setResDataEndState :: (MonadIO m) => EndStateType -> Maybe ByteString -> ReaderT SqlBackend m ()
+setResDataEndState (EndStatePrep k) (Just bs) = do
+  let parts = splitState bs
+  mapM_ (\(nr, part) -> upsert (PrepEndStatePart k nr part) [PrepEndStatePartData =. part]) (zip [0..] parts)
+  deleteWhere [PrepEndStatePartResultData ==. k, PrepEndStatePartNumber >=. length parts]
+setResDataEndState (EndStateWarmUp k) (Just bs) = do
+  let parts = splitState bs
+  mapM_ (\(nr, part) -> upsert (WarmUpEndStatePart k nr part) [WarmUpEndStatePartData =. part]) (zip [0..] parts)
+  deleteWhere [WarmUpEndStatePartResultData ==. k, WarmUpEndStatePartNumber >=. length parts]
+setResDataEndState (EndStateRep k) (Just bs) = do
+  let parts = splitState bs
+  mapM_ (\(nr, part) -> upsert (RepEndStatePart k nr part) [RepEndStatePartData =. part]) (zip [0..] parts)
+  deleteWhere [RepEndStatePartResultData ==. k, RepEndStatePartNumber >=. length parts]
+setResDataEndState (EndStatePrep k) Nothing = deleteWhere [PrepEndStatePartResultData ==. k]
+setResDataEndState (EndStateWarmUp k) Nothing = deleteWhere [WarmUpEndStatePartResultData ==. k]
+setResDataEndState (EndStateRep k) Nothing = deleteWhere [RepEndStatePartResultData ==. k]
+
+
+setResDataStartState :: (MonadIO m) => StartStateType -> ByteString -> ReaderT SqlBackend m ()
+setResDataStartState (StartStatePrep k) bs = do
+  let parts = splitState bs
+  mapM_ (\(nr, part) -> upsert (PrepStartStatePart k nr part) [PrepStartStatePartData =. part]) (zip [0..] parts)
+  deleteWhere [PrepStartStatePartResultData ==. k, PrepStartStatePartNumber >=. length parts]
+setResDataStartState (StartStateWarmUp k) bs = do
+  let parts = splitState bs
+  mapM_ (\(nr, part) -> upsert (WarmUpStartStatePart k nr part) [WarmUpStartStatePartData =. part]) (zip [0..] parts)
+  deleteWhere [WarmUpStartStatePartResultData ==. k, WarmUpStartStatePartNumber >=. length parts]
+setResDataStartState (StartStateRep k) bs = do
+  let parts = splitState bs
+  mapM_ (\(nr, part) -> upsert (RepStartStatePart k nr part) [RepStartStatePartData =. part]) (zip [0..] parts)
+  deleteWhere [RepStartStatePartResultData ==. k, RepStartStatePartNumber >=. length parts]
+
+
+splitState :: ByteString -> [ByteString]
+splitState bs | B.null bs = []
+              | otherwise = B.take splitLength bs : splitState (B.drop splitLength bs)
+  where splitLength = 16000000  -- 128MB as ByteString is composed of Word8 (8-bit unsigned integer) elements
+
 
 setParams :: (PersistUniqueRead backend, PersistQueryRead backend, BackendCompatible SqlBackend backend, ExperimentDef a) => Key Exp -> a -> ReaderT backend (LoggingT (ExpM a)) a
 setParams expId st = do
@@ -152,9 +212,9 @@ loadExperimentResult (Entity k (ExpResult expId rep mPrepResDataId)) = do
   mEPrepResData <- fmap join $ sequence $ P.getEntity <$> mPrepResDataId
   prepRes <- case mEPrepResData of
     Nothing -> return Nothing
-    Just (Entity resDataKey (PrepResultData startT endT startRandGenBS endRandGenBS startStBS endStBS startInpStBS endInpStBS)) -> do
-      let startSt = AvailableOnDemand (loadResDataStartState expId (view prepResultDataStartState) resDataKey)
-      let endSt = AvailableOnDemand (loadResDataEndState expId (view prepResultDataEndState) resDataKey)
+    Just (Entity resDataKey (PrepResultData startT endT startRandGenBS endRandGenBS startInpStBS endInpStBS)) -> do
+      let startSt = AvailableOnDemand (loadResDataStartState expId (StartStatePrep resDataKey))
+      let endSt = AvailableOnDemand (loadResDataEndState expId (EndStatePrep resDataKey))
       mStartInpSt <- deserialise "prep start input state" startInpStBS
       mEndInpSt <- mDeserialise "prep end input state" endInpStBS
       inpCount <- loadPreparationInputCount resDataKey
@@ -261,8 +321,8 @@ loadReplicationResult expId (Entity k (RepResult _ repNr mWmUpResId mRepResId)) 
       let wmUpEndTime = view warmUpResultDataEndTime wmUpRes
       wmUpStartRandGen <- toRandGen (view warmUpResultDataStartRandGen wmUpRes)
       wmUpEndRandGen <- maybe (return Nothing) (fmap Just . toRandGen) (view warmUpResultDataEndRandGen wmUpRes)
-      let wmUpStartSt = AvailableOnDemand (loadResDataStartState expId (view warmUpResultDataStartState) wmUpResKey)
-      let wmUpEndSt = AvailableOnDemand (loadResDataEndState expId (view warmUpResultDataEndState) wmUpResKey)
+      let wmUpStartSt = AvailableOnDemand (loadResDataStartState expId (StartStateWarmUp wmUpResKey))
+      let wmUpEndSt = AvailableOnDemand (loadResDataEndState expId (EndStateWarmUp wmUpResKey))
       mWmUpStartInpSt <- deserialise "warm up start input state" (view warmUpResultDataStartInputState wmUpRes)
       mWmUpEndInpSt <- mDeserialise "warm up end input state" (view warmUpResultDataEndInputState wmUpRes)
       wmUpInpValsCount <- loadReplicationWarmUpInputCount wmUpResKey
@@ -297,8 +357,8 @@ loadReplicationResult expId (Entity k (RepResult _ repNr mWmUpResId mRepResId)) 
       return $ do
         let repInpVals = AvailableOnDemand (fromMaybe [] <$> loadReplicationInput repResKey)
             repMeasures = AvailableOnDemand (loadReplicationMeasures repResKey)
-        let repStartSt = AvailableOnDemand (loadResDataStartState expId (view repResultDataStartState) repResKey)
-        let repEndSt = AvailableOnDemand (loadResDataEndState expId (view repResultDataEndState) repResKey)
+        let repStartSt = AvailableOnDemand (loadResDataStartState expId (StartStateRep repResKey))
+        let repEndSt = AvailableOnDemand (loadResDataEndState expId (EndStateRep repResKey))
         repStartInpSt <- mRepStartInpSt
         repEndInpSt <- mRepEndInpSt
         return $

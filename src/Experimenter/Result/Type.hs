@@ -68,7 +68,7 @@ data ResultData a = ResultData
   , _inputValues     :: !(AvailabilityList a (Input a))
   , _results         :: !(AvailabilityList a Measure)
   , _startState      :: !(Availability a a)
-  , _endState        :: !(Availability a (Maybe a))    -- ^ state at end of warm-up phase
+  , _endState        :: !(Availability a (Maybe a))    -- ^ state at end of run
   , _startInputState :: !(InputState a)
   , _endInputState   :: !(Maybe (InputState a))
   }

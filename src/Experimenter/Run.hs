@@ -397,17 +397,20 @@ newResultData seed repResType st inpSt = do
   k <- case repResType of
           Prep expResId   -> do
             serSt <- lift $ lift $ serialisable st
-            prepId <- insert (PrepResultData time Nothing (serialiseSeed seed) Nothing (runPut $ put serSt) Nothing (runPut $ put inpSt) Nothing)
+            prepId <- insert (PrepResultData time Nothing (serialiseSeed seed) Nothing (runPut $ put inpSt) Nothing)
+            setResDataStartState (StartStatePrep prepId) (runPut $ put serSt)
             update expResId [ExpResultPrepResultData =. Just prepId]
             return $ ResultDataPrep prepId
           WarmUp repResId -> do
             serSt <- lift $ lift $ serialisable st
-            wmUpId <- insert (WarmUpResultData time Nothing (serialiseSeed seed) Nothing  (runPut $ put serSt) Nothing (runPut $ put inpSt) Nothing)
+            wmUpId <- insert (WarmUpResultData time Nothing (serialiseSeed seed) Nothing  (runPut $ put inpSt) Nothing)
+            setResDataStartState (StartStateWarmUp wmUpId) (runPut $ put serSt)
             update repResId [RepResultWarmUpResultData =. Just wmUpId]
             return $ ResultDataWarmUp wmUpId
           Rep repResId    -> do
             serSt <- lift $ lift $ serialisable st
-            repResDataId <- insert (RepResultData time Nothing (serialiseSeed seed) Nothing (runPut $ put serSt) Nothing (runPut $ put inpSt) Nothing)
+            repResDataId <- insert (RepResultData time Nothing (serialiseSeed seed) Nothing (runPut $ put inpSt) Nothing)
+            setResDataStartState (StartStateRep repResDataId) (runPut $ put serSt)
             update repResId [RepResultRepResultData =. Just repResDataId]
             return $ ResultDataRep repResDataId
   g <- liftIO $ restore seed
@@ -677,53 +680,41 @@ runResultData expId len repResType resData = do
     isNew = curLen == 0
     splitPeriods = 1000
     periodsToRun = map (+ curLen) [1 .. min splitPeriods (len - curLen)]
-    mkEndStateAvailableOnDemand =
-      case resData ^. resultDataKey of
-        ResultDataPrep key -> AvailableOnDemand $ loadResDataEndState expId (view prepResultDataEndState) key
-        ResultDataWarmUp key -> AvailableOnDemand $ loadResDataEndState expId (view warmUpResultDataEndState) key
-        ResultDataRep key -> AvailableOnDemand $ loadResDataEndState expId (view repResultDataEndState) key
     mkStartStateAvailableOnDemand =
       case resData ^. resultDataKey of
-        ResultDataPrep key -> AvailableOnDemand $ loadResDataStartState expId (view prepResultDataStartState) key
-        ResultDataWarmUp key -> AvailableOnDemand $ loadResDataStartState expId (view warmUpResultDataStartState) key
-        ResultDataRep key -> AvailableOnDemand $ loadResDataStartState expId (view repResultDataStartState) key
+        ResultDataPrep key -> AvailableOnDemand $ loadResDataStartState expId (StartStatePrep key)
+        ResultDataWarmUp key -> AvailableOnDemand $ loadResDataStartState expId (StartStateWarmUp key)
+        ResultDataRep key -> AvailableOnDemand $ loadResDataStartState expId (StartStateRep key)
+    mkEndStateAvailableOnDemand =
+      case resData ^. resultDataKey of
+        ResultDataPrep key -> AvailableOnDemand $ loadResDataEndState expId (EndStatePrep key)
+        ResultDataWarmUp key -> AvailableOnDemand $ loadResDataEndState expId (EndStateWarmUp key)
+        ResultDataRep key -> AvailableOnDemand $ loadResDataEndState expId (EndStateRep key)
     addInputValsAndMeasure inputVals measures resData =
       let countResults' = resData ^. results . _1 + length measures
           countInputValues' = resData ^. inputValues . _1 + length inputVals
       in case resData ^. resultDataKey of
            ResultDataPrep key -> do
-             inpKeys <- mapM (insert . PrepInput key . view inputValuePeriod) inputVals
-             transactionSave
-             zipWithM_ (\k v -> insert $ PrepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
-             transactionSave
-             measureKeys <- mapM (insert . PrepMeasure key . view measurePeriod) measures
-             transactionSave
-             zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ PrepResultStep k n mX y) xs) measureKeys measures
-             transactionSave
+             inpKeys <- insertMany $ map (PrepInput key . view inputValuePeriod) inputVals
+             insertMany_ $ zipWith (\k v -> PrepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
+             measureKeys <- insertMany $ map (PrepMeasure key . view measurePeriod) measures
+             insertMany_ $ concat $ zipWith (\k (Measure _ xs) -> map (\(StepResult n mX y) -> PrepResultStep k n mX y) xs) measureKeys measures
              return $ results .~ (countResults', AvailableOnDemand (loadPrepartionMeasures key)) $ inputValues .~
                (countInputValues', AvailableOnDemand (fromMaybe [] <$> loadPreparationInput key)) $
                resData
            ResultDataWarmUp key -> do
-             inpKeys <- mapM (insert . WarmUpInput key . view inputValuePeriod) inputVals
-             transactionSave
-             zipWithM_ (\k v -> insert $ WarmUpInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
-             transactionSave
-             measureKeys <- mapM (insert . WarmUpMeasure key . view measurePeriod) measures
-             transactionSave
-             zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ WarmUpResultStep k n mX y) xs) measureKeys measures
-             transactionSave
+             inpKeys <- insertMany $ map (WarmUpInput key . view inputValuePeriod) inputVals
+             insertMany_ $ zipWith (\k v -> WarmUpInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
+             measureKeys <- insertMany $ map (WarmUpMeasure key . view measurePeriod) measures
+             insertMany_ $ concat $ zipWith (\k (Measure _ xs) -> map (\(StepResult n mX y) -> WarmUpResultStep k n mX y) xs) measureKeys measures
              return $ results .~ (countResults', AvailableOnDemand (loadReplicationWarmUpMeasures key)) $ inputValues .~
                (countInputValues', AvailableOnDemand (fromMaybe [] <$> loadReplicationWarmUpInput key)) $
                resData
            ResultDataRep key -> do
-             inpKeys <- mapM (insert . RepInput key . view inputValuePeriod) inputVals
-             transactionSave
-             zipWithM_ (\k v -> insert $ RepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
-             transactionSave
-             measureKeys <- mapM (insert . RepMeasure key . view measurePeriod) measures
-             transactionSave
-             zipWithM_ (\k (Measure _ xs) -> mapM (\(StepResult n mX y) -> insert $ RepResultStep k n mX y) xs) measureKeys measures
-             transactionSave
+             inpKeys <- insertMany $ map (RepInput key . view inputValuePeriod) inputVals
+             insertMany_ $ zipWith (\k v -> RepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
+             measureKeys <- insertMany $ map (RepMeasure key . view measurePeriod) measures
+             insertMany_ $ concat $ zipWith (\k (Measure _ xs) -> map (\(StepResult n mX y) -> RepResultStep k n mX y) xs) measureKeys measures
              return $ results .~ (countResults', AvailableOnDemand (loadReplicationMeasures key)) $ inputValues .~
                (countInputValues', AvailableOnDemand (fromMaybe [] <$> loadReplicationInput key)) $
                resData
@@ -740,15 +731,11 @@ runResultData expId len repResType resData = do
         , PrepResultDataStartInputState =. runPut (put sInpSt)
         , PrepResultDataEndInputState =. runPut . put <$> eInpSt
         ]
-      transactionSave
       when (curLen == 0) $ do
         serSt <- mkTransientlyAvailable sSt >>= lift . lift . serialisable
-        update k [PrepResultDataStartState =. runPut (put serSt)]
-        transactionSave
+        setResDataStartState (StartStatePrep k) (runPut $ put serSt)
       serESt <- mkTransientlyAvailable eSt >>= lift . lift . traverse serialisable
-      update k [PrepResultDataEndState =. runPut . put <$> serESt]
-      transactionSave
-      -- replace k (PrepResultData sTime eTime sGBS eGBS (runPut . put $ serSt) (runPut . put <$> serESt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
+      setResDataEndState (EndStatePrep k) (runPut . put <$> serESt)
     upd (WarmUp repResId) (ResultData (ResultDataWarmUp k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do
       sGBS <- liftIO $ fromRandGen sG
       eGBS <- liftIO $ maybe (return Nothing) (fmap Just . fromRandGen) eG
@@ -761,15 +748,11 @@ runResultData expId len repResType resData = do
         , WarmUpResultDataStartInputState =. runPut (put sInpSt)
         , WarmUpResultDataEndInputState =. runPut . put <$> eInpSt
         ]
-      transactionSave
       when (curLen == 0) $ do
         serSt <- mkTransientlyAvailable sSt >>= lift . lift . serialisable
-        update k [WarmUpResultDataStartState =. runPut (put serSt)]
-        transactionSave
+        setResDataStartState (StartStateWarmUp k)  (runPut $ put serSt)
       serESt <- mkTransientlyAvailable eSt >>= lift . lift . traverse serialisable
-      update k [WarmUpResultDataEndState =. runPut . put <$> serESt]
-      transactionSave
-      -- replace k (WarmUpResultData sTime eTime sGBS eGBS (runPut . put $ serSt) (runPut . put <$> serESt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
+      setResDataEndState (EndStateWarmUp k) (runPut . put <$> serESt)
     upd (Rep repResId) (ResultData (ResultDataRep k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do
       sGBS <- liftIO $ fromRandGen sG
       eGBS <- liftIO $ maybe (return Nothing) (fmap Just . fromRandGen) eG
@@ -782,15 +765,11 @@ runResultData expId len repResType resData = do
         , RepResultDataStartInputState =. runPut (put sInpSt)
         , RepResultDataEndInputState =. runPut . put <$> eInpSt
         ]
-      transactionSave
       when (curLen == 0) $ do
         serSt <- mkTransientlyAvailable sSt >>= lift . lift . serialisable
-        update k [RepResultDataStartState =. runPut (put serSt)]
-        transactionSave
+        setResDataStartState (StartStateRep k) (runPut $ put serSt)
       serESt <- mkTransientlyAvailable eSt >>= lift . lift . traverse serialisable
-      update k [RepResultDataEndState =. runPut . put <$> serESt]
-      transactionSave
-      -- replace k (RepResultData sTime eTime sGBS eGBS (runPut . put $ serSt) (runPut . put <$> serESt) (runPut . put $ sInpSt) (runPut . put <$> eInpSt))
+      setResDataEndState (EndStateRep k) (runPut . put <$> serESt)
     upd _ _ = error "Unexpected update combination. This is a bug, please report it!"
 
 
