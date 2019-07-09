@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns         #-}
 {-# LANGUAGE FlexibleContexts     #-}
 {-# LANGUAGE FlexibleInstances    #-}
 {-# LANGUAGE GADTs                #-}
@@ -51,7 +52,6 @@ import           Database.Persist.Sql         (fromSqlKey)
 import           Network.HostName             (HostName, getHostName)
 import           System.IO
 import           System.Posix.Process
-import           System.Posix.Signals
 import           System.Random.MWC
 
 
@@ -73,7 +73,7 @@ import           Debug.Trace
 type Updated = Bool
 type InitialState a = a
 type InitialInputState a = InputState a
-type DropPreparation = Bool
+type SkipPreparation = Bool
 type Rands = ([Seed],[Seed],[Seed]) -- ^ Preparation, Warm Up and Evaluation random generators
 
 data Mode = Master | Slave
@@ -81,12 +81,12 @@ data Mode = Master | Slave
 
 
 execExperiments :: (ExperimentDef a) => (ExpM a (Bool, Experiments a) -> IO (Bool, Experiments a)) -> DatabaseSetup -> ExperimentSetup -> InputState a -> a -> IO (Experiments a)
-execExperiments runExpM dbSetup setup initInpSt initSt = snd <$> runExperiments runExpM dbSetup setup initInpSt initSt
+execExperiments runExpM dbSetup setup initInpSt initSt = force . snd <$> runExperiments runExpM dbSetup setup initInpSt initSt
 
 -- | Run an experiment with non-monadic initial state. In case the initial state requires monadic effect (e.g. building
 -- a Tensorflow model), use `runExperimentsM`!
 runExperiments :: (ExperimentDef a) => (ExpM a (Bool, Experiments a) -> IO (Bool, Experiments a)) -> DatabaseSetup -> ExperimentSetup -> InputState a -> a -> IO (Bool, Experiments a)
-runExperiments runExpM dbSetup setup initInpSt initSt = runner runExpM dbSetup setup initInpSt (return initSt)
+runExperiments runExpM dbSetup setup initInpSt initSt = force <$> runner runExpM dbSetup setup initInpSt (return initSt)
 
 runExperimentsM :: (ExperimentDef a) => (ExpM a (Bool, Experiments a) -> IO (Bool, Experiments a)) -> DatabaseSetup -> ExperimentSetup -> InputState a -> ExpM a a -> IO (Bool, Experiments a)
 runExperimentsM = runner
@@ -95,14 +95,15 @@ runExperimentsIO :: (ExperimentDef a, IO ~ ExpM a) => DatabaseSetup -> Experimen
 runExperimentsIO dbSetup setup initInpSt initSt = runner id dbSetup setup initInpSt (return initSt)
 
 runner :: (ExperimentDef a) => (ExpM a (Bool, Experiments a) -> IO (Bool, Experiments a)) -> DatabaseSetup -> ExperimentSetup -> InputState a -> ExpM a a -> IO (Bool, Experiments a)
-runner runExpM dbSetup setup initInpSt mkInitSt = do
-  runStdoutLoggingT $ withPostgresqlPool (connectionString dbSetup) (parallelConnections dbSetup) $ liftSqlPersistMPool $ runMigration migrateAll
-  runExpM $
-    (runStdoutLoggingT . filterLogger (\s _ -> s /= "SQL")) $
-    withPostgresqlConn (connectionString dbSetup) $ \backend ->
-      flip runSqlConn backend $ do
-        initSt <- lift (lift mkInitSt)
-        loadExperiments setup initInpSt initSt >>= checkUniqueParamNames >>= runExperimenter dbSetup setup initInpSt initSt
+runner runExpM dbSetup setup initInpSt mkInitSt =
+  fmap force $ do
+    runStdoutLoggingT $ withPostgresqlPool (connectionString dbSetup) (parallelConnections dbSetup) $ liftSqlPersistMPool $ runMigration migrateAll
+    runExpM $
+      (runStdoutLoggingT . filterLogger (\s _ -> s /= "SQL")) $
+      withPostgresqlConn (connectionString dbSetup) $ \backend ->
+        flip runSqlConn backend $ do
+          initSt <- lift (lift mkInitSt)
+          loadExperiments setup initInpSt initSt >>= checkUniqueParamNames >>= runExperimenter dbSetup setup initInpSt initSt
 
 checkUniqueParamNames :: (Monad m) => Experiments a -> m (Experiments a)
 checkUniqueParamNames exps = do
@@ -132,15 +133,8 @@ runExperimenter dbSetup setup initInpSt initSt exps = do
           return (fst res, exps')
         else delete masterId >> restartExperimenter -- slave died
     Nothing -> do
-      mMaster <- getBy $ UniqueExpsMaster (exps ^. experimentsKey)
-      case mMaster of
-        Nothing -> restartExperimenter
-        Just (Entity masterId master) ->
-          if diffUTCTime time (master ^. expsMasterLastAliveSign) > 2 * keepAliveTimeout
-            then delete masterId >> restartExperimenter
-            else do
-              $(logInfo) "Running in SLAVE mode!"
-              runExperiment dbSetup Slave exps
+      $(logInfo) "Running in SLAVE mode!"
+      runExperiment dbSetup Slave exps
   where
     restartExperimenter = loadExperiments setup initInpSt initSt >>= runExperimenter dbSetup setup initInpSt initSt
 
@@ -352,13 +346,13 @@ continueExperiment dbSetup rands exps exp = do
       liftIO (writeIORef ref Working)
       exps' <- loadParameters exps exp -- loads parameters into the init state
       $(logInfo) "Checking if new experiments can be created"
-      expResList <- getExpRes exps' (exp ^. experimentResults) >>= truncateExperiments repetits
+      !expResList <- force <$> (getExpRes exps' (exp ^. experimentResults) >>= truncateExperiments repetits)
       $(logInfo) $ "Number of experiment results loaded: " <> tshow (length expResList)
-      let dropPrep = any (^. parameterSettingDropPrepeationPhase) (exp ^. parameterSetup)
-      expRes <- mapM (runExperimentResult dropPrep rands exps' expId expNr) expResList
+      let skipPrep = any (^. parameterSettingSkipPreparationPhase) (exp ^. parameterSetup)
+      expRes <- force <$> mapM (runExperimentResult skipPrep rands exps' expId expNr) expResList
       let updated = any fst expRes
           res = map snd expRes
-      liftIO (writeIORef ref Finished)
+      expRes `seq` liftIO (writeIORef ref Finished)
       if updated
         then do
           eTime <- return <$> liftIO getCurrentTime
@@ -419,22 +413,24 @@ newResultData seed repResType st inpSt = do
 
 runExperimentResult ::
      (ExperimentDef a)
-  => DropPreparation
+  => SkipPreparation
   -> Rands
   -> Experiments a
   -> Key Exp
   -> ExperimentNumber
   -> ExperimentResult a
   -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, ExperimentResult a)
-runExperimentResult dropPrep rands@(prepRands, _, _) exps expId expNr expRes = do
+runExperimentResult skipPrep rands@(prepRands, _, _) exps expId expNr expRes = do
   let repetNr = expRes ^. repetitionNumber
   let prepSeed = prepRands !! (repetNr - 1)
+  (prepInitSt, delPrep) <-
+    maybe (return (expInitSt, False)) (fmap (maybe (expInitSt, True) (, False)) . mkTransientlyAvailable) (expRes ^? preparationResults . traversed . endState)
   (prepUpdated, prepRes) <-
-    if dropPrep
+    if skipPrep
       then do
-        $(logInfo) "Skipping preparation phase as provided by the parameter setting (dropPreparationPhase)."
+        $(logInfo) "Skipping preparation phase as provided by the parameter setting (skipPreparationPhase)."
         return (False, Nothing)
-      else runPreparation prepSeed exps expId expResId (expNr, repetNr) (expRes ^. preparationResults)
+      else runPreparation prepSeed exps expId expResId (expNr, repetNr) delPrep prepInitSt (expRes ^. preparationResults)
   repsDone <-
     if prepUpdated
       then do
@@ -442,8 +438,8 @@ runExperimentResult dropPrep rands@(prepRands, _, _) exps expId expNr expRes = d
         return []
       else return (expRes ^. evaluationResults)
   transactionSave
-  mEndSt <- maybe (return Nothing) (mkTransientlyAvailable . view endState)  prepRes
-  let initSt = fromMaybe (exps ^. experimentsInitialState) mEndSt
+  mEndSt <- maybe (return Nothing) (mkTransientlyAvailable . view endState) prepRes
+  let initSt = fromMaybe expInitSt mEndSt
   let initInpSt = fromMaybe (exps ^. experimentsInitialInputState) (view endInputState =<< prepRes)
   let runRepl e repRess = do
         res <- runReplicationResult rands e expId (expNr, repetNr) initSt initInpSt repRess
@@ -454,6 +450,7 @@ runExperimentResult dropPrep rands@(prepRands, _, _) exps expId expNr expRes = d
       res = map snd repRes
   return (prepUpdated || updated, set preparationResults prepRes $ set evaluationResults res expRes)
   where
+    expInitSt = exps ^. experimentsInitialState
     expResId = expRes ^. experimentResultKey
     getRepRes :: (MonadLogger m, MonadIO m) => Experiments a -> [ReplicationResult a] -> ReaderT SqlBackend m [ReplicationResult a]
     getRepRes exps repsDone = do
@@ -474,11 +471,13 @@ runPreparation ::
   -> Key Exp
   -> Key ExpResult
   -> (ExperimentNumber, RepetitionNumber)
+  -> Bool
+  -> a
   -> Maybe (ResultData a)
   -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, Maybe (ResultData a))
-runPreparation seed exps expId expResId (expNr, repetNr) mResData = do
+runPreparation seed exps expId expResId (expNr, repetNr) prepDelNeeded prepInitSt mResData = do
   g <- liftIO $ restore seed
-  initSt <- lift $ lift $ beforePreparationHook expNr repetNr g (exps ^. experimentsInitialState)
+  initSt <- lift $ lift $ beforePreparationHook expNr repetNr g prepInitSt
   let len = maybe 0 (view (results . _1)) mResData
   mResData' <-
     if delNeeded len
@@ -494,7 +493,7 @@ runPreparation seed exps expId expResId (expNr, repetNr) mResData = do
       return res
     else return (delNeeded len || runNeeded len, mResData')
   where
-    delNeeded len = maybe False (\_ -> prepSteps < len) mResData
+    delNeeded len = prepDelNeeded || maybe False (\_ -> prepSteps < len) mResData
     runNeeded len = maybe (prepSteps > 0) (\_ -> prepSteps > len || (delNeeded len && prepSteps > 0)) mResData
     prepSteps = exps ^. experimentsSetup . expsSetupPreparationSteps
     initInpSt = exps ^. experimentsInitialInputState
@@ -563,8 +562,8 @@ runWarmUp seed exps expId repResId (expNr, repetNr, repliNr) initSt initInpSt mR
       when (delNeeded len) $ $(logInfo) "Deleted warm up data."
       return (delNeeded len, mResData')
   where
-    delNeeded len = maybe False (\r -> wmUpSteps < len) mResData
-    runNeeded len = maybe (wmUpSteps > 0) (\r -> wmUpSteps > len || (delNeeded len && wmUpSteps > 0)) mResData
+    delNeeded len = maybe False (\_ -> wmUpSteps < len) mResData || maybe False ((>0) . lengthAvailabilityList) (mResData ^? traversed.results)
+    runNeeded len = maybe (wmUpSteps > 0) (\_ -> wmUpSteps > len || (delNeeded len && wmUpSteps > 0)) mResData
     wmUpSteps = exps ^. experimentsSetup . expsSetupEvaluationWarmUpSteps
     new initStWmUp = newResultData seed (WarmUp repResId) initStWmUp initInpSt
     run len rD = ((delNeeded len ||) *** Just) <$> runResultData expId wmUpSteps (WarmUp repResId) rD
@@ -603,7 +602,7 @@ runEval seed exps expId warmUpUpdated repResId (expNr, repetNr, repliNr) initSt 
       $(logInfo) $ "No evaluation run needed for replication with ID " <> tshow (unSqlBackendKey $ unRepResultKey repResId) <> ". All needed data comes from the DB!"
       return (delNeeded len, mResData')
   where
-    delNeeded len = warmUpUpdated || maybe False (\_ -> evalSteps < len) mResData
+    delNeeded len = warmUpUpdated || maybe False (\_ -> evalSteps < len) mResData || maybe False ((>0) . lengthAvailabilityList) (mResData ^? traversed.results)
     runNeeded len = maybe (evalSteps > 0) (\_ -> evalSteps > len) mResData
     evalSteps = exps ^. experimentsSetup . expsSetupEvaluationSteps
     new initStEval = newResultData seed (Rep repResId) initStEval initInpSt
@@ -633,20 +632,22 @@ deleteResultData repResType = do
       repRes <- get repResId
       sequence_ $ deleteCascade <$> (view repResultRepResultData =<< repRes)
 
+foldM' :: (Monad m) => (a -> b -> m a) -> a -> [b] -> m a
+foldM' _ acc [] = return acc
+foldM' f acc (x:xs) = do
+  !acc' <- f acc x
+  acc' `seq` foldM' f acc' xs
 
 runResultData :: (ExperimentDef a) => Key Exp -> Int -> RepResultType -> ResultData a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, ResultData a)
 runResultData expId len repResType resData = do
   startStAvail <- mkAvailable (resData ^. startState)
-  st <-
-    do mEndSt <- mkTransientlyAvailable (resData ^. endState)
-       startSt <- mkTransientlyAvailable startStAvail
-       return $ fromMaybe startSt mEndSt
+  st <- mkTransientlyAvailable (resData ^. endState) >>= maybe (mkTransientlyAvailable startStAvail) return
   let stInp = fromMaybe (resData ^. startInputState) (resData ^. endInputState)
   let g = fromMaybe (resData ^. startRandGen) (resData ^. endRandGen)
   $(logInfo) $ "Number of steps already run is " <> tshow curLen <> ", thus still need to run " <> tshow (len - curLen) <> " steps."
   let updated = not (null periodsToRun)
   sTime <- liftIO getCurrentTime
-  (g', force -> st', force -> stInp', inputs, force -> measures) <- foldM run (g, st, stInp, [], []) periodsToRun
+  (g', force -> st', force -> stInp', inputs, force -> measures) <- foldM' run (g, st, stInp, [], []) periodsToRun
   if updated
     then do
       eTime <- pure <$> liftIO getCurrentTime

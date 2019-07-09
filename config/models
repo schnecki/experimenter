@@ -47,7 +47,7 @@ ParamSetting
     exp ExpId
     name Text
     value ByteString
-    dropPreparationPhase Bool
+    skipPreparationPhase Bool
     experimentDesign Int
 
 

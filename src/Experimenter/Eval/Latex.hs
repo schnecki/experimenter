@@ -277,7 +277,7 @@ paramSettingTable evals (ExperimentEval nr _ exp)
   | otherwise = Just $ Table (Row ["Parameter", "Value"]) (concatMap mkRow (exp ^. parameterSetup))
   where
     dropRow :: Row
-    dropRow = Row [CellT "Drop Preparation Phase", CellT "True (No preparation phase was executed!)"]
+    dropRow = Row [CellT "Skip Preparation Phase", CellT "True (No preparation phase was executed!)"]
     singleInstanceRow :: Text -> Row
     singleInstanceRow n = Row [CellT "Run a single instance", CellT $ "True (No further variations needed as specified by parameter " <> n <> "!)"]
     mkRow :: ParameterSetting a -> [Row]
@@ -288,7 +288,7 @@ paramSettingTable evals (ExperimentEval nr _ exp)
             [ CellT n
             , CellT $ "was not modified as it is not listed in the parameter setting" <>
               (if drp
-                 then " [DropPrepPhase]"
+                 then " [SkipPrepPhase]"
                  else "") <>
               (case design of
                  FullFactory    -> ""
@@ -308,7 +308,7 @@ paramSettingTable evals (ExperimentEval nr _ exp)
                          Nothing -> ""
                          Just (minVal, maxVal) -> math (text " " `in_` autoParens (text (raw (tshow minVal)) <> ", " <> text (raw (tshow maxVal))))) <>
                       (if drp
-                         then " [DropPrepPhase]"
+                         then " [SkipPrepPhase]"
                          else mempty) <>
                       (case design of
                          FullFactory    -> ""

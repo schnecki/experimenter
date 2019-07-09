@@ -85,7 +85,7 @@ setup = ExperimentSetup
 
 main :: IO ()
 main = do
-  let databaseSetup = DatabaseSetup "host=localhost dbname=experimenter user=schnecki password= port=5432" 10
+  let databaseSetup = DatabaseSetup "host=localhost dbname=experimenter2 user=experimenter password= port=5432" 10
   (changed, res) <- runExperiments id databaseSetup setup () (Dice (Just 0.2))
   putStrLn $ "Any change: " ++ show changed
   let evals = [ Mean OverExperimentRepetitions (Of "draw"), StdDev OverExperimentRepetitions (Of "draw")

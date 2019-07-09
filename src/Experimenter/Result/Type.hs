@@ -46,6 +46,9 @@ instance NFData b => NFData (Availability a b) where
 
 type AvailabilityList a b = (Int, Availability a [b]) -- ^ Demand availability of a list with the length fetched.
 
+lengthAvailabilityList :: AvailabilityList a b -> Int
+lengthAvailabilityList (nr, _) = nr
+
 mkAvailableList :: (Foldable t, ExperimentDef a) => (Int, Availability a (t b)) -> ReaderT SqlBackend (LoggingT (ExpM a)) (Int, Availability a (t b))
 mkAvailableList (nr, Available xs)         = return (nr, Available xs)
 mkAvailableList (_, AvailableOnDemand query) = (\xs -> (length xs, Available xs)) <$> query

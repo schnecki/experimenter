@@ -63,9 +63,9 @@ setup :: ExperimentSetup
 setup = ExperimentSetup
   { _experimentBaseName         = "dice param"
   , _experimentRepetitions      =  2
-  , _preparationSteps           =  100
-  , _evaluationWarmUpSteps      =  10
-  , _evaluationSteps            =  14
+  , _preparationSteps           =  100000
+  , _evaluationWarmUpSteps      =  10000
+  , _evaluationSteps            =  14000
   , _evaluationReplications     =  1
   , _maximumParallelEvaluations =  1
   }
@@ -73,7 +73,7 @@ setup = ExperimentSetup
 
 main :: IO ()
 main = do
-  let databaseSetup = DatabaseSetup "host=localhost dbname=experimenter user=schnecki password= port=5432" 10
+  let databaseSetup = DatabaseSetup "host=localhost dbname=experimenter2 user=experimenter password= port=5432" 10
   g <- newStdGen
   (changed, res) <- runExperimentsIO databaseSetup setup () (Dice g (Just 0.2))
   putStrLn $ "Any change: " ++ show changed
@@ -86,4 +86,5 @@ main = do
               ]
   evalRes <- genEvalsIO databaseSetup res evals
   -- print (view evalsResults evalRes)
-  writeAndCompileLatex evalRes
+  -- writeAndCompileLatex evalRes
+  return ()

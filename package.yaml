@@ -77,6 +77,24 @@ executables:
       - experimenter
       - random
 
+  # dice-prof:
+  #   main:                Dice.hs
+  #   other-modules:       []
+  #   source-dirs:         examples
+  #   ghc-options:
+  #   - -threaded
+  #   - -O2
+  #   - -rtsopts
+  #   - -with-rtsopts=-N
+  #   - -auto-all
+  #   - -caf-all
+  #   - -fforce-recomp
+  #   - -prof
+  #   dependencies:
+  #     - experimenter
+  #     - random
+
+
   dice-stateless:
     main:                DiceStateless.hs
     other-modules:       []

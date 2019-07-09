@@ -28,7 +28,7 @@ data ParameterSetup a =
   , getParameter          :: a -> b                        -- ^ Get the parameter from the current state.
   , modifyParameter       :: Maybe (b -> IO [b])           -- ^ Either no modification or function.
   , bounds                :: Maybe (b, b)                  -- ^ Bounds (inclusive).
-  , dropPreparationPhase  :: Maybe (b -> Bool)             -- ^ Drop the preparation phase if True (e.g. to skip learning phase). Default: False.
+  , skipPreparationPhase  :: Maybe (b -> Bool)             -- ^ Skip the preparation phase if True (e.g. to skip learning phase). Default: False.
   , alterExperimentDesign :: Maybe (b -> ExperimentDesign) -- ^ Change the experiment design. Default: Full-Factory design.
   }
 -- makeLenses ''ParameterSetup  -- does not work with ExistentialQuantification
@@ -36,10 +36,10 @@ data ParameterSetup a =
 
 data ParameterSetting a =
   ParameterSetting
-  { _parameterSettingName                :: T.Text
-  , _parameterSettingValue               :: BS.ByteString
-  , _parameterSettingDropPrepeationPhase :: Bool
-  , _parameterSettingExperimentDesign    :: ExperimentDesign
+  { _parameterSettingName                 :: T.Text
+  , _parameterSettingValue                :: BS.ByteString
+  , _parameterSettingSkipPreparationPhase :: Bool
+  , _parameterSettingExperimentDesign     :: ExperimentDesign
   } deriving (Eq, Generic, NFData)
 makeLenses ''ParameterSetting
 
