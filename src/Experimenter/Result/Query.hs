@@ -102,11 +102,8 @@ deserialise n bs =
   let res = runGet S.get bs
    in case res of
         Left err -> do
-          $(logError) $ "Could not deserialise " <> n <> "! Discarding saved experiment result. Data length: " <> tshow (B.length bs) <> ". Error Message: " <> tshow err
-          liftIO $ hFlush stdout
-          liftIO $ hFlush stderr
-          liftIO exitFailure
-          -- return Nothing
+          -- $(logError) $ "Could not deserialise " <> n <> "! Discarding saved experiment result. Data length: " <> tshow (B.length bs) <> ". Error Message: " <> tshow err
+          return Nothing
         Right r -> return $ Just r
 
 
@@ -131,8 +128,8 @@ loadResDataEndState expId endState = do
     if null parts
       then return Nothing
       else do
-        ser <- fromMaybe (error "Could not deserialise preparation end state ") <$> deserialise (T.pack "end state") (B.concat parts)
-        lift $ lift $ fmap Just (deserialisable ser)
+        mSer <- deserialise (T.pack "end state") (B.concat parts)
+        lift $ lift $ maybe (return Nothing) (fmap Just . deserialisable) mSer
   traverse (setParams expId) res
 
 loadResDataStartState :: (ExperimentDef a) => Key Exp -> StartStateType -> ReaderT SqlBackend (LoggingT (ExpM a)) a
@@ -146,7 +143,7 @@ loadResDataStartState expId startState = do
     if null parts
       then error "Could not get start state"
       else do
-        ser <- fromMaybe (error "Could not deserialise preparation start state ") <$> deserialise "prep start state" (B.concat parts)
+        ser <- fromMaybe (error "Could not deserialise start state ") <$> deserialise "prep start state" (B.concat parts)
         lift $ lift $ deserialisable ser
   setParams expId res
 
