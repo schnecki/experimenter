@@ -679,7 +679,7 @@ runResultData expId len repResType resData = do
   where
     curLen = resData ^. results . _1
     isNew = curLen == 0
-    splitPeriods = 1000
+    splitPeriods = 5000
     periodsToRun = map (+ curLen) [1 .. min splitPeriods (len - curLen)]
     mkStartStateAvailableOnDemand =
       case resData ^. resultDataKey of
