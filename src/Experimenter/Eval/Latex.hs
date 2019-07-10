@@ -13,8 +13,8 @@ import           Control.Monad                (unless, void, zipWithM_)
 import           Control.Monad.Logger
 import           Data.Function                (on)
 import           Data.List                    as L (find, foldl', groupBy, sortBy)
+import           Data.Maybe                   (fromMaybe)
 import qualified Data.Serialize               as S
-
 import qualified Data.Text                    as T
 import           System.Directory
 import           System.Process
@@ -35,11 +35,12 @@ import           Experimenter.Util
 rootPath :: FilePath
 rootPath = "results"
 
-mainFile :: FilePath
-mainFile = "main.tex"
+mainFile :: Evals a -> FilePath
+mainFile evals = "main_" <> t <> ".tex"
+  where t = maybe "unfinished_experiment" show (evals ^. evalsExperiments.experimentsEndTime)
 
-mainFilePdf :: FilePath
-mainFilePdf = T.unpack (T.dropWhileEnd (/= '.') (T.pack mainFile)) <> "pdf"
+mainFilePdf :: Evals a -> FilePath
+mainFilePdf evals = T.unpack (T.dropWhileEnd (/= '.') (T.pack $ mainFile evals)) <> "pdf"
 
 writeAndCompileLatex :: Evals a -> IO ()
 writeAndCompileLatex evals = writeLatex evals >> compileLatex evals
@@ -51,18 +52,19 @@ compileLatex :: Evals a -> IO ()
 compileLatex evals = do
   let n = getExpsName evals
       dir = rootPath <> "/" <> n
-  void $ runProcess "pdflatex" [mainFile] (Just dir) Nothing Nothing Nothing Nothing >>= waitForProcess
+  void $ runProcess "pdflatex" [mainFile evals] (Just dir) Nothing Nothing Nothing Nothing >>= waitForProcess
   pwd <- getCurrentDirectory
-  putStrLn $ "\n\nSuccessfully compiled your results! See file://" <> pwd <> "/results/" <> n <> "/" <> mainFilePdf
+  putStrLn $ "\n\nSuccessfully compiled your results! See file://" <> pwd <> "/results/" <> n <> "/" <> mainFilePdf evals
 
 
 writeLatex :: Evals a -> IO ()
 writeLatex evals = do
   let n = getExpsName evals
       dir = rootPath <> "/" <> n
-      file = dir <> "/" <> mainFile
+      file = dir <> "/" <> mainFile evals
   createDirectoryIfMissing True dir
   runStdoutLoggingT (execLaTeXT (root evals)) >>= renderFile file
+
 
 root :: (MonadLogger m) => Evals a -> LaTeXT m ()
 root evals = do
