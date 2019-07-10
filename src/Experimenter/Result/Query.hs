@@ -3,6 +3,7 @@
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE Strict              #-}
 {-# LANGUAGE TemplateHaskell     #-}
 {-# LANGUAGE TypeFamilies        #-}
 module Experimenter.Result.Query
@@ -28,6 +29,7 @@ module Experimenter.Result.Query
     ) where
 
 
+import           Control.DeepSeq                      (force)
 import           Control.Lens                         (over, view)
 import           Control.Monad.Logger
 import           Control.Monad.Reader
@@ -120,6 +122,7 @@ loadResDataEndState ::
   -> ReaderT SqlBackend (LoggingT (ExpM a)) (Maybe a)
 loadResDataEndState expId endState = do
   parts <-
+    fmap force $
     case endState of
       EndStatePrep k -> fmap (view prepEndStatePartData . entityVal) <$> selectList [PrepEndStatePartResultData ==. k] [Asc PrepEndStatePartNumber]
       EndStateWarmUp k -> fmap (view warmUpEndStatePartData . entityVal) <$> selectList [WarmUpEndStatePartResultData ==. k] [Asc WarmUpEndStatePartNumber]
@@ -130,11 +133,12 @@ loadResDataEndState expId endState = do
       else do
         mSer <- deserialise (T.pack "end state") (B.concat parts)
         lift $ lift $ maybe (return Nothing) (fmap Just . deserialisable) mSer
-  traverse (setParams expId) res
+  force <$> traverse (setParams expId) res
 
 loadResDataStartState :: (ExperimentDef a) => Key Exp -> StartStateType -> ReaderT SqlBackend (LoggingT (ExpM a)) a
 loadResDataStartState expId startState = do
   parts <-
+    fmap force $
     case startState of
       StartStatePrep k -> fmap (view prepStartStatePartData . entityVal) <$> selectList [PrepStartStatePartResultData ==. k] [Asc PrepStartStatePartNumber]
       StartStateWarmUp k -> fmap (view warmUpStartStatePartData . entityVal) <$> selectList [WarmUpStartStatePartResultData ==. k] [Asc WarmUpStartStatePartNumber]
@@ -145,11 +149,12 @@ loadResDataStartState expId startState = do
       else do
         ser <- fromMaybe (error "Could not deserialise start state ") <$> deserialise "prep start state" (B.concat parts)
         lift $ lift $ deserialisable ser
-  setParams expId res
+  force <$> setParams expId res
 
 
 setResDataEndState :: (MonadIO m) => EndStateType -> Maybe ByteString -> ReaderT SqlBackend m ()
 setResDataEndState (EndStatePrep k) (Just bs) = do
+  liftIO $ B.writeFile "/tmp/EndState" bs
   let parts = splitState bs
   mapM_ (\(nr, part) -> upsert (PrepEndStatePart k nr part) [PrepEndStatePartData =. part]) (zip [0..] parts)
   deleteWhere [PrepEndStatePartResultData ==. k, PrepEndStatePartNumber >=. length parts]
@@ -461,7 +466,7 @@ getOrCreateExps setup initInpSt initSt = do
       expsList
   params <- mapM (\e -> selectList [ParamExps ==. entityKey e] [Asc ParamName]) exps
   let mkParamTpl (Param _ n minB maxB) = (n, minB, maxB)
-  let myParams = L.sortBy (compare `on` (\(x, _, _) -> x)) $ map (mkParamTpl . convertParameterSetup (entityKey (head exps))) (parameters initSt)
+  let ~myParams = L.sortBy (compare `on` (\(x, _, _) -> x)) $ map (mkParamTpl . convertParameterSetup (entityKey (head exps))) (parameters initSt)
   case L.find ((== myParams) . map (mkParamTpl . entityVal) . snd) (zip exps params) of
     Nothing -> do
       $(logInfo) "Starting new experiment..."
