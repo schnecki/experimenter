@@ -8,6 +8,7 @@
 {-# LANGUAGE TypeFamilies        #-}
 module Experimenter.Result.Query
     ( loadExperiments
+    , loadExperimentResults
     , loadPrepartionMeasures
     , loadPreparationInput
     , loadReplicationWarmUpMeasures

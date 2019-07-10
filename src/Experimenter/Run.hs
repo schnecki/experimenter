@@ -340,7 +340,7 @@ loadParameters exps exp = foldM setParam exps (exp ^. parameterSetup)
 
 
 continueExperiment :: (ExperimentDef a) => DatabaseSetting -> Rands -> Experiments a -> Experiment a  -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, Experiment a)
-continueExperiment dbSetup rands exps exp = do
+continueExperiment dbSetup rands exps expIn = do
   pid <- liftIO getProcessID
   hostName <- liftIO getHostName
   time <- liftIO getCurrentTime
@@ -350,9 +350,11 @@ continueExperiment dbSetup rands exps exp = do
   case maybeLocked of
     Nothing -> do
       $(logInfo) $ "Skipping experiment with ID " <> tshow (fromSqlKey expId) <> " as it is currently locked by another worker."
-      return (False, exp)
+      return (False, expIn)
     Just lock -> do
-      printParamSetup
+      expResults <- loadExperimentResults expId -- update data
+      let exp = set experimentResults expResults expIn
+      printParamSetup exp
       $(logInfo) $ "Processing experiment with ID " <> tshow (fromSqlKey expId) <> "."
       ref <- liftIO $ createKeepAliveFork dbSetup (\t -> update lock [ExpExecutionLockLastAliveSign =. t]) (delete lock)
       liftIO (writeIORef ref Working)
@@ -372,16 +374,16 @@ continueExperiment dbSetup rands exps exp = do
           return (updated, set experimentResults res $ set experimentEndTime eTime exp)
         else return (updated, set experimentResults res exp)
   where
-    printParamSetup = do
+    printParamSetup exp = do
       $(logInfo) "------------------------------"
       $(logInfo) "--  LOADED PARAMETER SETUP  --"
       $(logInfo) "------------------------------"
-      if null (view parameterSetup exp)
+      if null (view parameterSetup expIn)
         then $(logDebug) "No info parameters set."
         else mapM_ (printParamSetting exps) (view parameterSetup exp)
       $(logInfo) "------------------------------"
-    expNr = exp ^. experimentNumber
-    expId = exp ^. experimentKey
+    expNr = expIn ^. experimentNumber
+    expId = expIn ^. experimentKey
     repetits = exps ^. experimentsSetup . expsSetupRepetitions
     getExpRes :: (MonadIO m) => Experiments a -> [ExperimentResult a] -> ReaderT SqlBackend m [ExperimentResult a]
     getExpRes exps expResDone =
@@ -389,8 +391,7 @@ continueExperiment dbSetup rands exps exp = do
       forM
         [length expResDone + 1 .. repetits]
         (\nr -> do
-           startTime <- liftIO getCurrentTime
-           kExpRes <- insert $ ExpResult (exp ^. experimentKey) nr Nothing
+           kExpRes <- insert $ ExpResult expId nr Nothing
            return $ ExperimentResult kExpRes nr Nothing [])
     truncateExperiments nr xs = do
       let dels = drop nr xs
