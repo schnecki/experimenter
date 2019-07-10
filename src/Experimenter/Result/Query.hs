@@ -488,10 +488,13 @@ getOrCreateExps setup initInpSt initSt = do
       serInitSt <- lift $ lift $ serialisable initSt
       eExp <- insertEntity $ Exps name time Nothing (runPut $ put serInitSt) (runPut $ put initInpSt)
       void $ insert $ mkExpSetup eExp
+      mapM_ (insertInfoParam (entityKey eExp)) infoParams
       mapM_ (insertParam (entityKey eExp)) (parameters initSt)
       return eExp
     Just (eExp, _) -> do
       $(logInfo) "Found experiment with same name and parameter settings. Continuing experiment ..."
+      expInfoParams <- map entityVal <$> selectList [ExpsInfoParamExps ==. entityKey eExp] []
+      mapM_ (insertInfoParam (entityKey eExp)) (filter ((`notElem` map (view expsInfoParamName) expInfoParams) . infoParameterName) infoParams)
       putMany [mkExpSetup eExp]
       return eExp
   where
@@ -504,6 +507,7 @@ getOrCreateExps setup initInpSt initSt = do
         (max 0 $ view evaluationSteps setup)
         (max 1 $ view evaluationReplications setup)
         (max 1 $ view maximumParallelEvaluations setup)
+    insertInfoParam k (ExperimentInfoParameter n v) = insert $ ExpsInfoParam k n (S.runPut $ S.put v)
     insertParam :: Key Exps -> ParameterSetup a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Key Param)
     insertParam eExp (ParameterSetup n _ _ _ (Just (minVal, maxVal)) drp _) = insert $ Param eExp n (Just $ runPut $ put minVal) (Just $ runPut $ put maxVal)
     insertParam eExp (ParameterSetup n _ _ _ Nothing _ _) = insert $ Param eExp n Nothing Nothing
