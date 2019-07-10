@@ -9,6 +9,7 @@ ExpsInfoParam
     exps ExpsId
     name Text
     value ByteString
+    UniqueExpsInfoParam exps name
 
 ExpsMaster
     exps ExpsId
