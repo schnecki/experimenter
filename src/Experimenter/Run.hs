@@ -157,6 +157,9 @@ continueExperiments dbSetup mode exp = do
       $(logInfo) "No experiments found and running in slave mode. Check whether the master has initialised the experiment yet!"
       return (False, exp)
     else do
+      unless (null $ view experimentsInfoParameters exp) $ do
+        $(logInfo) "Info parameter setup:"
+        mapM_ printInfoParamSetup (view experimentsInfoParameters exp)
       rands <- liftIO $ mkRands exps
       newExps <-
         if mode == Slave
@@ -175,6 +178,7 @@ continueExperiments dbSetup mode exp = do
           return (updated, set experiments res $ set experimentsEndTime endTime exp)
         else return (updated, set experiments res exp)
   where
+    printInfoParamSetup (ExperimentInfoParameter p v) = $(logInfo) $ p <> ": " <> tshow v
     mkRands :: [Experiment a] -> IO Rands
     mkRands [] = do
       prep <- replicateM repetits (createSystemRandom >>= save)

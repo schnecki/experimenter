@@ -15,7 +15,7 @@ import           GHC.Generics
 -- ^ ExperimentInfoParameters can be used to separate experiments from each other. These parameters will be shown in the
 -- evaluation output. E.g. testing different feature extraction settings.
 data ExperimentInfoParameter =
-  forall b. (Show b, Ord b, Serialize b) =>
+  forall b. (Show b, Eq b, Serialize b) =>
             ExperimentInfoParameter
               { infoParameterName :: T.Text
               , infoParameter     :: b
@@ -30,7 +30,8 @@ type MkExperimentSetting a = a -> ExperimentSetting
 
 data ExperimentSetting = ExperimentSetting
   { _experimentBaseName         :: T.Text                    -- ^ Base name of experiment.
-  , _experimentInfoParameters   :: [ExperimentInfoParameter] -- ^ List of Parameters defining the experiment.
+  , _experimentInfoParameters   :: [ExperimentInfoParameter] -- ^ List of Parameters defining the experiment. Adding
+                                                             -- more information does not effect equality.
   , _experimentRepetitions      :: Int                       -- ^ Repetitions of each experiment (>=1).
   , _preparationSteps           :: Int                       -- ^ Preparation phase length (e.g. learning phase) (>=0).
   , _evaluationWarmUpSteps      :: Int -- ^ Warm up phase length before each evaluation of each experiment (>=0).

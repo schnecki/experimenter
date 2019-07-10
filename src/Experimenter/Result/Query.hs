@@ -467,8 +467,8 @@ getOrCreateExps :: forall a . (ExperimentDef a) => ExperimentSetting -> InputSta
 getOrCreateExps setup initInpSt initSt = do
   let name = view experimentBaseName setup
   expsList <- selectList [ExpsName ==. name] []
-  expsInfoParams <- map entityVal <$> selectList [ExpsInfoParamExps <-. map entityKey expsList] []
-  let expsList' = map fst $ filter matchesExpsInfoParam (zip expsList expsInfoParams)
+  expsInfoParams <- map (map entityVal) <$> mapM (\(Entity e _) -> selectList [ExpsInfoParamExps ==. e] []) expsList
+  let expsList' = map fst $ filter ((\xs -> length infoParams >= length xs && all matchesExpsInfoParam xs) . snd) (zip expsList expsInfoParams)
   exps <-
     filterM
       (\(Entity _ (Exps _ _ _ s iS)) -> do
@@ -504,8 +504,9 @@ getOrCreateExps setup initInpSt initSt = do
         (max 1 $ view maximumParallelEvaluations setup)
     insertParam :: Key Exps -> ParameterSetup a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Key Param)
     insertParam eExp (ParameterSetup n _ _ _ (Just (minVal, maxVal)) drp _) = insert $ Param eExp n (Just $ runPut $ put minVal) (Just $ runPut $ put maxVal)
-    insertParam eExp (ParameterSetup n _ _ _ Nothing drp _) = insert $ Param eExp n Nothing Nothing
-    matchesExpsInfoParam (_, ExpsInfoParam _ n bs) =
-      case L.find ((== n) . infoParameterName) (view experimentInfoParameters setup) of
+    insertParam eExp (ParameterSetup n _ _ _ Nothing _ _) = insert $ Param eExp n Nothing Nothing
+    infoParams = view experimentInfoParameters setup
+    matchesExpsInfoParam (ExpsInfoParam _ n bs) =
+      case L.find ((== n) . infoParameterName) infoParams of
         Nothing                            -> False
-        Just (ExperimentInfoParameter _ p) -> S.runPut (S.put p) == bs
+        Just (ExperimentInfoParameter _ p) -> fromEither False ((p ==) <$> S.runGet S.get bs)
