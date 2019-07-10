@@ -198,9 +198,11 @@ setResDataStartState (StartStateRep k) bs = do
 
 
 splitState :: ByteString -> [ByteString]
-splitState bs | B.null bs = []
-              | otherwise = B.take splitLength bs : splitState (B.drop splitLength bs)
-  where splitLength = 16000000  -- 128MB as ByteString is composed of Word8 (8-bit unsigned integer) elements
+splitState bs
+  | B.null bs = []
+  | otherwise = B.take splitLength bs : splitState (B.drop splitLength bs)
+  where
+    splitLength = 128000000     -- 128MB as ByteString is composed of Word8 (8-bit unsigned integer = 1 byte) elements
 
 
 setParams :: (PersistUniqueRead backend, PersistQueryRead backend, BackendCompatible SqlBackend backend, ExperimentDef a) => Key Exp -> a -> ReaderT backend (LoggingT (ExpM a)) a

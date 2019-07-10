@@ -157,9 +157,7 @@ continueExperiments dbSetup mode exp = do
       $(logInfo) "No experiments found and running in slave mode. Check whether the master has initialised the experiment yet!"
       return (False, exp)
     else do
-      unless (null $ view experimentsInfoParameters exp) $ do
-        $(logInfo) "Info parameter setup:"
-        mapM_ printInfoParamSetup (view experimentsInfoParameters exp)
+      printInfoParamSetup
       rands <- liftIO $ mkRands exps
       newExps <-
         if mode == Slave
@@ -178,7 +176,15 @@ continueExperiments dbSetup mode exp = do
           return (updated, set experiments res $ set experimentsEndTime endTime exp)
         else return (updated, set experiments res exp)
   where
-    printInfoParamSetup (ExperimentInfoParameter p v) = $(logInfo) $ p <> ": " <> tshow v
+    printInfoParamSetup = do
+      $(logInfo) "------------------------------"
+      $(logInfo) "--   INFO PARAMETER SETUP   --"
+      $(logInfo) "------------------------------"
+      if null (view experimentsInfoParameters exp)
+        then $(logDebug) "No info parameters set."
+        else mapM_ printInfoParam (view experimentsInfoParameters exp)
+      $(logInfo) "------------------------------"
+    printInfoParam (ExperimentInfoParameter p v) = $(logInfo) $ p <> ": " <> tshow v
     mkRands :: [Experiment a] -> IO Rands
     mkRands [] = do
       prep <- replicateM repetits (createSystemRandom >>= save)
@@ -338,7 +344,7 @@ continueExperiment dbSetup rands exps exp = do
   pid <- liftIO getProcessID
   hostName <- liftIO getHostName
   time <- liftIO getCurrentTime
-  deleteWhere [ExpExecutionLockLastAliveSign <=. addUTCTime (-2*keepAliveTimeout) time]
+  deleteWhere [ExpExecutionLockLastAliveSign <=. addUTCTime (-2 * keepAliveTimeout) time]
   maybeLocked <- insertUnique $ ExpExecutionLock expId (T.pack hostName) (fromIntegral pid) time
   transactionSave
   case maybeLocked of
@@ -346,6 +352,7 @@ continueExperiment dbSetup rands exps exp = do
       $(logInfo) $ "Skipping experiment with ID " <> tshow (fromSqlKey expId) <> " as it is currently locked by another worker."
       return (False, exp)
     Just lock -> do
+      printParamSetup
       $(logInfo) $ "Processing experiment with ID " <> tshow (fromSqlKey expId) <> "."
       ref <- liftIO $ createKeepAliveFork dbSetup (\t -> update lock [ExpExecutionLockLastAliveSign =. t]) (delete lock)
       liftIO (writeIORef ref Working)
@@ -365,6 +372,14 @@ continueExperiment dbSetup rands exps exp = do
           return (updated, set experimentResults res $ set experimentEndTime eTime exp)
         else return (updated, set experimentResults res exp)
   where
+    printParamSetup = do
+      $(logInfo) "------------------------------"
+      $(logInfo) "--  LOADED PARAMETER SETUP  --"
+      $(logInfo) "------------------------------"
+      if null (view parameterSetup exp)
+        then $(logDebug) "No info parameters set."
+        else mapM_ (printParamSetting exps) (view parameterSetup exp)
+      $(logInfo) "------------------------------"
     expNr = exp ^. experimentNumber
     expId = exp ^. experimentKey
     repetits = exps ^. experimentsSetup . expsSetupRepetitions
@@ -383,6 +398,27 @@ continueExperiment dbSetup rands exps exp = do
       mapM_ deleteExperimentResult dels
       unless (null dels) transactionSave
       return $ take nr xs
+
+printParamSetting :: (ExperimentDef a) => Experiments a -> ParameterSetting a -> ReaderT SqlBackend (LoggingT (ExpM a)) ()
+printParamSetting exps (ParameterSetting n bs skipPrep expDes) =
+  case L.find ((== n) . parameterName) (exps ^. experimentsParameters) of
+    (Just (ParameterSetup _ setter _ _ _ _ _)) ->
+      case S.runGet S.get bs of
+        Left _ -> err
+        Right val -> do
+          let _ = setter val (exps ^. experimentsInitialState) -- only needed for type inference
+          $(logInfo) $
+            n <> ": " <> tshow val <>
+            if skipPrep
+              then " [SkipPreparation] "
+              else "" <>
+                   if expDes == SingleInstance
+                     then " [SingleInstance] "
+                     else ""
+    _ -> err
+  where
+    err = $(logInfo) $ n <> ": Could not deserialise value as this parameter does not exist anymore. Thus keeping it unchanged."
+
 
 data RepResultType
   = Prep (Key ExpResult)
