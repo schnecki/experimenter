@@ -240,7 +240,7 @@ mkNewExps exp expsDone = do
       startTime <- liftIO getCurrentTime
       let sortParamSettings = map (L.sortBy (compare `on` view parameterSettingName))
       existParamSettings <- sortParamSettings <$> existingParamSettings exp
-      $(logInfo) $ "Existing Parameter settings: " <> tshow (map (map showVal) $ map (\xs -> zip (L.sortBy (compare `on` parameterName) params) xs) existParamSettings)
+      -- $(logInfo) $ "Existing Parameter settings: " <> tshow (map (map showVal) $ map (\xs -> zip (L.sortBy (compare `on` parameterName) params) xs) existParamSettings)
       paramSettings <- mapM (mkParamModifications exp) params
       let paramCombs = combinations paramSettings
       let paramSingleInstances = map (filter ((== SingleInstance) . view parameterSettingExperimentDesign)) paramSettings
@@ -256,17 +256,17 @@ mkNewExps exp expsDone = do
       unless (null exps) $ $(logInfo) $ "Created " <> tshow (length exps) <> " new experiments variations!"
       transactionSave
       return exps
-  where
-    showVal (ps, x) = head $ showVals (ps, [x])
-    showVals (ParameterSetup _ setter getter _ _ _ _, xs) =
-      let fromRight (Right x)  = x
-          fromRight (Left err) = error err
-       in map snd $
-          map
-            (\x ->
-               let v = (fromRight $ S.runGet S.get $ view parameterSettingValue x)
-                in (getter $ setter v (exp ^. experimentsInitialState), tshow v))
-            xs
+  -- where
+  --   showVal (ps, x) = head $ showVals (ps, [x])
+  --   showVals (ParameterSetup _ setter getter _ _ _ _, xs) =
+  --     let fromRight (Right x)  = x
+  --         fromRight (Left err) = error err
+  --      in map snd $
+  --         map
+  --           (\x ->
+  --              let v = (fromRight $ S.runGet S.get $ view parameterSettingValue x)
+  --               in (getter $ setter v (exp ^. experimentsInitialState), tshow v))
+  --           xs
 
 
 combinations :: [[a]] -> [[a]]
