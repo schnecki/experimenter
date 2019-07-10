@@ -719,6 +719,7 @@ runResultData expId len repResType resData = do
       | pred = f
       | otherwise = id
     curLen = resData ^. results . _1
+    delInputs = resData ^. results . _1 - resData ^. inputValues . _1 > 0
     isNew = curLen == 0
     splitPeriods = 5000
     periodsToRun = map (+ curLen) [1 .. min splitPeriods (len - curLen)]
@@ -737,6 +738,7 @@ runResultData expId len repResType resData = do
           countInputValues' = resData ^. inputValues . _1 + length inputVals
        in case resData ^. resultDataKey of
             ResultDataPrep key -> do
+              when (delInputs) $ deleteCascadeWhere [PrepInputPrepResultData ==. key, PrepInputPeriod >=. curLen+1] 
               inpKeys <- insertMany $ map (PrepInput key . view inputValuePeriod) inputVals
               insertMany_ $ zipWith (\k v -> PrepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
               measureKeys <- insertMany $ map (PrepMeasure key . view measurePeriod) measures
@@ -745,6 +747,7 @@ runResultData expId len repResType resData = do
                 (countInputValues', AvailableOnDemand (fromMaybe [] <$> loadPreparationInput key)) $
                 resData
             ResultDataWarmUp key -> do
+              when (delInputs) $ deleteCascadeWhere [WarmUpInputRepResult ==. key, WarmUpInputPeriod >=. curLen+1] 
               inpKeys <- insertMany $ map (WarmUpInput key . view inputValuePeriod) inputVals
               insertMany_ $ zipWith (\k v -> WarmUpInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
               measureKeys <- insertMany $ map (WarmUpMeasure key . view measurePeriod) measures
@@ -753,6 +756,7 @@ runResultData expId len repResType resData = do
                 (countInputValues', AvailableOnDemand (fromMaybe [] <$> loadReplicationWarmUpInput key)) $
                 resData
             ResultDataRep key -> do
+              when (delInputs) $ deleteCascadeWhere [RepInputRepResult ==. key, RepInputPeriod >=. curLen+1] 
               inpKeys <- insertMany $ map (RepInput key . view inputValuePeriod) inputVals
               insertMany_ $ zipWith (\k v -> RepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
               measureKeys <- insertMany $ map (RepMeasure key . view measurePeriod) measures
