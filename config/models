@@ -5,6 +5,11 @@ Exps
     initialState ByteString
     initialInputState ByteString
 
+ExpsInfoParam
+    exps ExpsId
+    name Text
+    value ByteString
+
 ExpsMaster
     exps ExpsId
     hostname Text

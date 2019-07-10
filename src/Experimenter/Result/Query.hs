@@ -59,7 +59,7 @@ import           Experimenter.Measure
 import           Experimenter.Models
 import           Experimenter.Parameter
 import           Experimenter.Result.Type
-import           Experimenter.Setup
+import           Experimenter.Setting
 import           Experimenter.StepResult
 import           Experimenter.Util
 
@@ -79,13 +79,24 @@ data StartStateType
   | StartStateRep (Key RepResultData)
 
 
-loadExperiments :: (ExperimentDef a) => ExperimentSetup -> InputState a -> a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Experiments a)
+loadExperiments :: (ExperimentDef a) => ExperimentSetting -> InputState a -> a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Experiments a)
 loadExperiments setup initInpSt initSt = do
   eExp <- getOrCreateExps setup initInpSt initSt
   let e = entityVal eExp
   exps <- L.sortBy (compare `on` view experimentNumber) <$> loadExperimentList (entityKey eExp)
   eSetup <- fromMaybe (error "Setup not found. Your DB is corrupted!") <$> getBy (UniqueExpsSetup (entityKey eExp))
-  return $ Experiments (entityKey eExp) (view expsName e) (view expsStartTime e) (view expsEndTime e) (entityVal eSetup) (parameters initSt) initSt initInpSt exps
+  return $!
+    Experiments
+      (entityKey eExp)
+      (view expsName e)
+      (view expsStartTime e)
+      (view expsEndTime e)
+      (entityVal eSetup)
+      (parameters initSt)
+      (view experimentInfoParameters setup)
+      initSt
+      initInpSt
+      exps
 
 
 loadExperimentList :: (ExperimentDef a) => Key Exps -> ReaderT SqlBackend (LoggingT (ExpM a)) [Experiment a]
@@ -452,25 +463,26 @@ loadReplicationMeasures kExpRes = do
     combineMeasures xs@(Measure p _:_) = Measure p (concatMap (view measureResults) xs)
     combineMeasures _                  = error "not possible"
 
-getOrCreateExps :: forall a . (ExperimentDef a) => ExperimentSetup -> InputState a -> a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Entity Exps)
+getOrCreateExps :: forall a . (ExperimentDef a) => ExperimentSetting -> InputState a -> a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Entity Exps)
 getOrCreateExps setup initInpSt initSt = do
   let name = view experimentBaseName setup
-  -- expsList <- selectList [ExpsName ==. name, ExpsInitialInputState ==. runPut (put initInpSt), ExpsInitialState ==. runPut (put initSt)] []
   expsList <- selectList [ExpsName ==. name] []
+  expsInfoParams <- map entityVal <$> selectList [ExpsInfoParamExps <-. map entityKey expsList] []
+  let expsList' = map fst $ filter matchesExpsInfoParam (zip expsList expsInfoParams)
   exps <-
     filterM
       (\(Entity _ (Exps _ _ _ s iS)) -> do
-          serSt <- lift $ lift $ sequence $ deserialisable <$> runGet S.get s
-          let other = (,) <$> serSt <*> runGet S.get iS
-          return $ fromEither False (equalExperiments (initSt, initInpSt) <$> other))
-      expsList
+         serSt <- lift $ lift $ sequence $ deserialisable <$> runGet S.get s
+         let other = (,) <$> serSt <*> runGet S.get iS
+         return $ fromEither False (equalExperiments (initSt, initInpSt) <$> other))
+      expsList'
   params <- mapM (\e -> selectList [ParamExps ==. entityKey e] [Asc ParamName]) exps
   let mkParamTpl (Param _ n minB maxB) = (n, minB, maxB)
   let ~myParams = L.sortBy (compare `on` (\(x, _, _) -> x)) $ map (mkParamTpl . convertParameterSetup (entityKey (head exps))) (parameters initSt)
   case L.find ((== myParams) . map (mkParamTpl . entityVal) . snd) (zip exps params) of
     Nothing -> do
       $(logInfo) "Starting new experiment..."
-      time <-  liftIO getCurrentTime
+      time <- liftIO getCurrentTime
       serInitSt <- lift $ lift $ serialisable initSt
       eExp <- insertEntity $ Exps name time Nothing (runPut $ put serInitSt) (runPut $ put initInpSt)
       void $ insert $ mkExpSetup eExp
@@ -493,3 +505,7 @@ getOrCreateExps setup initInpSt initSt = do
     insertParam :: Key Exps -> ParameterSetup a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Key Param)
     insertParam eExp (ParameterSetup n _ _ _ (Just (minVal, maxVal)) drp _) = insert $ Param eExp n (Just $ runPut $ put minVal) (Just $ runPut $ put maxVal)
     insertParam eExp (ParameterSetup n _ _ _ Nothing drp _) = insert $ Param eExp n Nothing Nothing
+    matchesExpsInfoParam (_, ExpsInfoParam _ n bs) =
+      case L.find ((== n) . infoParameterName) (view experimentInfoParameters setup) of
+        Nothing                            -> False
+        Just (ExperimentInfoParameter _ p) -> S.runPut (S.put p) == bs

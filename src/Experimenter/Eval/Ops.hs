@@ -9,21 +9,21 @@ module Experimenter.Eval.Ops
     , genEvalsIO
     ) where
 
-import           Control.Arrow               ((&&&), (***))
-import           Control.Lens                hiding (Cons, Over, over)
-import           Control.Monad               (unless)
-import           Control.Monad.Logger        (logDebug)
+import           Control.Arrow                ((&&&), (***))
+import           Control.Lens                 hiding (Cons, Over, over)
+import           Control.Monad                (unless)
+import           Control.Monad.Logger         (logDebug)
 import           Control.Monad.Logger
 import           Control.Monad.Reader
-import           Data.Function               (on)
-import           Data.List                   (find, sortBy)
-import           Data.Maybe                  (fromMaybe)
-import qualified Data.Text                   as T
-import           Database.Persist.Postgresql (SqlBackend, runSqlConn, withPostgresqlConn)
+import           Data.Function                (on)
+import           Data.List                    (find, sortBy)
+import           Data.Maybe                   (fromMaybe)
+import qualified Data.Text                    as T
+import           Database.Persist.Postgresql  (SqlBackend, runSqlConn, withPostgresqlConn)
 
-import           Experimenter.DatabaseSetup
+import           Experimenter.DatabaseSetting
 import           Experimenter.Eval.Reduce
-import           Experimenter.Eval.Type      as E
+import           Experimenter.Eval.Type       as E
 import           Experimenter.Experiment
 import           Experimenter.Measure
 import           Experimenter.Result.Type
@@ -37,16 +37,16 @@ makeResDataAvailable exps =
   mapMOf (experiments . traversed . experimentResults . traversed . evaluationResults . traversed . evalResults . traversed . results) mkAvailableList exps >>=
   mapMOf (experiments . traversed . experimentResults . traversed . evaluationResults . traversed . evalResults . traversed . inputValues) mkAvailableList
 
-runner :: (ExperimentDef a) => (ExpM a (Experiments a) -> IO (Experiments a)) -> DatabaseSetup -> Experiments a -> IO (Experiments a)
+runner :: (ExperimentDef a) => (ExpM a (Experiments a) -> IO (Experiments a)) -> DatabaseSetting -> Experiments a -> IO (Experiments a)
 runner runExpM dbSetup exps =
   runExpM $
   (runStdoutLoggingT . filterLogger (\s _ -> s /= "SQL")) $ withPostgresqlConn (connectionString dbSetup) $ \backend -> flip runSqlConn backend $ makeResDataAvailable exps
 
 
-genEvalsIO :: (ExperimentDef a, IO ~ ExpM a) => DatabaseSetup -> Experiments a -> [StatsDef a] -> IO (Evals a)
+genEvalsIO :: (ExperimentDef a, IO ~ ExpM a) => DatabaseSetting -> Experiments a -> [StatsDef a] -> IO (Evals a)
 genEvalsIO = genEvals id
 
-genEvals :: (ExperimentDef a) => (ExpM a (Experiments a) -> IO (Experiments a)) -> DatabaseSetup -> Experiments a -> [StatsDef a] -> IO (Evals a)
+genEvals :: (ExperimentDef a) => (ExpM a (Experiments a) -> IO (Experiments a)) -> DatabaseSetting -> Experiments a -> [StatsDef a] -> IO (Evals a)
 genEvals runExpM dbSetup exps evals = do
   exps' <- runner runExpM dbSetup exps
   res <- mapM mkEval (exps' ^. experiments)

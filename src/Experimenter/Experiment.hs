@@ -49,11 +49,14 @@ class (MonadUnliftIO (ExpM a), NFData a, NFData (InputState a), Serialize (Input
   -- ^ Provides the parameter setting.
   parameters :: a -> [ParameterSetup a]
 
-  -- ^ This function defines how to find experiments that can be resumed. Note that the experiments name is always a
-  -- comparison factor, that is, experiments with different names are unequal.
+  -- ^ This function defines how to find experiments that can be resumed. Note that the experiments name and experiment
+  -- info parameters are always comparison factors, that is, experiments with different names or info parameters are
+  -- unequal. The default is to compare only on name and info parameters.
   equalExperiments :: (a, InputState a) -> (a, InputState a) -> Bool
-  default equalExperiments :: (Eq a, Eq (InputState a)) => (a, InputState a) -> (a, InputState a) -> Bool
-  equalExperiments x y = x == y
+  -- default equalExperiments :: (Eq a, Eq (InputState a)) => (a, InputState a) -> (a, InputState a) -> Bool
+  -- equalExperiments x y = x == y
+  default equalExperiments :: (a, InputState a) -> (a, InputState a) -> Bool
+  equalExperiments _ _ = True
 
 
   -- HOOKS

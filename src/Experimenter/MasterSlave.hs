@@ -35,7 +35,7 @@ import           System.Posix.Process
 import           System.Process
 
 
-import           Experimenter.DatabaseSetup
+import           Experimenter.DatabaseSetting
 import           Experimenter.Experiment
 import           Experimenter.Models
 import           Experimenter.Result
@@ -49,7 +49,7 @@ keepAliveTimeout = 10
 data WorkerStatus = Working | Finished
   deriving (Eq, Show)
 
-createKeepAliveFork :: DatabaseSetup -> (UTCTime -> ReaderT SqlBackend (NoLoggingT (ResourceT IO)) ()) -> ReaderT SqlBackend (NoLoggingT (ResourceT IO)) () -> IO (IORef WorkerStatus)
+createKeepAliveFork :: DatabaseSetting -> (UTCTime -> ReaderT SqlBackend (NoLoggingT (ResourceT IO)) ()) -> ReaderT SqlBackend (NoLoggingT (ResourceT IO)) () -> IO (IORef WorkerStatus)
 createKeepAliveFork dbSetup updateFunction deletionFunction = do
   ref <- liftIO $ newIORef Working
   void $ liftIO $ forkIO (runNoLoggingT $ withPostgresqlPool (connectionString dbSetup) 1 $ liftSqlPersistMPool $ keepAlive ref)

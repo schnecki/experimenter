@@ -5,3 +5,4 @@ experimenter.cabal
 /results/dice/main.aux
 /results/
 /.dir-locals.el
+/stack.yaml.lock

@@ -9,7 +9,7 @@ module Experimenter.Eval.Latex
     ) where
 
 import           Control.Lens                 hiding ((&))
-import           Control.Monad                (void, zipWithM_)
+import           Control.Monad                (unless, void, zipWithM_)
 import           Control.Monad.Logger
 import           Data.Function                (on)
 import           Data.List                    as L (find, foldl', groupBy, sortBy)
@@ -28,6 +28,7 @@ import           Experimenter.Eval.Type
 import           Experimenter.Models
 import           Experimenter.Parameter.Type
 import           Experimenter.Result.Type
+import           Experimenter.Setting         (ExperimentInfoParameter (..))
 import           Experimenter.Util
 
 
@@ -103,6 +104,14 @@ experimentsInfo exps = do
     , Row ["Experiment Evaluation Steps:",                CellT (tshow $ exps ^. experimentsSetup . expsSetupEvaluationSteps)]
     , Row ["Experiment Evaluation Replications:",         CellT (tshow $ exps ^. experimentsSetup . expsSetupEvaluationReplications)]
     ]
+
+  let infoParams = exps ^. experimentsInfoParameters
+  unless (null infoParams) $ do
+    part "Experiment Information Parameters"
+    printTable $ Table (Row ["Parameter", "Value"])
+      (map mkInfoParam infoParams)
+
+  where mkInfoParam (ExperimentInfoParameter n v) = Row [CellT n, CellT (tshow v)]
 
 
 experimentsEvals :: (MonadLogger m) => Evals a -> LaTeXT m ()

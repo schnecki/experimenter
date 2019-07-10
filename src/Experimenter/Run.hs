@@ -12,7 +12,8 @@
 {-# LANGUAGE ViewPatterns         #-}
 
 module Experimenter.Run
-    ( DatabaseSetup (..)
+    ( DatabaseSetting (..)
+    , MkExperimentSetting
     , execExperiments
     , runExperiments
     , runExperimentsM
@@ -55,7 +56,7 @@ import           System.Posix.Process
 import           System.Random.MWC
 
 
-import           Experimenter.DatabaseSetup
+import           Experimenter.DatabaseSetting
 import           Experimenter.Experiment
 import           Experimenter.Input
 import           Experimenter.MasterSlave
@@ -63,7 +64,7 @@ import           Experimenter.Measure
 import           Experimenter.Models
 import           Experimenter.Parameter
 import           Experimenter.Result
-import           Experimenter.Setup
+import           Experimenter.Setting
 import           Experimenter.StepResult
 import           Experimenter.Util
 
@@ -79,22 +80,21 @@ type Rands = ([Seed],[Seed],[Seed]) -- ^ Preparation, Warm Up and Evaluation ran
 data Mode = Master | Slave
   deriving (Eq, Show)
 
-
-execExperiments :: (ExperimentDef a) => (ExpM a (Bool, Experiments a) -> IO (Bool, Experiments a)) -> DatabaseSetup -> ExperimentSetup -> InputState a -> a -> IO (Experiments a)
+execExperiments :: (ExperimentDef a) => (ExpM a (Bool, Experiments a) -> IO (Bool, Experiments a)) -> DatabaseSetting -> MkExperimentSetting a -> InputState a -> a -> IO (Experiments a)
 execExperiments runExpM dbSetup setup initInpSt initSt = force . snd <$> runExperiments runExpM dbSetup setup initInpSt initSt
 
 -- | Run an experiment with non-monadic initial state. In case the initial state requires monadic effect (e.g. building
 -- a Tensorflow model), use `runExperimentsM`!
-runExperiments :: (ExperimentDef a) => (ExpM a (Bool, Experiments a) -> IO (Bool, Experiments a)) -> DatabaseSetup -> ExperimentSetup -> InputState a -> a -> IO (Bool, Experiments a)
+runExperiments :: (ExperimentDef a) => (ExpM a (Bool, Experiments a) -> IO (Bool, Experiments a)) -> DatabaseSetting -> MkExperimentSetting a -> InputState a -> a -> IO (Bool, Experiments a)
 runExperiments runExpM dbSetup setup initInpSt initSt = force <$> runner runExpM dbSetup setup initInpSt (return initSt)
 
-runExperimentsM :: (ExperimentDef a) => (ExpM a (Bool, Experiments a) -> IO (Bool, Experiments a)) -> DatabaseSetup -> ExperimentSetup -> InputState a -> ExpM a a -> IO (Bool, Experiments a)
+runExperimentsM :: (ExperimentDef a) => (ExpM a (Bool, Experiments a) -> IO (Bool, Experiments a)) -> DatabaseSetting -> MkExperimentSetting a -> InputState a -> ExpM a a -> IO (Bool, Experiments a)
 runExperimentsM = runner
 
-runExperimentsIO :: (ExperimentDef a, IO ~ ExpM a) => DatabaseSetup -> ExperimentSetup -> InputState a -> a -> IO (Bool, Experiments a)
+runExperimentsIO :: (ExperimentDef a, IO ~ ExpM a) => DatabaseSetting -> MkExperimentSetting a -> InputState a -> a -> IO (Bool, Experiments a)
 runExperimentsIO dbSetup setup initInpSt initSt = runner id dbSetup setup initInpSt (return initSt)
 
-runner :: (ExperimentDef a) => (ExpM a (Bool, Experiments a) -> IO (Bool, Experiments a)) -> DatabaseSetup -> ExperimentSetup -> InputState a -> ExpM a a -> IO (Bool, Experiments a)
+runner :: (ExperimentDef a) => (ExpM a (Bool, Experiments a) -> IO (Bool, Experiments a)) -> DatabaseSetting -> MkExperimentSetting a -> InputState a -> ExpM a a -> IO (Bool, Experiments a)
 runner runExpM dbSetup setup initInpSt mkInitSt =
   fmap force $ do
     runStdoutLoggingT $ withPostgresqlPool (connectionString dbSetup) (parallelConnections dbSetup) $ liftSqlPersistMPool $ runMigration migrateAll
@@ -103,7 +103,8 @@ runner runExpM dbSetup setup initInpSt mkInitSt =
       withPostgresqlConn (connectionString dbSetup) $ \backend ->
         flip runSqlConn backend $ do
           initSt <- lift (lift mkInitSt)
-          loadExperiments setup initInpSt initSt >>= checkUniqueParamNames >>= runExperimenter dbSetup setup initInpSt initSt
+          let setting = setup initSt
+          loadExperiments setting initInpSt initSt >>= checkUniqueParamNames >>= runExperimenter dbSetup setting initInpSt initSt
 
 checkUniqueParamNames :: (Monad m) => Experiments a -> m (Experiments a)
 checkUniqueParamNames exps = do
@@ -112,7 +113,7 @@ checkUniqueParamNames exps = do
   return exps
 
 
-runExperimenter :: (ExperimentDef a) => DatabaseSetup -> ExperimentSetup -> InputState a -> a -> Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Bool, Experiments a)
+runExperimenter :: (ExperimentDef a) => DatabaseSetting -> ExperimentSetting -> InputState a -> a -> Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Bool, Experiments a)
 runExperimenter dbSetup setup initInpSt initSt exps = do
   pid <- liftIO getProcessID
   hostName <- liftIO getHostName
@@ -138,7 +139,7 @@ runExperimenter dbSetup setup initInpSt initSt exps = do
   where
     restartExperimenter = loadExperiments setup initInpSt initSt >>= runExperimenter dbSetup setup initInpSt initSt
 
-runExperiment :: (ExperimentDef a) => DatabaseSetup -> Mode -> Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Bool, Experiments a)
+runExperiment :: (ExperimentDef a) => DatabaseSetting -> Mode -> Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Bool, Experiments a)
 runExperiment dbSetup mode exps = do
   (anyChange, exps') <- continueExperiments dbSetup mode exps
   if anyChange
@@ -146,7 +147,7 @@ runExperiment dbSetup mode exps = do
     else return (anyChange, exps')
 
 
-continueExperiments :: (ExperimentDef a) => DatabaseSetup -> Mode -> Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Bool, Experiments a)
+continueExperiments :: (ExperimentDef a) => DatabaseSetting -> Mode -> Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Bool, Experiments a)
 continueExperiments dbSetup mode exp = do
   $(logInfo) $ "Processing set of experiments with ID " <> tshow (unSqlBackendKey $ unExpsKey $ exp ^. experimentsKey)
   liftIO $ hFlush stdout
@@ -328,7 +329,7 @@ loadParameters exps exp = foldM setParam exps (exp ^. parameterSetup)
     parameterSetups = parameters (exps ^. experimentsInitialState)
 
 
-continueExperiment :: (ExperimentDef a) => DatabaseSetup -> Rands -> Experiments a -> Experiment a  -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, Experiment a)
+continueExperiment :: (ExperimentDef a) => DatabaseSetting -> Rands -> Experiments a -> Experiment a  -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, Experiment a)
 continueExperiment dbSetup rands exps exp = do
   pid <- liftIO getProcessID
   hostName <- liftIO getHostName

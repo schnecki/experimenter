@@ -16,6 +16,7 @@ import           Experimenter.Input
 import           Experimenter.Measure
 import           Experimenter.Models
 import           Experimenter.Parameter
+import           Experimenter.Setting
 
 import           Control.DeepSeq
 import           Control.Lens
@@ -125,6 +126,7 @@ data Experiments a = Experiments
   , _experimentsEndTime           :: !(Maybe UTCTime)
   , _experimentsSetup             :: !ExpsSetup
   , _experimentsParameters        :: ![ParameterSetup a]
+  , _experimentsInfoParameters    :: ![ExperimentInfoParameter]
   , _experimentsInitialState      :: !a -- ^ state at period 0
   , _experimentsInitialInputState :: !(InputState a)
   , _experiments                  :: [Experiment a]
@@ -132,7 +134,7 @@ data Experiments a = Experiments
 makeLenses ''Experiments
 
 instance NFData a => NFData (Experiments a) where
-  rnf (Experiments !k name stT endT set param !initSt !initInp exps) = rnf name `seq` rnf stT `seq` rnf endT `seq` rnf initSt `seq` rnf exps
+  rnf (Experiments !k name stT endT !set !param !infoParams !initSt !initInp exps) = rnf name `seq` rnf stT `seq` rnf endT `seq` rnf initSt `seq` rnf exps `seq` rnf infoParams
 
 -- instance Serialize GenIO where
 --   put g = put (show g)

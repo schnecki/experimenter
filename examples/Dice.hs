@@ -46,12 +46,6 @@ instance ExperimentDef Dice where
     in return ([result], Dice g' mD)
   parameters _ = [] -- [fakeParam]
 
-  -- Either compare params or do not compare them, but for sure do not compare random generators! As they are never
-  -- equal!
-  equalExperiments (Dice _ f1,_) (Dice _ f2,_) = f1 == f2
-  equalExperiments _ _                         = True
-
-
 fakeParam :: ParameterSetup Dice
 fakeParam = ParameterSetup "fake" (\mD (Dice g _) -> Dice g mD) (\(Dice _ mD) -> mD) (Just (\(Just b) -> return [Just (fromR $ toR b - 0.2), Just (fromR $ toR b + 0.2)])) (Just (Just 0, Just 1)) Nothing Nothing
   where
@@ -59,9 +53,10 @@ fakeParam = ParameterSetup "fake" (\mD (Dice g _) -> Dice g mD) (\(Dice _ mD) ->
     fromR = fromRational
 
 
-setup :: ExperimentSetup
-setup = ExperimentSetup
+setup :: MkExperimentSetting a
+setup _ = ExperimentSetting
   { _experimentBaseName         = "dice param"
+  , _experimentInfoParameters = []
   , _experimentRepetitions      =  2
   , _preparationSteps           =  100000
   , _evaluationWarmUpSteps      =  10000
@@ -73,7 +68,7 @@ setup = ExperimentSetup
 
 main :: IO ()
 main = do
-  let databaseSetup = DatabaseSetup "host=localhost dbname=experimenter2 user=experimenter password= port=5432" 10
+  let databaseSetup = DatabaseSetting "host=localhost dbname=experimenter2 user=experimenter password= port=5432" 10
   g <- newStdGen
   (changed, res) <- runExperimentsIO databaseSetup setup () (Dice g (Just 0.2))
   putStrLn $ "Any change: " ++ show changed
