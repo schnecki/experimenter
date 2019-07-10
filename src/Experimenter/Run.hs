@@ -604,7 +604,7 @@ runWarmUp seed exps expId repResId (expNr, repetNr, repliNr) initSt initInpSt mR
       when (delNeeded len) $ $(logInfo) "Deleted warm up data."
       return (delNeeded len, mResData')
   where
-    delNeeded len = maybe False (\_ -> wmUpSteps < len) mResData || maybe False ((>0) . lengthAvailabilityList) (mResData ^? traversed.results)
+    delNeeded len = maybe False (\_ -> wmUpSteps < len) mResData --  || maybe False ((>0) . lengthAvailabilityList) (mResData ^? traversed.results)
     runNeeded len = maybe (wmUpSteps > 0) (\_ -> wmUpSteps > len || (delNeeded len && wmUpSteps > 0)) mResData
     wmUpSteps = exps ^. experimentsSetup . expsSetupEvaluationWarmUpSteps
     new initStWmUp = newResultData seed (WarmUp repResId) initStWmUp initInpSt
@@ -644,7 +644,7 @@ runEval seed exps expId warmUpUpdated repResId (expNr, repetNr, repliNr) initSt 
       $(logInfo) $ "No evaluation run needed for replication with ID " <> tshow (unSqlBackendKey $ unRepResultKey repResId) <> ". All needed data comes from the DB!"
       return (delNeeded len, mResData')
   where
-    delNeeded len = warmUpUpdated || maybe False (\_ -> evalSteps < len) mResData || maybe False ((>0) . lengthAvailabilityList) (mResData ^? traversed.results)
+    delNeeded len = warmUpUpdated || maybe False (\_ -> evalSteps < len) mResData --  || maybe False ((>0) . lengthAvailabilityList) (mResData ^? traversed.results)
     runNeeded len = maybe (evalSteps > 0) (\_ -> evalSteps > len) mResData
     evalSteps = exps ^. experimentsSetup . expsSetupEvaluationSteps
     new initStEval = newResultData seed (Rep repResId) initStEval initInpSt
@@ -738,7 +738,7 @@ runResultData expId len repResType resData = do
           countInputValues' = resData ^. inputValues . _1 + length inputVals
        in case resData ^. resultDataKey of
             ResultDataPrep key -> do
-              when (delInputs) $ deleteCascadeWhere [PrepInputPrepResultData ==. key, PrepInputPeriod >=. curLen+1] 
+              when (delInputs) $ deleteCascadeWhere [PrepInputPrepResultData ==. key, PrepInputPeriod >=. curLen+1]
               inpKeys <- insertMany $ map (PrepInput key . view inputValuePeriod) inputVals
               insertMany_ $ zipWith (\k v -> PrepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
               measureKeys <- insertMany $ map (PrepMeasure key . view measurePeriod) measures
@@ -747,7 +747,7 @@ runResultData expId len repResType resData = do
                 (countInputValues', AvailableOnDemand (fromMaybe [] <$> loadPreparationInput key)) $
                 resData
             ResultDataWarmUp key -> do
-              when (delInputs) $ deleteCascadeWhere [WarmUpInputRepResult ==. key, WarmUpInputPeriod >=. curLen+1] 
+              when (delInputs) $ deleteCascadeWhere [WarmUpInputRepResult ==. key, WarmUpInputPeriod >=. curLen+1]
               inpKeys <- insertMany $ map (WarmUpInput key . view inputValuePeriod) inputVals
               insertMany_ $ zipWith (\k v -> WarmUpInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
               measureKeys <- insertMany $ map (WarmUpMeasure key . view measurePeriod) measures
@@ -756,7 +756,7 @@ runResultData expId len repResType resData = do
                 (countInputValues', AvailableOnDemand (fromMaybe [] <$> loadReplicationWarmUpInput key)) $
                 resData
             ResultDataRep key -> do
-              when (delInputs) $ deleteCascadeWhere [RepInputRepResult ==. key, RepInputPeriod >=. curLen+1] 
+              when (delInputs) $ deleteCascadeWhere [RepInputRepResult ==. key, RepInputPeriod >=. curLen+1]
               inpKeys <- insertMany $ map (RepInput key . view inputValuePeriod) inputVals
               insertMany_ $ zipWith (\k v -> RepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
               measureKeys <- insertMany $ map (RepMeasure key . view measurePeriod) measures
