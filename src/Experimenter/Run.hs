@@ -680,6 +680,7 @@ foldM' f acc (x:xs) = do
   !acc' <- f acc x
   acc' `seq` foldM' f acc' xs
 
+
 runResultData :: (ExperimentDef a) => Key Exp -> Int -> RepResultType -> ResultData a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Updated, ResultData a)
 runResultData expId len repResType resData = do
   ~startStAvail <- mkAvailable (resData ^. startState)
@@ -689,7 +690,10 @@ runResultData expId len repResType resData = do
   $(logInfo) $ "Number of steps already run is " <> tshow curLen <> ", thus still need to run " <> tshow (len - curLen) <> " steps."
   let updated = not (null periodsToRun)
   sTime <- liftIO getCurrentTime
+  let phase = fromEnum $ phaseFromResultDataKey (resData ^. resultDataKey)
+  void $ upsertBy (UniqueExpProgress expId) (ExpProgress expId phase curLen) [ExpProgressPhase =. phase, ExpProgressStep =. curLen]
   (g', force -> st', force -> stInp', inputs, force -> measures) <- foldM' run (g, st, stInp, [], []) periodsToRun
+  when updated $ void $ upsertBy (UniqueExpProgress expId) (ExpProgress expId phase (curLen + nrOfPeriodsToRun)) [ExpProgressPhase =. phase, ExpProgressStep =. curLen + nrOfPeriodsToRun]
   if updated
     then do
       eTime <- pure <$> liftIO getCurrentTime
@@ -722,7 +726,8 @@ runResultData expId len repResType resData = do
     delInputs = resData ^. results . _1 - resData ^. inputValues . _1 > 0
     isNew = curLen == 0
     splitPeriods = 5000
-    periodsToRun = map (+ curLen) [1 .. min splitPeriods (len - curLen)]
+    nrOfPeriodsToRun = min splitPeriods (len - curLen)
+    periodsToRun = map (+ curLen) [1 .. nrOfPeriodsToRun]
     mkStartStateAvailableOnDemand =
       case resData ^. resultDataKey of
         ResultDataPrep key -> AvailableOnDemand $ loadResDataStartState expId (StartStatePrep key)
@@ -738,7 +743,7 @@ runResultData expId len repResType resData = do
           countInputValues' = resData ^. inputValues . _1 + length inputVals
        in case resData ^. resultDataKey of
             ResultDataPrep key -> do
-              when (delInputs) $ deleteCascadeWhere [PrepInputPrepResultData ==. key, PrepInputPeriod >=. curLen+1]
+              when (delInputs) $ deleteCascadeWhere [PrepInputPrepResultData ==. key, PrepInputPeriod >=. curLen + 1]
               inpKeys <- insertMany $ map (PrepInput key . view inputValuePeriod) inputVals
               insertMany_ $ zipWith (\k v -> PrepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
               measureKeys <- insertMany $ map (PrepMeasure key . view measurePeriod) measures
@@ -747,7 +752,7 @@ runResultData expId len repResType resData = do
                 (countInputValues', AvailableOnDemand (fromMaybe [] <$> loadPreparationInput key)) $
                 resData
             ResultDataWarmUp key -> do
-              when (delInputs) $ deleteCascadeWhere [WarmUpInputRepResult ==. key, WarmUpInputPeriod >=. curLen+1]
+              when (delInputs) $ deleteCascadeWhere [WarmUpInputRepResult ==. key, WarmUpInputPeriod >=. curLen + 1]
               inpKeys <- insertMany $ map (WarmUpInput key . view inputValuePeriod) inputVals
               insertMany_ $ zipWith (\k v -> WarmUpInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
               measureKeys <- insertMany $ map (WarmUpMeasure key . view measurePeriod) measures
@@ -756,7 +761,7 @@ runResultData expId len repResType resData = do
                 (countInputValues', AvailableOnDemand (fromMaybe [] <$> loadReplicationWarmUpInput key)) $
                 resData
             ResultDataRep key -> do
-              when (delInputs) $ deleteCascadeWhere [RepInputRepResult ==. key, RepInputPeriod >=. curLen+1]
+              when (delInputs) $ deleteCascadeWhere [RepInputRepResult ==. key, RepInputPeriod >=. curLen + 1]
               inpKeys <- insertMany $ map (RepInput key . view inputValuePeriod) inputVals
               insertMany_ $ zipWith (\k v -> RepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
               measureKeys <- insertMany $ map (RepMeasure key . view measurePeriod) measures

@@ -49,6 +49,12 @@ ExpExecutionLock
     lastAliveSign UTCTime
     UniqueExpExecutionLock exp
 
+ExpProgress
+    exp ExpId
+    phase Int
+    step Int
+    UniqueExpProgress exp
+
 ParamSetting
     exp ExpId
     name Text

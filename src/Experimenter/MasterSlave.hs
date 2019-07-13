@@ -78,7 +78,9 @@ waitForSlaves exps = do
     waitForSlaves' notSelf expIds = do
       locks <- filter notSelf . fmap entityVal <$> selectList [ExpExecutionLockExp <-. expIds] []
       if null locks
-        then return True
+        then do
+        deleteWhere [ExpProgressExp <-. expIds]
+        return True
         else do
           time <- liftIO getCurrentTime
           let workingSlaves = filter (\l -> diffUTCTime time (l ^. expExecutionLockLastAliveSign) <= 2 * keepAliveTimeout) locks

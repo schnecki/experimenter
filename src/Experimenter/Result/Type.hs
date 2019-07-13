@@ -30,6 +30,17 @@ import           System.Random.MWC
 
 import           Debug.Trace
 
+data Phase
+  = PreparationPhase
+  | WarmUpPhase
+  | EvaluationPhase
+  deriving (Eq, Ord, Show, Enum)
+
+phaseFromResultDataKey :: ResultDataKey -> Phase
+phaseFromResultDataKey ResultDataPrep{}   = PreparationPhase
+phaseFromResultDataKey ResultDataWarmUp{} = WarmUpPhase
+phaseFromResultDataKey ResultDataRep{}    = EvaluationPhase
+
 data ResultDataKey
   = ResultDataPrep (Key PrepResultData)
   | ResultDataWarmUp (Key WarmUpResultData)
