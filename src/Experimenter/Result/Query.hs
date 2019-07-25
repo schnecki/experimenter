@@ -9,6 +9,7 @@
 module Experimenter.Result.Query
     ( loadExperiments
     , loadExperimentResults
+    , loadExperimentsResults
     , loadPrepartionMeasures
     , loadPreparationInput
     , loadReplicationWarmUpMeasures
@@ -34,6 +35,7 @@ import           Control.DeepSeq                      (force)
 import           Control.Lens                         (over, view)
 import           Control.Monad.Logger
 import           Control.Monad.Reader
+import           Control.Monad.Trans.Maybe
 import           Data.ByteString                      (ByteString)
 import qualified Data.ByteString                      as B
 import           Data.Function                        (on)
@@ -78,6 +80,38 @@ data StartStateType
   = StartStatePrep (Key PrepResultData)
   | StartStateWarmUp (Key WarmUpResultData)
   | StartStateRep (Key RepResultData)
+
+
+loadExperimentsResults :: (ExperimentDef a) => ExperimentSetting -> InputState a -> a -> Key Exps -> ReaderT SqlBackend (LoggingT (ExpM a)) (Maybe (Experiments a))
+loadExperimentsResults setup initInpSt initSt key =
+  runMaybeT $ do
+    e <- MaybeT $ P.get key
+    exps <- lift (L.sortBy (compare `on` view experimentNumber) <$> loadExperimentList key)
+    expInfoParams <- lift (map entityVal <$> selectList [ExpsInfoParamExps ==. key] [])
+    eSetup <- lift (fromMaybe (error "Setup not found. Your DB is corrupted!") <$> getBy (UniqueExpsSetup key))
+    infoParams <- lift (mapM fromInfoParam expInfoParams)
+    return $
+      Experiments
+        key
+        (view expsName e)
+        (view expsStartTime e)
+        (view expsEndTime e)
+        (entityVal eSetup)
+        (parameters initSt)
+        (concat infoParams)
+        initSt
+        initInpSt
+        exps
+  where
+    infoParams = view experimentInfoParameters setup
+    fromInfoParam (ExpsInfoParam _ n bs) =
+      case L.find ((== n) . infoParameterName) infoParams of
+        Nothing -> do
+          $(logDebug) $ "Could not find parameter " <> n <> " in settings while loading values from the DB. It will not be reported therefore!"
+          return []
+        Just (ExperimentInfoParameter _ v) -> return [ExperimentInfoParameter n (fromEither v $ S.runGet S.get bs)]
+    fromEither _ (Right x) = x
+    fromEither d (Left _)  = d
 
 
 loadExperiments :: (ExperimentDef a) => ExperimentSetting -> InputState a -> a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Experiments a)

@@ -37,7 +37,7 @@ rootPath = "results"
 
 mainFile :: Evals a -> FilePath
 mainFile evals = "main_" <> t <> ".tex"
-  where t = maybe "unfinished_experiment" show (evals ^. evalsExperiments.experimentsEndTime)
+  where t = maybe "unfinished_experiment" (T.unpack . T.replace " " "_" . T.pack . show) (evals ^. evalsExperiments.experimentsEndTime)
 
 mainFilePdf :: Evals a -> FilePath
 mainFilePdf evals = T.unpack (T.dropWhileEnd (/= '.') (T.pack $ mainFile evals)) <> "pdf"

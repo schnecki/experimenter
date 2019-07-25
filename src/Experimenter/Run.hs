@@ -18,6 +18,7 @@ module Experimenter.Run
     , runExperiments
     , runExperimentsM
     , runExperimentsIO
+    , loadExperimentsResultsM
     ) where
 
 import           Control.Arrow                (first, second, (&&&), (***))
@@ -39,6 +40,7 @@ import           Control.Monad.Reader
 import           Control.Monad.Trans.Resource
 import qualified Data.ByteString              as BS
 import           Data.Function                (on)
+import           Data.Int                     (Int64)
 import qualified Data.List                    as L
 import           Data.Maybe                   (fromJust, fromMaybe, isJust, isNothing)
 import           Data.Pool                    as P
@@ -49,7 +51,7 @@ import           Data.Time                    (UTCTime, addUTCTime, diffUTCTime,
                                                getCurrentTime)
 import qualified Database.Esqueleto           as E
 import           Database.Persist.Postgresql
-import           Database.Persist.Sql         (fromSqlKey)
+import           Database.Persist.Sql         (fromSqlKey, toSqlKey)
 import           Network.HostName             (HostName, getHostName)
 import           System.IO
 import           System.Posix.Process
@@ -105,6 +107,17 @@ runner runExpM dbSetup setup initInpSt mkInitSt =
           initSt <- lift (lift mkInitSt)
           let setting = setup initSt
           loadExperiments setting initInpSt initSt >>= checkUniqueParamNames >>= runExperimenter dbSetup setting initInpSt initSt
+
+loadExperimentsResultsM :: (ExperimentDef a) => (ExpM a (Maybe (Experiments a)) -> IO (Maybe (Experiments a))) -> DatabaseSetting -> MkExperimentSetting a -> InputState a -> ExpM a a -> Int64 -> IO (Maybe (Experiments a))
+loadExperimentsResultsM runExpM dbSetup setup initInpSt mkInitSt key =
+  runExpM $
+  (runStdoutLoggingT . filterLogger (\s _ -> s /= "SQL")) $
+  withPostgresqlConn (connectionString dbSetup) $ \backend ->
+    flip runSqlConn backend $ do
+      initSt <- lift (lift mkInitSt)
+      let setting = setup initSt
+      loadExperimentsResults setting initInpSt initSt (toSqlKey key)
+
 
 checkUniqueParamNames :: (Monad m) => Experiments a -> m (Experiments a)
 checkUniqueParamNames exps = do

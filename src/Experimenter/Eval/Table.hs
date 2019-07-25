@@ -1,4 +1,5 @@
 {-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE OverloadedStrings         #-}
 module Experimenter.Eval.Table where
 
 import           Control.Monad                (forM_)
@@ -35,6 +36,9 @@ data Cell
 instance IsString Cell where
   fromString = CellT . T.pack
 
+dereferLatex :: T.Text -> T.Text
+dereferLatex = T.replace "{" "\\{" . T.replace "}" "\\}" . T.replace "_" "\\_"
+
 
 printTable :: (MonadLogger m) => Table -> LaTeXT m ()
 printTable tbl = forM_ (splitTable tbl) printTable'
@@ -47,7 +51,7 @@ printTable tbl = forM_ (splitTable tbl) printTable'
         printRow _ (Row []) = mempty
         printRow f (Row (c:cs)) = foldl' (&) (f $ printCell c) (map (f . printCell) cs) <> lnbk
         printCell :: (LaTeXC l) => Cell -> l
-        printCell (CellT txt) = raw txt
+        printCell (CellT txt) = raw (dereferLatex txt)
         printCell (CellD nr)  = raw $ printDouble nr
         printCell (CellL l)   = fromLaTeX l
         printCell CellEmpty   = mempty
