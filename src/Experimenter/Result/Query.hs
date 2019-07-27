@@ -506,6 +506,7 @@ getOrCreateExps setup initInpSt initSt = do
   expsList <- selectList [ExpsName ==. name] []
   expsInfoParams <- map (map entityVal) <$> mapM (\(Entity e _) -> selectList [ExpsInfoParamExps ==. e] []) expsList
   let expsList' = map fst $ filter ((\xs -> length infoParams >= length xs && all matchesExpsInfoParam xs) . snd) (zip expsList expsInfoParams)
+  when (null expsList') $ $(logInfo) "No experiment with same Experiment Info Parameters found!"
   exps <-
     filterM
       (\(Entity _ (Exps _ _ _ s iS)) -> do
@@ -513,10 +514,11 @@ getOrCreateExps setup initInpSt initSt = do
          let other = (,) <$> serSt <*> runGet S.get iS
          return $ fromEither False (equalExperiments (initSt, initInpSt) <$> other))
       expsList'
+  when (not (null expsList') && null exps) $ $(logInfo) "No experiment with same Parameters found!"
   params <- mapM (\e -> selectList [ParamExps ==. entityKey e] [Asc ParamName]) exps
-  let mkParamTpl (Param _ n minB maxB) = (n, minB, maxB)
-  let ~myParams = L.sortBy (compare `on` (\(x, _, _) -> x)) $ map (mkParamTpl . convertParameterSetup (entityKey (head exps))) (parameters initSt)
-  case L.find ((== myParams) . map (mkParamTpl . entityVal) . snd) (zip exps params) of
+  let mkParamTpl (Param _ n _ _) = n
+  let ~myParams = L.sort $ map (mkParamTpl . convertParameterSetup (entityKey (head exps))) (parameters initSt)
+  case L.find ((== myParams) . L.sort . map (mkParamTpl . entityVal) . snd) (zip exps params) of
     Nothing -> do
       $(logInfo) "Starting new experiment..."
       time <- liftIO getCurrentTime
