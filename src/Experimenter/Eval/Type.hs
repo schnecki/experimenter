@@ -83,19 +83,20 @@ prettyStatsDef statsDef = case statsDef of
 
 prettyOf :: Of a -> T.Text
 prettyOf = dropDoublePars . prettyOf'
-
-  where prettyOf' of' = case of' of
-          Of name           -> "of " <> name
-          Stats statsDef    -> "(" <> prettyStatsDef statsDef <> ")"
-          Div x y           -> "( " <> prettyOf' x <> ") / (" <> prettyOf' y <> ")"
-          Add x y           -> "( " <> prettyOf' x <> ") + (" <> prettyOf' y <> ")"
-          Sub x y           -> "( " <> prettyOf' x <> ") - (" <> prettyOf' y <> ")"
-          Mult x y          -> "( " <> prettyOf' x <> ") * (" <> prettyOf' y <> ")"
-          Last x            -> "Last(" <> prettyOf' x <> ")"
-          First x           -> "First(" <> prettyOf' x <> ")"
-          Length x          -> "Length(" <> prettyOf' x <> ")"
-          EveryXthElem nr x -> "EveryXthElem(" <> T.pack (show nr) <> ", " <> prettyOf' x <> ")"
-        dropDoublePars = T.replace "((" "(" . T.replace "))" ")"
+  where
+    prettyOf' of' =
+      case of' of
+        Of name -> "of " <> name
+        Stats statsDef -> "(" <> prettyStatsDef statsDef <> ")"
+        Div x y -> "( " <> prettyOf' x <> ") / (" <> prettyOf' y <> ")"
+        Add x y -> "( " <> prettyOf' x <> ") + (" <> prettyOf' y <> ")"
+        Sub x y -> "( " <> prettyOf' x <> ") - (" <> prettyOf' y <> ")"
+        Mult x y -> "( " <> prettyOf' x <> ") * (" <> prettyOf' y <> ")"
+        Last x -> "Last(" <> prettyOf' x <> ")"
+        First x -> "First(" <> prettyOf' x <> ")"
+        Length x -> "Length(" <> prettyOf' x <> ")"
+        EveryXthElem nr x -> "EveryXthElem(" <> T.pack (show nr) <> ", " <> prettyOf' x <> ")"
+    dropDoublePars = T.replace "((" "(" . T.replace "))" ")"
 
 
 prettyOver :: Over a -> T.Text

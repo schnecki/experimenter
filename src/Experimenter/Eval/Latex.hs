@@ -25,6 +25,7 @@ import           Text.LaTeX.Packages.Inputenc
 
 import           Experimenter.Eval.Table
 import           Experimenter.Eval.Type
+import           Experimenter.Eval.Util
 import           Experimenter.Models
 import           Experimenter.Parameter.Type
 import           Experimenter.Result.Type
@@ -32,21 +33,8 @@ import           Experimenter.Setting         (ExperimentInfoParameter (..))
 import           Experimenter.Util
 
 
-rootPath :: FilePath
-rootPath = "results"
-
-mainFile :: Evals a -> FilePath
-mainFile evals = "main_" <> t <> ".tex"
-  where t = maybe "unfinished_experiment" (T.unpack . T.replace " " "_" . T.pack . show) (evals ^. evalsExperiments.experimentsEndTime)
-
-mainFilePdf :: Evals a -> FilePath
-mainFilePdf evals = T.unpack (T.dropWhileEnd (/= '.') (T.pack $ mainFile evals)) <> "pdf"
-
 writeAndCompileLatex :: Evals a -> IO ()
 writeAndCompileLatex evals = writeLatex evals >> compileLatex evals
-
-getExpsName :: Evals a -> String
-getExpsName evals  = T.unpack $ T.replace " " "_" $ evals ^. evalsExperiments.experimentsName
 
 compileLatex :: Evals a -> IO ()
 compileLatex evals = do
