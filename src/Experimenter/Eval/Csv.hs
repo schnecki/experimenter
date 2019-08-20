@@ -96,31 +96,38 @@ smoothAndWriteFileResultData exps prefix smoothing measureName resData = do
   -- let filterMeasure = over measureResults (filter ((== measureName) . view resultName))
   -- xs <- fmap (map filterMeasure) $ mkAvailableList (resData ^. results) >>= mkTransientlyAvailable . snd
   let len = lengthAvailabilityList (resData ^. results)
-  let froms = [0,100000..len+1] ++ [len+1 | len `mod` 100000 /= 0]
+  let froms = [0,splitSize..len+1] ++ [len+1 | len `mod` splitSize /= 0]
   let fromTos = zip froms (tail $ map (subtract 1) froms)
   mapM_ (smoothAndWriteFileResultData' exps prefix smoothing measureName resData) fromTos
+  where splitSize = 250000
 
 smoothAndWriteFileResultData' :: (ExperimentDef a) => Experiments a -> T.Text -> Smoothing -> MeasureName -> ResultData a -> (Int,Int) -> ReaderT SqlBackend (LoggingT (ExpM a)) ()
 smoothAndWriteFileResultData' exps prefix smoothing measureName resData (from, to) = do
-  res <-
-    E.select $
-    E.from $ \(measure `E.InnerJoin` result) -> do
-      E.on (measure E.^. PrepMeasureId E.==. result E.^. PrepResultStepMeasure)
-      E.where_ (result E.^. PrepResultStepName E.==. E.val measureName)
-      E.where_ (measure E.^. PrepMeasurePeriod E.>=. E.val from)
-      E.where_ (measure E.^. PrepMeasurePeriod E.<=. E.val to)
-      E.orderBy [E.asc (measure E.^. PrepMeasurePeriod)]
-      return (measure E.^. PrepMeasurePeriod, result E.^. PrepResultStepYValue)
+  res <- case resData ^. resultDataKey of
+    ResultDataPrep key ->
+      E.select $
+      E.from $ \(measure `E.InnerJoin` result) -> do
+        E.on (measure E.^. PrepMeasureId E.==. result E.^. PrepResultStepMeasure)
+        E.where_ (measure E.^. PrepMeasurePrepResultData E.==. E.val key)
+        E.where_ (result E.^. PrepResultStepName E.==. E.val measureName)
+        E.where_ (measure E.^. PrepMeasurePeriod E.>=. E.val from)
+        E.where_ (measure E.^. PrepMeasurePeriod E.<=. E.val to)
+        E.orderBy [E.asc (measure E.^. PrepMeasurePeriod)]
+        return (measure E.^. PrepMeasurePeriod, result E.^. PrepResultStepYValue)
+    ResultDataWarmUp key -> undefined
+    ResultDataRep key -> undefined
   let toMeasure (E.Value p, E.Value v) = Measure p [StepResult measureName Nothing v]
   let ls = filter (not . null) $ map toFileCts $ smooth smoothing $ map toMeasure res
   when (from == 0) $ do
     liftIO $ putStrLn $ "Processing measure " <> T.unpack measureName <> ". Saving data to: " <> folder
     liftIO $ createDirectoryIfMissing True folder
-    liftIO $ writeFile filePath header
+    liftIO $ writeFile filePath header >> writeFile filePathPlotSh plotSh
   liftIO $ appendFile filePath (unlines ls)
   where
     filePath = folder </> T.unpack (prefix <> "_" <> measureName <> ".csv")
+    filePathPlotSh = folder </> "plot.sh"
     folder = expsPath exps </> "csv"
+
     header = "Period\t" <> T.unpack (prefix <> "_" <> measureName) <> "\n"
     toFileCts (Measure p []) = []
     toFileCts (Measure p [res]) = show p <> "\t" <> show (res ^. resultYValue)
@@ -146,3 +153,29 @@ avgName (Repl repet)             = "repet" <> tshow repet <> "_replAvg"
 avgName (Repet repl)             = "repetAvg_repl" <> tshow repl
 avgName RepetRepl                = "repetAvg_replAvg"
 
+plotSh :: String
+plotSh =
+  unlines
+    [ "FILES=\"\"                                               "
+    , "                                                         "
+    , "for arg in $@; do                                        "
+    , "     FILES=\"$FILES `find . -type f -name \"*$arg*\"`\"  "
+    , "done                                                     "
+    , "                                                         "
+    , "echo $FILES                                              "
+    , "                                                         "
+    , "ARRAY=($FILES)                                           "
+    , "for col in {2,3,4}; do                                   "
+    , "    CMD=\"set key autotitle columnhead; plot \"          "
+    , "    for f in $FILES; do                                  "
+    , "        echo $f                                          "
+    , "        CMD=\"$CMD '$f' using 0:$col with lines \"       "
+    , "        if [ \"$f\" != \"${ARRAY[-1]}\" ]; then          "
+    , "            CMD=\"$CMD, \"                               "
+    , "        fi                                               "
+    , "    done                                                 "
+    , "    CMD=\"$CMD; pause mouse close; \"                    "
+    , "    echo $CMD                                            "
+    , "    gnuplot -e \"$CMD\" &                                "
+    , "done                                                     "
+    ]
