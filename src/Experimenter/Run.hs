@@ -108,8 +108,19 @@ runner runExpM dbSetup setup initInpSt mkInitSt =
           let setting = setup initSt
           loadExperiments setting initInpSt initSt >>= checkUniqueParamNames >>= runExperimenter dbSetup setting initInpSt initSt
 
-loadExperimentsResultsM :: (ExperimentDef a) => (ExpM a (Maybe (Experiments a)) -> IO (Maybe (Experiments a))) -> DatabaseSetting -> MkExperimentSetting a -> InputState a -> ExpM a a -> Int64 -> IO (Maybe (Experiments a))
-loadExperimentsResultsM runExpM dbSetup setup initInpSt mkInitSt key =
+type OnlyFinishedExperiments = Bool
+
+loadExperimentsResultsM ::
+     (ExperimentDef a)
+  => OnlyFinishedExperiments
+  -> (ExpM a (Maybe (Experiments a)) -> IO (Maybe (Experiments a)))
+  -> DatabaseSetting
+  -> MkExperimentSetting a
+  -> InputState a
+  -> ExpM a a
+  -> Int64
+  -> IO (Maybe (Experiments a))
+loadExperimentsResultsM filtFin runExpM dbSetup setup initInpSt mkInitSt key =
   runExpM $
   (runStdoutLoggingT . filterLogger (\s _ -> s /= "SQL")) $
   withPostgresqlConn (connectionString dbSetup) $ \backend ->
@@ -122,7 +133,7 @@ loadExperimentsResultsM runExpM dbSetup setup initInpSt mkInitSt key =
             all (\expRes -> length (expRes ^. evaluationResults) == setting ^. evaluationReplications) (exp ^. experimentResults) && -- replications
             all (\expRes -> maybe 0 (lengthAvailabilityList . view results) (expRes ^. warmUpResults) == setting ^. evaluationWarmUpSteps) (exp ^. experimentResults.traversed.evaluationResults) && -- warm up length
             all (\expRes -> maybe 0 (lengthAvailabilityList . view results) (expRes ^. evalResults) == setting ^. evaluationSteps) (exp ^. experimentResults.traversed.evaluationResults) -- eval length
-          filterFinished x = over experiments (filter isFinished) x
+          filterFinished x = over experiments (if filtFin then filter isFinished else id) x
 
 
       fmap filterFinished <$> loadExperimentsResults setting initInpSt initSt (toSqlKey key)

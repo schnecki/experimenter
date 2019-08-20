@@ -3,6 +3,7 @@ module Experimenter.Eval
   ( module E
   ) where
 
+import           Experimenter.Eval.Csv    as E
 import           Experimenter.Eval.Latex  as E
 import           Experimenter.Eval.Ops    as E
 import           Experimenter.Eval.Reduce as E

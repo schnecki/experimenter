@@ -3,6 +3,7 @@ module Experimenter.Eval.Util where
 
 import           Control.Lens             hiding (Cons, Over, over)
 import qualified Data.Text                as T
+import           System.FilePath.Posix
 
 import           Experimenter.Eval.Type   as E
 import           Experimenter.Result.Type
@@ -11,13 +12,16 @@ import           Experimenter.Result.Type
 rootPath :: FilePath
 rootPath = "results"
 
-mainFile :: Evals a -> FilePath
-mainFile evals = "main_" <> t <> ".tex"
-  where t = maybe "unfinished_experiment" (T.unpack . T.replace " " "_" . T.pack . show) (evals ^. evalsExperiments.experimentsEndTime)
+mainFile :: Experiments a -> FilePath
+mainFile exps = "main_" <> t <> ".tex"
+  where t = maybe "unfinished_experiment" (T.unpack . T.replace " " "_" . T.pack . show) (exps ^. experimentsEndTime)
 
-mainFilePdf :: Evals a -> FilePath
-mainFilePdf evals = T.unpack (T.dropWhileEnd (/= '.') (T.pack $ mainFile evals)) <> "pdf"
+mainFilePdf :: Experiments a -> FilePath
+mainFilePdf exps = T.unpack (T.dropWhileEnd (/= '.') (T.pack $ mainFile exps)) <> "pdf"
 
+getExpsName :: Experiments a -> String
+getExpsName exps  = T.unpack $ T.replace " " "_" $ exps ^. experimentsName
 
-getExpsName :: Evals a -> String
-getExpsName evals  = T.unpack $ T.replace " " "_" $ evals ^. evalsExperiments.experimentsName
+expsPath :: Experiments a -> FilePath
+expsPath exps = rootPath </> getExpsName exps
+

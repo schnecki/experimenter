@@ -17,6 +17,7 @@ import           Data.Maybe                   (fromMaybe)
 import qualified Data.Serialize               as S
 import qualified Data.Text                    as T
 import           System.Directory
+import           System.FilePath.Posix
 import           System.Process
 import           Text.LaTeX
 import           Text.LaTeX.Packages.AMSMath
@@ -38,18 +39,19 @@ writeAndCompileLatex evals = writeLatex evals >> compileLatex evals
 
 compileLatex :: Evals a -> IO ()
 compileLatex evals = do
-  let n = getExpsName evals
-      dir = rootPath <> "/" <> n
-  void $ runProcess "pdflatex" [mainFile evals] (Just dir) Nothing Nothing Nothing Nothing >>= waitForProcess
+  let exps = evals ^. evalsExperiments
+      dir = expsPath exps
+      n = getExpsName exps
+  void $ runProcess "pdflatex" [mainFile exps] (Just dir) Nothing Nothing Nothing Nothing >>= waitForProcess
   pwd <- getCurrentDirectory
-  putStrLn $ "\n\nSuccessfully compiled your results! See file://" <> pwd <> "/results/" <> n <> "/" <> mainFilePdf evals
+  putStrLn $ "\n\nSuccessfully compiled your results! See file://" <> pwd <> "/results/" <> n <> "/" <> mainFilePdf exps
 
 
 writeLatex :: Evals a -> IO ()
 writeLatex evals = do
-  let n = getExpsName evals
-      dir = rootPath <> "/" <> n
-      file = dir <> "/" <> mainFile evals
+  let exps = evals ^. evalsExperiments
+      dir = expsPath exps
+      file = dir </> mainFile exps
   createDirectoryIfMissing True dir
   runStdoutLoggingT (execLaTeXT (root evals)) >>= renderFile file
 
