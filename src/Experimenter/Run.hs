@@ -116,7 +116,16 @@ loadExperimentsResultsM runExpM dbSetup setup initInpSt mkInitSt key =
     flip runSqlConn backend $ do
       initSt <- lift (lift mkInitSt)
       let setting = setup initSt
-      loadExperimentsResults setting initInpSt initSt (toSqlKey key)
+          isFinished exp =
+            length (exp ^. experimentResults) == setting ^. experimentRepetitions && -- repetitions
+            all (\expRes -> maybe 0 (lengthAvailabilityList . view results) (expRes ^. preparationResults) == setting ^. preparationSteps) (exp ^. experimentResults) && -- preparation length
+            all (\expRes -> length (expRes ^. evaluationResults) == setting ^. evaluationReplications) (exp ^. experimentResults) && -- replications
+            all (\expRes -> maybe 0 (lengthAvailabilityList . view results) (expRes ^. warmUpResults) == setting ^. evaluationWarmUpSteps) (exp ^. experimentResults.traversed.evaluationResults) && -- warm up length
+            all (\expRes -> maybe 0 (lengthAvailabilityList . view results) (expRes ^. evalResults) == setting ^. evaluationSteps) (exp ^. experimentResults.traversed.evaluationResults) -- eval length
+          filterFinished x = over experiments (filter isFinished) x
+
+
+      fmap filterFinished <$> loadExperimentsResults setting initInpSt initSt (toSqlKey key)
 
 
 checkUniqueParamNames :: (Monad m) => Experiments a -> m (Experiments a)

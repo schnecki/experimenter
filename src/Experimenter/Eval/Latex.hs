@@ -302,10 +302,10 @@ paramSettingTable evals (ExperimentEval nr _ exp)
               let _ = setter val (evals ^. evalsExperiments . experimentsInitialState) -- only needed for type inference
                in Row
                     [ CellT n
-                    , CellL $ raw (tshow val) <>
+                    , CellL $ raw (dereferLatex $ tshow val) <>
                       (case mBounds of
                          Nothing -> ""
-                         Just (minVal, maxVal) -> math (text " " `in_` autoParens (text (raw (tshow minVal)) <> ", " <> text (raw (tshow maxVal))))) <>
+                         Just (minVal, maxVal) -> math (text " " `in_` autoParens (text (raw (dereferLatex $ tshow minVal)) <> ", " <> text (raw (dereferLatex $ tshow maxVal))))) <>
                       (if drp
                          then " [SkipPrepPhase]"
                          else mempty) <>
