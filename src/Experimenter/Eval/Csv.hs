@@ -140,8 +140,9 @@ type RepetNr = Int
 data Avg = None RepetNr (Maybe ReplNr) | Repl RepetNr | Repet ReplNr | RepetRepl
 
 avgName :: Avg -> T.Text
-avgName (None repet repl) = "repet" <> tshow repet <> "_repl" <> tshow repl
-avgName (Repl repet)      = "repet" <> tshow repet <> "_replAvg"
-avgName (Repet repl)      = "repetAvg_repl" <> tshow repl
-avgName RepetRepl         = "repetAvg_replAvg"
+avgName (None repet (Just repl)) = "repet" <> tshow repet <> "_repl" <> tshow repl
+avgName (None repet Nothing)     = "repet" <> tshow repet
+avgName (Repl repet)             = "repet" <> tshow repet <> "_replAvg"
+avgName (Repet repl)             = "repetAvg_repl" <> tshow repl
+avgName RepetRepl                = "repetAvg_replAvg"
 
