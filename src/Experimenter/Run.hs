@@ -71,8 +71,6 @@ import           Experimenter.StepResult
 import           Experimenter.Util
 
 
-import           Debug.Trace
-
 type Updated = Bool
 type InitialState a = a
 type InitialInputState a = InputState a
@@ -104,9 +102,10 @@ runner runExpM dbSetup setup initInpSt mkInitSt =
       (runStdoutLoggingT . filterLogger (\s _ -> s /= "SQL")) $
       withPostgresqlConn (connectionString dbSetup) $ \backend ->
         flip runSqlConn backend $ do
-          initSt <- lift (lift mkInitSt)
-          let setting = setup initSt
-          loadExperiments setting initInpSt initSt >>= checkUniqueParamNames >>= runExperimenter dbSetup setting initInpSt initSt
+          initSt <- lift $ lift mkInitSt
+          $(logInfo) "Created initial state and will now check the DB for loading or creating experiments"
+          let expSetting = setup initSt
+          loadExperiments expSetting initInpSt initSt >>= checkUniqueParamNames >>= runExperimenter dbSetup expSetting initInpSt initSt
 
 type OnlyFinishedExperiments = Bool
 

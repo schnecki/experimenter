@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns        #-}
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE GADTs               #-}
 {-# LANGUAGE OverloadedStrings   #-}
@@ -65,9 +66,6 @@ import           Experimenter.Result.Type
 import           Experimenter.Setting
 import           Experimenter.StepResult
 import           Experimenter.Util
-
-
-import           Debug.Trace
 
 
 data EndStateType
@@ -522,7 +520,7 @@ getOrCreateExps setup initInpSt initSt = do
     Nothing -> do
       $(logInfo) "Starting new experiment..."
       time <- liftIO getCurrentTime
-      serInitSt <- lift $ lift $ serialisable initSt
+      !serInitSt <- lift $ lift $ serialisable initSt
       eExp <- insertEntity $ Exps name time Nothing (runPut $ put serInitSt) (runPut $ put initInpSt)
       void $ insert $ mkExpSetup eExp
       mapM_ (insertInfoParam (entityKey eExp)) infoParams
@@ -551,5 +549,5 @@ getOrCreateExps setup initInpSt initSt = do
     infoParams = view experimentInfoParameters setup
     matchesExpsInfoParam (ExpsInfoParam _ n bs) =
       case L.find ((== n) . infoParameterName) infoParams of
-        Nothing                            -> False
+        Nothing -> False
         Just (ExperimentInfoParameter _ p) -> fromEither False ((p ==) <$> S.runGet S.get bs)
