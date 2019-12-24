@@ -123,6 +123,11 @@ experimentsEvals :: Evals a -> LaTeXT SimpleDB ()
 experimentsEvals evals = do
   pagebreak "4"
   part "Experiment Evaluations"
+  -- input $ scalarFile (evals ^. evalsExperiments)
+  -- input $ repetitionFile (evals ^. evalsExperiments)
+  -- input $ replicationFile (evals ^. evalsExperiments)
+  -- input $ periodicFile (evals ^. evalsExperiments)
+
   tables <- lift (mkResultTables evals)
   liftIO $ print tables
   writeTables (force tables)
@@ -134,22 +139,26 @@ data EvalTables a = EvalTables
   , numbers                :: ![(Maybe Table, [(StatsDef a, Table)])]
   } deriving (Show, Generic, NFData)
 
+instance Semigroup (EvalTables a) where
+  EvalTables ap ar ae an <> EvalTables bp br be bn = EvalTables (ap<>bp) (ar <> br) (ae <> be) (an <> bn)
+
+instance Monoid (EvalTables a) where
+  mempty = EvalTables [] [] [] []
+
+
 mkResultTables :: Evals a -> SimpleDB [EvalTables a]
-mkResultTables evals = do
-  let isExperimentalReplicationUnit UnitExperimentRepetition         = True
-      isExperimentalReplicationUnit UnitBestExperimentRepetitions {} = True
-      isExperimentalReplicationUnit _                                = False
-  forM (evals ^. evalsResults) $ \res -> do
-      groupedEval <- groupEvaluations res
-      let periodEval = filter ((== UnitPeriods) . (^. _1)) groupedEval
-      let replicEval = filter ((== UnitReplications) . (^. _1)) groupedEval
-      let expereEval = filter (isExperimentalReplicationUnit . (^. _1)) groupedEval
-      let numberEval = filter ((== UnitScalar) . (^. _1)) groupedEval
-      let periodicTbl = map (mkExperimentTable evals) periodEval
-      let replicationTbl = map (mkExperimentTable evals) replicEval
-      let experimentalReplicationTbl = map (mkExperimentTable evals) expereEval
-      let numberEvalsTbl = map (mkExperimentTable evals) numberEval
-      return $ force $ EvalTables periodicTbl replicationTbl experimentalReplicationTbl numberEvalsTbl
+mkResultTables evals =
+  forM (evals ^. evalsResults) $ \eval@(ExperimentEval _ avRes _) ->
+    fmap (force . mconcat) $
+    forM avRes $ \av -> do
+      res <- mkTransientlyAvailable av
+      let tbl = mkExperimentTable evals (leastUnit res, eval, [res])
+      return $
+        case leastUnit res of
+          UnitPeriods              -> EvalTables [tbl] [] [] []
+          UnitReplications         -> EvalTables [] [tbl] [] []
+          UnitExperimentRepetition -> EvalTables [] [] [tbl] []
+          UnitScalar               -> EvalTables [] [] [] [tbl]
 
 
 writeTables :: [EvalTables a] -> LaTeXT SimpleDB ()
@@ -203,15 +212,18 @@ writeTables !(force -> tables) = do
     (map periodic tables)
 
 
-printTableWithName :: (Monad m, MonadLogger m) => (StatsDef a, Table) -> LaTeXT m ()
+printTableWithName :: (MonadLogger m) => (StatsDef a, Table) -> LaTeXT m ()
 printTableWithName (nm, tbl) = do
   paragraph (raw $ prettyStatsDef nm)
   printTable tbl
 
-groupEvaluations :: ExperimentEval a -> SimpleDB [(Unit, ExperimentEval a, [EvalResults a])]
-groupEvaluations eval@(ExperimentEval _ res _) = do
-  res' <- mapM mkTransientlyAvailable res
-  return $ map (\xs@((_,x):_) -> (x, eval, map fst xs)) $ groupBy ((==) `on` snd) $ sortBy (compare `on` snd) (map (\x -> (x, leastUnit x)) res')
+
+-- groupEvaluations :: ExperimentEval a -> SimpleDB [(Unit, ExperimentEval a, [EvalResults a])]
+-- groupEvaluations eval@(ExperimentEval _ res _) = do
+--   res' <- mapM mkTransientlyAvailable res
+--   return $ map (\xs@((_, x):_) -> (x, eval, map fst xs)) $ groupBy ((==) `on` snd) $ sortBy (compare `on` snd)
+--     (map (\x -> (x, leastUnit x)) res')
+
 
 leastUnit :: EvalResults a -> Unit
 leastUnit (EvalValue _ u _ _ _)    = u

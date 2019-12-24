@@ -152,7 +152,7 @@ data Unit
   = UnitPeriods
   | UnitReplications
   | UnitExperimentRepetition
-  | UnitBestExperimentRepetitions Int
+  --  | UnitBestExperimentRepetitions Int
   | UnitScalar
   deriving (Generic, Serialize, Read, Eq, Ord, Show, NFData)
 
@@ -215,8 +215,8 @@ fromOver OverExperimentRepetitions = UnitExperimentRepetition
 
 -- | Demotes the unit by 1 degree. Thus this calculates the unit of a vector over which it was reduced.
 demoteUnit :: Unit -> Maybe Unit
-demoteUnit UnitPeriods                     = Nothing
-demoteUnit UnitReplications                = Just UnitPeriods
-demoteUnit UnitExperimentRepetition        = Just UnitReplications
-demoteUnit UnitBestExperimentRepetitions{} = Just UnitReplications
-demoteUnit UnitScalar                      = Just UnitExperimentRepetition
+demoteUnit UnitPeriods              = Nothing
+demoteUnit UnitReplications         = Just UnitPeriods
+demoteUnit UnitExperimentRepetition = Just UnitReplications
+-- demoteUnit UnitBestExperimentRepetitions{} = Just UnitReplications
+demoteUnit UnitScalar               = Just UnitExperimentRepetition
