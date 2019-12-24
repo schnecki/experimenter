@@ -6,3 +6,6 @@ experimenter.cabal
 /results/
 /.dir-locals.el
 /stack.yaml.lock
+/dice.aux
+/dice.hp
+/dice.ps

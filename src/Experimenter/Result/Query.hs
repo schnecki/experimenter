@@ -57,6 +57,7 @@ import           System.Exit                          (exitFailure)
 import           System.IO
 import           System.Random.MWC
 
+import           Experimenter.Availability
 import           Experimenter.Experiment
 import           Experimenter.Input
 import           Experimenter.Measure

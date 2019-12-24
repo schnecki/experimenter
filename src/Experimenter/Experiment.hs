@@ -21,7 +21,7 @@ type RepetitionNumber = Int
 type ReplicationNumber = Int
 
 
-class (MonadUnliftIO (ExpM a), NFData a, NFData (InputState a), Serialize (InputValue a), Serialize (InputState a), Serialize (Serializable a)) => ExperimentDef a where
+class (Monad (ExpM a), MonadUnliftIO (ExpM a), NFData a, NFData (InputState a), Serialize (InputValue a), Serialize (InputState a), Serialize (Serializable a)) => ExperimentDef a where
 
   type ExpM a :: (* -> *)
 

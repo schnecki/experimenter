@@ -58,10 +58,10 @@ setup _ = ExperimentSetting
   { _experimentBaseName         = "dice param"
   , _experimentInfoParameters = []
   , _experimentRepetitions      =  2
-  , _preparationSteps           =  100000
-  , _evaluationWarmUpSteps      =  10000
-  , _evaluationSteps            =  14000
-  , _evaluationReplications     =  1
+  , _preparationSteps           =  0
+  , _evaluationWarmUpSteps      =  1000
+  , _evaluationSteps            =  10000
+  , _evaluationReplications     =  20
   , _maximumParallelEvaluations =  1
   }
 
@@ -80,6 +80,6 @@ main = do
               , Id (Of "draw") `Named` "draws 2"
               ]
   evalRes <- genEvalsIO databaseSetup res evals
-  -- print (view evalsResults evalRes)
-  -- writeAndCompileLatex evalRes
+  print (view evalsResults evalRes)
+  writeAndCompileLatex databaseSetup evalRes
   return ()

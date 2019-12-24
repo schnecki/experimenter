@@ -89,4 +89,4 @@ main = do
               ]
   evalRes <- genEvalsIO databaseSetup res evals
   -- print (view evalsResults evalRes)
-  writeAndCompileLatex evalRes
+  writeAndCompileLatex databaseSetup evalRes

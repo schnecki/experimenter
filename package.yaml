@@ -73,6 +73,7 @@ executables:
     source-dirs:         examples
     ghc-options:
     - -threaded
+    - -O2
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
@@ -85,11 +86,10 @@ executables:
   #   source-dirs:         examples
   #   ghc-options:
   #   - -threaded
-  #   - -O2
   #   - -rtsopts
   #   - -with-rtsopts=-N
-  #   - -auto-all
-  #   - -caf-all
+  #   - -fprof-auto
+  #   - -fprof-cafs
   #   - -fforce-recomp
   #   - -prof
   #   dependencies:

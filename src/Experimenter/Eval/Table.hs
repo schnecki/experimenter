@@ -1,11 +1,18 @@
+{-# LANGUAGE BangPatterns              #-}
+{-# LANGUAGE DeriveAnyClass            #-}
+{-# LANGUAGE DeriveGeneric             #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE OverloadedStrings         #-}
+{-# LANGUAGE Strict                    #-}
 module Experimenter.Eval.Table where
 
+import           Control.DeepSeq
 import           Control.Monad                (forM_)
 import           Control.Monad.Logger
+import           Data.ByteString              (ByteString)
 import           Data.List                    (foldl')
 import qualified Data.Text                    as T
+import           GHC.Generics
 
 import           Text.LaTeX
 import           Text.LaTeX.Base.Class
@@ -19,19 +26,26 @@ import           Experimenter.Util
 data Table =
   Table Row
         [Row]
-  deriving (Show, Eq)
+  deriving (Show, Eq, Generic, NFData)
 
 newtype Row =
   Row [Cell]
-  deriving (Show, Eq)
+  deriving (Show, Eq, Generic, NFData)
 
 
 data Cell
-  = CellT T.Text
+  = CellT Text
   | CellD Double
   | CellL LaTeX
   | CellEmpty
-  deriving (Show, Eq)
+  deriving (Show, Eq, Generic)
+
+instance NFData Cell where
+  rnf (CellT !_) = ()
+  rnf (CellD x)  = rnf x
+  rnf (CellL !_) = ()
+  rnf CellEmpty  = ()
+
 
 instance IsString Cell where
   fromString = CellT . T.pack

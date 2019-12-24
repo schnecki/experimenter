@@ -202,3 +202,8 @@ RepResultStep
     name Text
     xValue  Double Maybe
     yValue  Double
+
+EvalResult
+    time UTCTime
+    data ByteString
+

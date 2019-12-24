@@ -21,12 +21,11 @@ module Experimenter.Run
     , loadExperimentsResultsM
     ) where
 
-import           Control.Arrow                (first, second, (&&&), (***))
+import           Control.Arrow                (first, (&&&), (***))
 import           Control.DeepSeq
 import           Control.Lens
 import           Control.Monad                (forM)
 import           Control.Monad.IO.Class
-import           Control.Monad.IO.Unlift
 import           Control.Monad.Logger         (LogLevel (..), LoggingT, MonadLogger,
                                                NoLoggingT, WriterLoggingT, defaultLoc,
                                                filterLogger, logDebug, logError, logInfo,
@@ -35,29 +34,25 @@ import           Control.Monad.Logger         (LogLevel (..), LoggingT, MonadLog
 import           Data.IORef
 import           Data.List                    (foldl')
 
-import           Control.Concurrent           (forkIO, threadDelay)
 import           Control.Monad.Reader
-import           Control.Monad.Trans.Resource
-import qualified Data.ByteString              as BS
 import           Data.Function                (on)
 import           Data.Int                     (Int64)
 import qualified Data.List                    as L
-import           Data.Maybe                   (fromJust, fromMaybe, isJust, isNothing)
-import           Data.Pool                    as P
+import           Data.Maybe                   (fromJust, fromMaybe)
 import           Data.Serialize               hiding (get)
 import qualified Data.Serialize               as S
 import qualified Data.Text                    as T
-import           Data.Time                    (UTCTime, addUTCTime, diffUTCTime,
-                                               getCurrentTime)
-import qualified Database.Esqueleto           as E
+import           Data.Time                    (addUTCTime, diffUTCTime, getCurrentTime)
+
 import           Database.Persist.Postgresql
 import           Database.Persist.Sql         (fromSqlKey, toSqlKey)
-import           Network.HostName             (HostName, getHostName)
+import           Network.HostName             (getHostName)
 import           System.IO
 import           System.Posix.Process
 import           System.Random.MWC
 
 
+import           Experimenter.Availability
 import           Experimenter.DatabaseSetting
 import           Experimenter.Experiment
 import           Experimenter.Input
@@ -132,7 +127,7 @@ loadExperimentsResultsM filtFin runExpM dbSetup setup initInpSt mkInitSt key =
             all (\expRes -> length (expRes ^. evaluationResults) == setting ^. evaluationReplications) (exp ^. experimentResults) && -- replications
             all (\expRes -> maybe 0 (lengthAvailabilityList . view results) (expRes ^. warmUpResults) == setting ^. evaluationWarmUpSteps) (exp ^. experimentResults.traversed.evaluationResults) && -- warm up length
             all (\expRes -> maybe 0 (lengthAvailabilityList . view results) (expRes ^. evalResults) == setting ^. evaluationSteps) (exp ^. experimentResults.traversed.evaluationResults) -- eval length
-          filterFinished x = over experiments (if filtFin then filter isFinished else id) x
+          filterFinished = over experiments (if filtFin then filter isFinished else id)
 
 
       fmap filterFinished <$> loadExperimentsResults setting initInpSt initSt (toSqlKey key)

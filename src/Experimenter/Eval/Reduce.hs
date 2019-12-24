@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE Strict            #-}
 
 module Experimenter.Eval.Reduce
     ( reduceUnary
@@ -14,9 +15,10 @@ import           Experimenter.Eval.Type   hiding (sum)
 import           Experimenter.Result.Type hiding (Experiments)
 
 transpose :: Unit -> [EvalResults a] -> [EvalResults a]
-transpose resUnit vs@(EvalValue tp _ _ _ _:_) = map (EvalVector tp resUnit) $ L.transpose $ map (\x -> [x]) vs
-transpose resUnit vs@(EvalReducedValue tp _ _:_) = map (EvalVector tp resUnit) $ L.transpose $ map (\x -> [x]) vs
-transpose resUnit vs@(EvalVector tp unit _:_) = map (EvalVector tp resUnit) $ L.transpose $ map (view evalValues) vs
+transpose resUnit vs@(EvalValue tp _ _ _ _:_) = map (EvalVector tp resUnit) $ L.transpose $ map (: []) vs
+transpose resUnit vs@(EvalReducedValue tp _ _:_) = map (EvalVector tp resUnit) $ L.transpose $ map (: []) vs
+transpose resUnit vs@(EvalVector tp _ _:_) = map (EvalVector tp resUnit) $ L.transpose $ map (view evalValues) vs
+transpose _ [] = []
 
 reduceUnary :: StatsDef a -> EvalResults a -> EvalResults a
 reduceUnary (Mean over _) eval = EvalReducedValue (flatten tp) (fromOver over) val

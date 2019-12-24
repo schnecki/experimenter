@@ -11,6 +11,7 @@
 
 module Experimenter.Result.Type where
 
+import           Experimenter.Availability
 import           Experimenter.Experiment
 import           Experimenter.Input
 import           Experimenter.Measure
@@ -20,15 +21,10 @@ import           Experimenter.Setting
 
 import           Control.DeepSeq
 import           Control.Lens
-import           Control.Monad.Logger
-import           Control.Monad.Reader
-import           Data.Serialize
-import qualified Data.Text                   as T
+import qualified Data.Text                 as T
 import           Data.Time
-import           Database.Persist.Postgresql (SqlBackend)
 import           System.Random.MWC
 
-import           Debug.Trace
 
 data Phase
   = PreparationPhase
@@ -47,32 +43,6 @@ data ResultDataKey
   | ResultDataRep (Key RepResultData)
   deriving (Eq, Show)
 
-data Availability a b
-  = (ExperimentDef a) =>
-    Available b
-  | AvailableOnDemand (ReaderT SqlBackend (LoggingT (ExpM a)) b)
-
-instance NFData b => NFData (Availability a b) where
-  rnf (Available b)          = rnf b
-  rnf (AvailableOnDemand !_) = ()
-
-type AvailabilityList a b = (Int, Availability a [b]) -- ^ Demand availability of a list with the length fetched.
-
-lengthAvailabilityList :: AvailabilityList a b -> Int
-lengthAvailabilityList (nr, _) = nr
-
-mkAvailableList :: (Foldable t, ExperimentDef a) => (Int, Availability a (t b)) -> ReaderT SqlBackend (LoggingT (ExpM a)) (Int, Availability a (t b))
-mkAvailableList (nr, Available xs)         = return (nr, Available xs)
-mkAvailableList (_, AvailableOnDemand query) = (\xs -> (length xs, Available xs)) <$> query
-
-mkAvailable :: (ExperimentDef a) => Availability a b -> ReaderT SqlBackend (LoggingT (ExpM a)) (Availability a b)
-mkAvailable (Available xs)            = return (Available xs)
-mkAvailable (AvailableOnDemand query) = Available <$> query
-
-mkTransientlyAvailable :: Availability a b -> ReaderT SqlBackend (LoggingT (ExpM a)) b
-mkTransientlyAvailable (Available xs)            = return xs
-mkTransientlyAvailable (AvailableOnDemand query) = query
-
 
 data ResultData a = ResultData
   { _resultDataKey   :: !ResultDataKey
@@ -80,10 +50,10 @@ data ResultData a = ResultData
   , _endTime         :: !(Maybe UTCTime)
   , _startRandGen    :: !GenIO
   , _endRandGen      :: !(Maybe GenIO)
-  , _inputValues     :: !(AvailabilityList a (Input a))
-  , _results         :: !(AvailabilityList a Measure)
-  , _startState      :: !(Availability a a)
-  , _endState        :: !(Availability a (Maybe a))    -- ^ state at end of run
+  , _inputValues     :: !(AvailabilityList (ExpM a) (Input a))
+  , _results         :: !(AvailabilityList (ExpM a) Measure)
+  , _startState      :: !(Availability (ExpM a) a)
+  , _endState        :: !(Availability (ExpM a) (Maybe a))    -- ^ state at end of run
   , _startInputState :: !(InputState a)
   , _endInputState   :: !(Maybe (InputState a))
   }
@@ -113,7 +83,7 @@ data ExperimentResult a = ExperimentResult
 makeLenses ''ExperimentResult
 
 instance NFData a => NFData (ExperimentResult a) where
-  rnf (ExperimentResult !k nr prep ev) = rnf nr `seq` rnf prep `seq` rnf ev
+  rnf (ExperimentResult !_ nr prep ev) = rnf nr `seq` rnf prep `seq` rnf ev
 
 
 data Experiment a = Experiment

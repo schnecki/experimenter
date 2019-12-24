@@ -1,3 +1,8 @@
+{-# LANGUAGE BangPatterns        #-}
+{-# LANGUAGE DeriveAnyClass      #-}
+{-# LANGUAGE DeriveGeneric       #-}
+{-# LANGUAGE Strict              #-}
+{-# LANGUAGE ViewPatterns        #-}
 {-# OPTIONS_GHC -fno-warn-type-defaults #-}
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE OverloadedStrings   #-}
@@ -8,14 +13,17 @@ module Experimenter.Eval.Latex
     , writeAndCompileLatex
     ) where
 
+import           Control.DeepSeq
 import           Control.Lens                 hiding ((&))
-import           Control.Monad                (unless, void, zipWithM_)
+import           Control.Monad                (forM, unless, void, zipWithM_)
 import           Control.Monad.Logger
 import           Data.Function                (on)
 import           Data.List                    as L (find, foldl', groupBy, sortBy)
 import           Data.Maybe                   (fromMaybe)
 import qualified Data.Serialize               as S
 import qualified Data.Text                    as T
+import           Database.Persist.Postgresql  (SqlBackend, runSqlConn, withPostgresqlConn)
+import           GHC.Generics
 import           System.Directory
 import           System.FilePath.Posix
 import           System.Process
@@ -24,6 +32,8 @@ import           Text.LaTeX.Packages.AMSMath
 import           Text.LaTeX.Packages.Hyperref
 import           Text.LaTeX.Packages.Inputenc
 
+import           Experimenter.Availability
+import           Experimenter.DatabaseSetting
 import           Experimenter.Eval.Table
 import           Experimenter.Eval.Type
 import           Experimenter.Eval.Util
@@ -31,11 +41,12 @@ import           Experimenter.Models
 import           Experimenter.Parameter.Type
 import           Experimenter.Result.Type
 import           Experimenter.Setting         (ExperimentInfoParameter (..))
+import           Experimenter.Type
 import           Experimenter.Util
 
 
-writeAndCompileLatex :: Evals a -> IO ()
-writeAndCompileLatex evals = writeLatex evals >> compileLatex evals
+writeAndCompileLatex :: DatabaseSetting -> Evals a -> IO ()
+writeAndCompileLatex dbSetup evals = writeLatex dbSetup evals >> compileLatex evals
 
 compileLatex :: Evals a -> IO ()
 compileLatex evals = do
@@ -44,27 +55,29 @@ compileLatex evals = do
       n = getExpsName exps
   void $ runProcess "pdflatex" [mainFile exps] (Just dir) Nothing Nothing Nothing Nothing >>= waitForProcess
   pwd <- getCurrentDirectory
-  putStrLn $ "\n\nSuccessfully compiled your results! See file://" <> pwd <> "/results/" <> n <> "/" <> mainFilePdf exps
+  putStrLn $ "n\nSuccessfully compiled your results! See file://" <> pwd <> "/results/" <> n <> "/" <> mainFilePdf exps
 
 
-writeLatex :: Evals a -> IO ()
-writeLatex evals = do
+writeLatex :: DatabaseSetting -> Evals a -> IO ()
+writeLatex dbSetup evals = do
   let exps = evals ^. evalsExperiments
       dir = expsPath exps
       file = dir </> mainFile exps
-  createDirectoryIfMissing True dir
-  runStdoutLoggingT (execLaTeXT (root evals)) >>= renderFile file
+  liftIO $ createDirectoryIfMissing True dir
+  res <- runStdoutLoggingT $ filterLogger (\s _ -> s /= "SQL") $ withPostgresqlConn (connectionString dbSetup) $ \backend -> flip runSqlConn backend $ execLaTeXT (root evals)
+  renderFile file res
 
 
-root :: (MonadLogger m) => Evals a -> LaTeXT m ()
+root :: Evals a -> LaTeXT SimpleDB ()
 root evals = do
   thePreamble evals
   document $ theBody evals
 
+
 -- Preamble with some basic info.
 thePreamble :: (MonadLogger m) => Evals a -> LaTeXT m ()
 thePreamble evals = do
-  let n = evals ^. evalsExperiments.experimentsName
+  let n = evals ^. evalsExperiments . experimentsName
   documentclass [] article
   author "Manuel Schneckenreither"
   title $ "Evaluation for ``" <> raw n <> "''"
@@ -75,7 +88,7 @@ thePreamble evals = do
   usepackage [pdftex] hyperref
 
 -- Body with a section.
-theBody :: (MonadLogger m) => Evals a -> LaTeXT m ()
+theBody :: Evals a -> LaTeXT SimpleDB ()
 theBody evals = do
   maketitle
   experimentsInfo (evals ^. evalsExperiments)
@@ -106,37 +119,41 @@ experimentsInfo exps = do
   where mkInfoParam (ExperimentInfoParameter n v) = Row [CellT n, CellT (tshow v)]
 
 
-experimentsEvals :: (MonadLogger m) => Evals a -> LaTeXT m ()
+experimentsEvals :: Evals a -> LaTeXT SimpleDB ()
 experimentsEvals evals = do
   pagebreak "4"
   part "Experiment Evaluations"
-  overReplicationResults evals
+  tables <- lift (mkResultTables evals)
+  liftIO $ print tables
+  writeTables (force tables)
+
+data EvalTables a = EvalTables
+  { periodic               :: ![(Maybe Table, [(StatsDef a, Table)])]
+  , replications           :: ![(Maybe Table, [(StatsDef a, Table)])]
+  , experimentReplications :: ![(Maybe Table, [(StatsDef a, Table)])]
+  , numbers                :: ![(Maybe Table, [(StatsDef a, Table)])]
+  } deriving (Show, Generic, NFData)
+
+mkResultTables :: Evals a -> SimpleDB [EvalTables a]
+mkResultTables evals = do
+  let isExperimentalReplicationUnit UnitExperimentRepetition         = True
+      isExperimentalReplicationUnit UnitBestExperimentRepetitions {} = True
+      isExperimentalReplicationUnit _                                = False
+  forM (evals ^. evalsResults) $ \res -> do
+      groupedEval <- groupEvaluations res
+      let periodEval = filter ((== UnitPeriods) . (^. _1)) groupedEval
+      let replicEval = filter ((== UnitReplications) . (^. _1)) groupedEval
+      let expereEval = filter (isExperimentalReplicationUnit . (^. _1)) groupedEval
+      let numberEval = filter ((== UnitScalar) . (^. _1)) groupedEval
+      let periodicTbl = map (mkExperimentTable evals) periodEval
+      let replicationTbl = map (mkExperimentTable evals) replicEval
+      let experimentalReplicationTbl = map (mkExperimentTable evals) expereEval
+      let numberEvalsTbl = map (mkExperimentTable evals) numberEval
+      return $ force $ EvalTables periodicTbl replicationTbl experimentalReplicationTbl numberEvalsTbl
 
 
-overReplicationResults :: (MonadLogger m) => Evals a -> LaTeXT m ()
-overReplicationResults evals = do
-  -- let isOverReplication res = res ^. evalUnit == UnitReplications
-  --     isOverExperiments res = res ^. evalUnit == UnitExperimentRepetition
-  --     isOverPeriods res = res ^. evalUnit == UnitPeriods
-  --     isEvalVectorOfPeriods (EvalVector _ _ vals) = all (== UnitPeriods) (vals ^.. traversed . evalUnit)
-  -- let isPeriodicEval (UnitPeriods, _, _) = True
-  --     isPeriodicEval _                   = False
-  -- let isReplicationEval (UnitReplications, _, _) = True
-  --     isReplicationEval _                        = False
-  let isExperimentalReplicationUnit UnitExperimentRepetition        = True
-      isExperimentalReplicationUnit UnitBestExperimentRepetitions{} = True
-      isExperimentalReplicationUnit _                               = False
-  let groupedEvals = map groupEvaluations (evals ^. evalsResults)
-  let periodEvals = map (filter ((== UnitPeriods) . (^._1))) groupedEvals
-      replicEvals = map (filter ((== UnitReplications) . (^._1))) groupedEvals
-      expereEvals = map (filter (isExperimentalReplicationUnit . (^._1))) groupedEvals
-      numberEvals = map (filter ((== UnitScalar) . (^._1))) groupedEvals
-
-  let periodicTbls = map (map (mkExperimentTable evals)) periodEvals
-  let replicationTbls = map (map (mkExperimentTable evals)) replicEvals
-  let experimentalReplicationTbls = map (map (mkExperimentTable evals)) expereEvals
-  let numberEvalsTbls = map (map (mkExperimentTable evals)) numberEvals
-
+writeTables :: [EvalTables a] -> LaTeXT SimpleDB ()
+writeTables !(force -> tables) = do
   section "Scalar Number Evaluations:"
   zipWithM_
     (\nr exps ->
@@ -147,7 +164,7 @@ overReplicationResults evals = do
              mapM_ printTableWithName vs)
           exps))
     [1 ..]
-    experimentalReplicationTbls
+    (map numbers tables)
   -- unless (null experimentalReplicationTbls) $ do
   section "Repetition Evaluations"
   zipWithM_
@@ -159,8 +176,7 @@ overReplicationResults evals = do
              mapM_ printTableWithName vs)
           exps))
     [1 ..]
-    experimentalReplicationTbls
-
+    (map experimentReplications tables)
   --  unless (null replicationTbls) $ do
   section "Replication Evaluations"
   zipWithM_
@@ -172,8 +188,7 @@ overReplicationResults evals = do
              mapM_ printTableWithName vs)
           exps))
     [1 ..]
-    replicationTbls
-
+    (map replications tables)
   -- unless (null periodicTbls) $ do
   section "Periodic Evaluations"
   zipWithM_
@@ -185,7 +200,7 @@ overReplicationResults evals = do
             mapM_ printTableWithName vs)
          exps)
     [1 ..]
-    periodicTbls
+    (map periodic tables)
 
 
 printTableWithName :: (Monad m, MonadLogger m) => (StatsDef a, Table) -> LaTeXT m ()
@@ -193,8 +208,10 @@ printTableWithName (nm, tbl) = do
   paragraph (raw $ prettyStatsDef nm)
   printTable tbl
 
-groupEvaluations :: ExperimentEval a -> [(Unit, ExperimentEval a, [EvalResults a])]
-groupEvaluations eval@(ExperimentEval _ res _) = map (\xs@((_,x):_) -> (x, eval, map fst xs)) $ groupBy ((==) `on` snd) $ sortBy (compare `on` snd) (map (\x -> (x, leastUnit x)) res)
+groupEvaluations :: ExperimentEval a -> SimpleDB [(Unit, ExperimentEval a, [EvalResults a])]
+groupEvaluations eval@(ExperimentEval _ res _) = do
+  res' <- mapM mkTransientlyAvailable res
+  return $ map (\xs@((_,x):_) -> (x, eval, map fst xs)) $ groupBy ((==) `on` snd) $ sortBy (compare `on` snd) (map (\x -> (x, leastUnit x)) res')
 
 leastUnit :: EvalResults a -> Unit
 leastUnit (EvalValue _ u _ _ _)    = u
@@ -252,11 +269,11 @@ mkEvalResult leastUnit name eval@(EvalVector _ unit vals) =
     mkRows :: [[Cell]] -> [Row] -> [[Cell]]
     mkRows accs vs = zipWith (++) accs (map fromRow vs)
     fromRow (Row xs) = xs
-    unitName UnitPeriods = "Period:"
-    unitName UnitReplications = "Replication:"
+    unitName UnitPeriods              = "Period:"
+    unitName UnitReplications         = "Replication:"
     unitName UnitExperimentRepetition = "Experiment Repetition:"
-    unitName (UnitBestExperimentRepetitions bestNr) = "Best " <> tshow bestNr <> " Experiment Repetitions:"
-    unitName UnitScalar = "Value:"
+    -- unitName (UnitBestExperimentRepetitions bestNr) = "Best " <> tshow bestNr <> " Experiment Repetitions:"
+    unitName UnitScalar               = "Value:"
 mkEvalResult leastUnit [] (EvalValue _ u n x y) = TableResult (Row [getXValue x]) [Row [CellD y]]
   where getXValue (Left x)  = CellT $ tshow x
         getXValue (Right d) = CellD d

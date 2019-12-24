@@ -23,6 +23,7 @@ import           Database.Persist.Postgresql  (SqlBackend, runSqlConn, withPostg
 import           System.Directory
 import           System.FilePath.Posix
 
+import           Experimenter.Availability
 import           Experimenter.DatabaseSetting
 import           Experimenter.Eval.Reduce
 import           Experimenter.Eval.Type       as E
