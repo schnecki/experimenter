@@ -128,8 +128,6 @@ loadExperimentsResultsM filtFin runExpM dbSetup setup initInpSt mkInitSt key =
             all (\expRes -> maybe 0 (lengthAvailabilityList . view results) (expRes ^. warmUpResults) == setting ^. evaluationWarmUpSteps) (exp ^. experimentResults.traversed.evaluationResults) && -- warm up length
             all (\expRes -> maybe 0 (lengthAvailabilityList . view results) (expRes ^. evalResults) == setting ^. evaluationSteps) (exp ^. experimentResults.traversed.evaluationResults) -- eval length
           filterFinished = over experiments (if filtFin then filter isFinished else id)
-
-
       fmap filterFinished <$> loadExperimentsResults setting initInpSt initSt (toSqlKey key)
 
 

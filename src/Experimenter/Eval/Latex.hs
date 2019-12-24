@@ -128,7 +128,11 @@ experimentsEvals evals = do
   -- input $ replicationFile (evals ^. evalsExperiments)
   -- input $ periodicFile (evals ^. evalsExperiments)
 
-  tables <- lift (mkResultTables evals)
+  tablesP <- lift $ mkResultTablesFor UnitPeriods evals
+  tablesR <- lift $ mkResultTablesFor UnitReplications evals
+  tablesE <- lift $ mkResultTablesFor UnitExperimentRepetition evals
+  tablesS <- lift $ mkResultTablesFor UnitScalar evals
+  let tables = tablesP <> tablesR <> tablesE <> tablesS
   liftIO $ print tables
   writeTables (force tables)
 
@@ -146,8 +150,8 @@ instance Monoid (EvalTables a) where
   mempty = EvalTables [] [] [] []
 
 
-mkResultTables :: Evals a -> SimpleDB [EvalTables a]
-mkResultTables evals =
+mkResultTablesFor :: Unit -> Evals a -> SimpleDB [EvalTables a]
+mkResultTablesFor unit evals =
   forM (evals ^. evalsResults) $ \eval@(ExperimentEval _ avRes _) ->
     fmap (force . mconcat) $
     forM avRes $ \av -> do
@@ -155,10 +159,10 @@ mkResultTables evals =
       let tbl = mkExperimentTable evals (leastUnit res, eval, [res])
       return $
         case leastUnit res of
-          UnitPeriods              -> EvalTables [tbl] [] [] []
-          UnitReplications         -> EvalTables [] [tbl] [] []
-          UnitExperimentRepetition -> EvalTables [] [] [tbl] []
-          UnitScalar               -> EvalTables [] [] [] [tbl]
+          UnitPeriods -> EvalTables [tbl | unit == UnitPeriods] [] [] []
+          UnitReplications -> EvalTables [] [tbl | unit == UnitReplications] [] []
+          UnitExperimentRepetition -> EvalTables [] [] [tbl | unit == UnitExperimentRepetition] []
+          UnitScalar -> EvalTables [] [] [] [tbl | unit == UnitScalar]
 
 
 writeTables :: [EvalTables a] -> LaTeXT SimpleDB ()

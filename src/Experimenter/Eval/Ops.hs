@@ -1,11 +1,12 @@
+{-# LANGUAGE BangPatterns        #-}
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE GADTs               #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE Strict              #-}
-{-# LANGUAGE TemplateHaskell     #-}
 {-# LANGUAGE TypeFamilies        #-}
+{-# LANGUAGE ViewPatterns        #-}
 
 
 module Experimenter.Eval.Ops
@@ -69,11 +70,11 @@ runner exps evals = do
   time <- liftIO getCurrentTime
   selectKeysList [EvalResultTime <=. addUTCTime (-60*60*24) time] [] >>= mapM_ delete
   -- Evaluate and get new data
-  res <- mapM mkEval (exps ^. experiments)
-  return $ force $ Evals (exps {_experiments = []}) res
+  !(force -> res) <- mapM mkEval (exps ^. experiments)
+  return $ Evals (exps {_experiments = []}) res
   where
     mkEval e = do
-      xs <- mapM (genExperiment e >=> saveEvalResults) evals
+      xs <- mapM (genExperiment e >=> saveEvalResults . force) evals
       return $ force $ ExperimentEval (e ^. experimentNumber) xs (e { _experimentResults = []})
 
 saveEvalResults :: (ExperimentDef a) => EvalResults a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Availability IO (EvalResults a))
@@ -94,21 +95,21 @@ saveEvalResults ev = do
 
 
 genExperiment :: (ExperimentDef a) => Experiment a -> StatsDef a -> DB a (EvalResults a)
-genExperiment exp (Named eval name) = addName <$> genExperiment exp eval
+genExperiment exp (Named eval name) = addName <$!!> genExperiment exp eval
   where addName res = res { _evalType = Named (res ^. evalType) name }
 genExperiment exp eval =
   case eval of
-    Mean OverExperimentRepetitions eval'   -> reduce eval' <$> genExpRes id (Id eval')
-    Sum OverExperimentRepetitions eval'    -> reduce eval' <$> genExpRes id (Id eval')
-    StdDev OverExperimentRepetitions eval' -> reduce eval' <$> genExpRes id (Id eval')
+    Mean OverExperimentRepetitions eval'   -> reduce eval' <$!!> genExpRes id (Id eval')
+    Sum OverExperimentRepetitions eval'    -> reduce eval' <$!!> genExpRes id (Id eval')
+    StdDev OverExperimentRepetitions eval' -> reduce eval' <$!!> genExpRes id (Id eval')
     -- Mean (OverBestXExperimentRepetitions nr cmp) eval' -> reduce eval' <$> genExpRes (take nr . sortBy (cmp `on` id)) (Id eval')
     -- Sum (OverBestXExperimentRepetitions nr cmp) eval' -> reduce eval' <$> genExpRes (take nr . sortBy (cmp `on` id)) (Id eval')
     -- StdDev (OverBestXExperimentRepetitions nr cmp) eval' -> reduce eval' <$> genExpRes (take nr . sortBy (cmp `on` id)) (Id eval')
-    _                                      -> packGenRes <$> genExpRes id eval
+    _                                      -> packGenRes <$!!> genExpRes id eval
   where
     -- packGenRes [x] = x
     packGenRes xs  = EvalVector eval UnitExperimentRepetition xs
-    genExpRes f e = mapM (genExperimentResult exp e) (f $ exp ^. experimentResults)
+    genExpRes f e = mapM (fmap force . genExperimentResult exp e) (f $ exp ^. experimentResults)
     reduce eval' = reduceUnary eval . EvalVector (Id eval') UnitExperimentRepetition
 
 
@@ -116,50 +117,51 @@ genExperimentResult :: (ExperimentDef a) => Experiment a -> StatsDef a -> Experi
 genExperimentResult _ (Named _ n) _ = error $ "An evaluation may only be named on the outermost function in evaluation " <> T.unpack (E.decodeUtf8 n)
 genExperimentResult exp eval expRes =
   case eval of
-    Mean OverReplications eval'   -> reduce <$> genRepl (Id eval')
-    StdDev OverReplications eval' -> reduce <$> genRepl (Id eval')
-    Sum OverReplications eval'    -> reduce <$> genRepl (Id eval')
-    _                             -> packGenRes <$> genRepl eval
-    -- packGenRes [x] = x
+    Mean OverReplications eval'   -> reduce <$!!> genRepl (Id eval')
+    StdDev OverReplications eval' -> reduce <$!!> genRepl (Id eval')
+    Sum OverReplications eval'    -> reduce <$!!> genRepl (Id eval')
+    _                             -> packGenRes <$!!> genRepl eval
   where
-    packGenRes xs = EvalVector eval UnitReplications xs
-    genRepl e = mapM (genReplication exp e) (expRes ^. evaluationResults)
-    reduce inp = EvalVector eval (getUnit inp) $ map (reduceUnary eval)  $ transpose UnitReplications inp
-    getUnit (EvalVector _ unit _:_)       = unit
-    getUnit (EvalValue _ unit _ _ _:_)    = unit
+    packGenRes = EvalVector eval UnitReplications
+    genRepl e = mapM (fmap force . genReplication exp e) (expRes ^. evaluationResults)
+    reduce !inp = force $! EvalVector eval (getUnit inp) $ map (reduceUnary eval) $ transpose UnitReplications inp
+    getUnit (EvalVector _ unit _:_) = unit
+    getUnit (EvalValue _ unit _ _ _:_) = unit
     getUnit (EvalReducedValue _ unit _:_) = unit
+    getUnit [] = error "Unexpected empty data in getUnit in genExperimentResult in Eval.Ops"
 
 
 genReplication :: (ExperimentDef a) => Experiment a -> StatsDef a -> ReplicationResult a -> DB a (EvalResults a)
-genReplication exp eval repl = fromMaybe (error "Evaluation data is incomplete!") <$> sequence (genResultData exp eval <$> (repl ^. evalResults))
+genReplication exp eval repl = fromMaybe (error "Evaluation data is incomplete!") <$!!> sequence (fmap force . genResultData exp eval <$!> (repl ^. evalResults))
 
 
 genResultData :: (ExperimentDef a) => Experiment a -> StatsDef a -> ResultData a -> DB a (EvalResults a)
 genResultData _ (Named _ n) _ = error $ "An evaluation may only be named on the outermost function in evaluation " <> T.unpack (E.decodeUtf8 n)
 genResultData exp eval repl =
   case eval of
-    Mean OverPeriods eval'   -> reduceUnary eval <$> genResultData exp (Id eval') repl
-    StdDev OverPeriods eval' -> reduceUnary eval <$> genResultData exp (Id eval') repl
-    Sum OverPeriods eval'    -> reduceUnary eval <$> genResultData exp (Id eval') repl
-    Id eval'                 -> evalOf exp eval' repl
-    _                        -> genExperiment exp eval
+    Mean OverPeriods eval'   -> reduceUnary eval <$!!> genResultData exp (Id eval') repl
+    StdDev OverPeriods eval' -> reduceUnary eval <$!!> genResultData exp (Id eval') repl
+    -- Sum OverPeriods of'@Of{} -> reduceUnary eval <$!!> evalOf exp of' repl
+    Sum OverPeriods eval'    -> reduceUnary eval <$!!> genResultData exp (Id eval') repl
+    Id eval'                 -> force <$!> evalOf exp eval' repl
+    _                        -> force <$!> genExperiment exp eval
 
 
 evalOf :: (ExperimentDef a) => Experiment a -> Of a -> ResultData a -> DB a (EvalResults a)
 evalOf exp eval resData =
   case eval of
     Of name -> do
-      xs <- mkTransientlyAvailable $ snd (resData ^. results)
-      return $ EvalVector (Id $ Of name) UnitPeriods $ sortBy (compare `on` (^?! evalX)) $ map (fromMeasure $ E.decodeUtf8 name) xs
+      !(force -> xs) <- mkTransientlyAvailable $ snd (resData ^. results)
+      return $ force $ EvalVector (Id $ Of name) UnitPeriods $ sortBy (compare `on` (^?! evalX)) $ map (fromMeasure $ E.decodeUtf8 name) xs
     Stats def -> genExperiment exp def
-    Div eval1 eval2 -> reduceBinaryOf eval <$> evalOf exp eval1 resData <*> evalOf exp eval2 resData
-    Add eval1 eval2 -> reduceBinaryOf eval <$> evalOf exp eval1 resData <*> evalOf exp eval2 resData
-    Sub eval1 eval2 -> reduceBinaryOf eval <$> evalOf exp eval1 resData <*> evalOf exp eval2 resData
-    Mult eval1 eval2 -> reduceBinaryOf eval <$> evalOf exp eval1 resData <*> evalOf exp eval2 resData
-    First eval' -> reduceUnaryOf eval <$> evalOf exp eval' resData
-    Last eval' -> reduceUnaryOf eval <$> evalOf exp eval' resData
-    EveryXthElem _ eval' -> reduceUnaryOf eval <$> evalOf exp eval' resData
-    Length eval' -> reduceUnaryOf eval <$> evalOf exp eval' resData
+    Div eval1 eval2 -> reduceBinaryOf eval <$!!> evalOf exp eval1 resData <*> evalOf exp eval2 resData
+    Add eval1 eval2 -> reduceBinaryOf eval <$!!> evalOf exp eval1 resData <*> evalOf exp eval2 resData
+    Sub eval1 eval2 -> reduceBinaryOf eval <$!!> evalOf exp eval1 resData <*> evalOf exp eval2 resData
+    Mult eval1 eval2 -> reduceBinaryOf eval <$!!> evalOf exp eval1 resData <*> evalOf exp eval2 resData
+    First eval' -> reduceUnaryOf eval <$!!> evalOf exp eval' resData
+    Last eval' -> reduceUnaryOf eval <$!!> evalOf exp eval' resData
+    EveryXthElem _ eval' -> reduceUnaryOf eval <$!!> evalOf exp eval' resData
+    Length eval' -> reduceUnaryOf eval <$!!> evalOf exp eval' resData
 
 fromMeasure :: T.Text -> Measure -> EvalResults a
 fromMeasure name (Measure p res) = case find ((==name) . view resultName) res of
