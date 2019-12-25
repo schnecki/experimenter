@@ -19,6 +19,8 @@ module Experimenter.Run
     , runExperimentsM
     , runExperimentsIO
     , loadExperimentsResultsM
+    , loadStateAfterPreparation
+    , loadStateAfterPreparation2
     ) where
 
 import           Control.Arrow                (first, (&&&), (***))
@@ -68,6 +70,7 @@ import           Experimenter.Util
 
 type Updated = Bool
 type InitialState a = a
+type State a = a
 type InitialInputState a = InputState a
 type SkipPreparation = Bool
 type Rands = ([Seed],[Seed],[Seed]) -- ^ Preparation, Warm Up and Evaluation random generators
@@ -94,13 +97,68 @@ runner runExpM dbSetup setup initInpSt mkInitSt =
   fmap force $ do
     runStdoutLoggingT $ withPostgresqlPool (connectionString dbSetup) (parallelConnections dbSetup) $ liftSqlPersistMPool $ runMigration migrateAll
     runExpM $
-      (runStdoutLoggingT . filterLogger (\s _ -> s /= "SQL")) $
+      runStdoutLoggingT $ filterLogger (\s _ -> s /= "SQL") $
       withPostgresqlConn (connectionString dbSetup) $ \backend ->
         flip runSqlConn backend $ do
           initSt <- lift $ lift mkInitSt
           $(logInfo) "Created initial state and will now check the DB for loading or creating experiments"
           let expSetting = setup initSt
           loadExperiments expSetting initInpSt initSt >>= checkUniqueParamNames >>= runExperimenter dbSetup expSetting initInpSt initSt
+
+loadStateAfterPreparation2 :: ExperimentDef a =>   (ExpM a (Maybe a) -> IO (Maybe a))  -> DatabaseSetting -> (a -> ExperimentSetting) -> InputState a -> ExpM a a -> Int -> Int -> IO (Maybe a)
+loadStateAfterPreparation2 runExpM dbSetup setup initInpSt mkInitSt expNr expRepNr =
+  fmap force $ runExpM $ runStdoutLoggingT $ filterLogger (\s _ -> s /= "SQL") $ withPostgresqlConn (connectionString dbSetup) $ \backend ->
+    flip runSqlConn backend $ do
+      initSt <- lift $ lift mkInitSt
+      $(logInfo) "Created initial state and will now check the DB for loading or creating experiments"
+      let expSetting = setup initSt
+      exps <- loadExperiments expSetting initInpSt initSt
+      $(logInfo) "Loaded exps"
+      let xs = exps ^.. experiments . traversed . filtered isExp . experimentResults . traversed . filtered isExpRep . preparationResults . traversed . endState
+      case xs of
+        [] -> error "Could not find this experiment or the requested experiment repetition"
+        (x:_) -> do
+          av <- fromAvailable <$> mkAvailable x
+          $(logInfo) "Made state available"
+          return av
+  where
+    fromAvailable (Available x) = x
+    fromAvailable _ = error "unexpected AvailableOnDemand in loadStateAfterPreparation"
+    isExp x = x ^. experimentNumber == expNr
+    isExpRep x = x ^. repetitionNumber == expRepNr
+
+
+loadStateAfterPreparation ::
+     (ExperimentDef a)
+  => (ExpM a (Maybe b) -> IO (Maybe b))
+  -> DatabaseSetting
+  -> MkExperimentSetting a
+  -> InputState a
+  -> ExpM a a
+  -> Int
+  -> Int
+  -> (a -> ExpM a b)
+  -> IO (Maybe b)
+loadStateAfterPreparation runExpM dbSetup setup initInpSt mkInitSt expNr expRepNr f =
+  runExpM $ do
+    mSt <-
+      runStdoutLoggingT $ filterLogger (\s _ -> s /= "SQL") $ withPostgresqlConn (connectionString dbSetup) $ \backend ->
+        flip runSqlConn backend $ do
+          initSt <- lift (lift mkInitSt)
+          let expSetting = setup initSt
+              isExp x = x ^. experimentNumber == expNr
+              isExpRep x = x ^. repetitionNumber == expRepNr
+          exp <- loadExperiments expSetting initInpSt initSt
+          let xs = exp ^.. experiments . traversed . filtered isExp . experimentResults . traversed . filtered isExpRep . preparationResults . traversed . endState
+          case xs of
+            [] -> error "Could not find this experiment or the requested experiment repetition"
+            (x:_) -> fmap fromAvailable $ mkAvailable x
+    case mSt of
+      Nothing -> return Nothing
+      Just st -> return <$> f st
+  where
+    fromAvailable (Available x) = x
+    fromAvailable _ = error "unexpected AvailableOnDemand in loadStateAfterPreparation"
 
 type OnlyFinishedExperiments = Bool
 

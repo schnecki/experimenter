@@ -47,6 +47,7 @@ dependencies:
   - deepseq
   - cereal-vector
   - vector
+  - containers
   - filepath
 
 library:

@@ -13,12 +13,14 @@ module Experimenter.Eval.Latex
     , writeAndCompileLatex
     ) where
 
+import           Control.Arrow                ((&&&), (***))
 import           Control.DeepSeq
 import           Control.Lens                 hiding ((&))
 import           Control.Monad                (forM, unless, void, zipWithM_)
 import           Control.Monad.Logger
 import           Data.Function                (on)
 import           Data.List                    as L (find, foldl', groupBy, sortBy)
+import qualified Data.Map.Strict              as M
 import           Data.Maybe                   (fromMaybe)
 import qualified Data.Serialize               as S
 import qualified Data.Text                    as T
@@ -123,28 +125,25 @@ experimentsEvals :: Evals a -> LaTeXT SimpleDB ()
 experimentsEvals evals = do
   pagebreak "4"
   part "Experiment Evaluations"
-  -- input $ scalarFile (evals ^. evalsExperiments)
-  -- input $ repetitionFile (evals ^. evalsExperiments)
-  -- input $ replicationFile (evals ^. evalsExperiments)
-  -- input $ periodicFile (evals ^. evalsExperiments)
-
-  tablesP <- lift $ mkResultTablesFor UnitPeriods evals
-  tablesR <- lift $ mkResultTablesFor UnitReplications evals
-  tablesE <- lift $ mkResultTablesFor UnitExperimentRepetition evals
-  tablesS <- lift $ mkResultTablesFor UnitScalar evals
+  !(force -> tablesP) <- lift $! mkResultTablesFor UnitPeriods evals
+  !(force -> tablesR) <- lift $! mkResultTablesFor UnitReplications evals
+  !(force -> tablesE) <- lift $! mkResultTablesFor UnitExperimentRepetition evals
+  !(force -> tablesS) <- lift $! mkResultTablesFor UnitScalar evals
   let tables = tablesP <> tablesR <> tablesE <> tablesS
+      mParams = M.fromList $ map (view evalExperimentNumber &&& paramSettingTable evals) (evals ^. evalsResults)
   liftIO $ print tables
-  writeTables (force tables)
+  writeTables mParams (force tables)
+
 
 data EvalTables a = EvalTables
-  { periodic               :: ![(Maybe Table, [(StatsDef a, Table)])]
-  , replications           :: ![(Maybe Table, [(StatsDef a, Table)])]
-  , experimentReplications :: ![(Maybe Table, [(StatsDef a, Table)])]
-  , numbers                :: ![(Maybe Table, [(StatsDef a, Table)])]
+  { periodic               :: ![(Int, [(StatsDef a, Table)])]
+  , replications           :: ![(Int, [(StatsDef a, Table)])]
+  , experimentReplications :: ![(Int, [(StatsDef a, Table)])]
+  , numbers                :: ![(Int, [(StatsDef a, Table)])]
   } deriving (Show, Generic, NFData)
 
 instance Semigroup (EvalTables a) where
-  EvalTables ap ar ae an <> EvalTables bp br be bn = EvalTables (ap<>bp) (ar <> br) (ae <> be) (an <> bn)
+  EvalTables ap ar ae an <> EvalTables bp br be bn = EvalTables (ap <> bp) (ar <> br) (ae <> be) (an <> bn)
 
 instance Monoid (EvalTables a) where
   mempty = EvalTables [] [] [] []
@@ -152,81 +151,42 @@ instance Monoid (EvalTables a) where
 
 mkResultTablesFor :: Unit -> Evals a -> SimpleDB [EvalTables a]
 mkResultTablesFor unit evals =
+  fmap force $!
   forM (evals ^. evalsResults) $ \eval@(ExperimentEval _ avRes _) ->
-    fmap (force . mconcat) $
+    fmap (force . mconcat) $!
     forM avRes $ \av -> do
       res <- mkTransientlyAvailable av
-      let tbl = mkExperimentTable evals (leastUnit res, eval, [res])
       return $
-        case leastUnit res of
-          UnitPeriods -> EvalTables [tbl | unit == UnitPeriods] [] [] []
-          UnitReplications -> EvalTables [] [tbl | unit == UnitReplications] [] []
-          UnitExperimentRepetition -> EvalTables [] [] [tbl | unit == UnitExperimentRepetition] []
-          UnitScalar -> EvalTables [] [] [] [tbl | unit == UnitScalar]
+        let ~tbl = mkExperimentTable evals (leastUnit res, eval, [res])
+         in case leastUnit res of
+              UnitPeriods              -> EvalTables [tbl | unit == UnitPeriods] [] [] []
+              UnitReplications         -> EvalTables [] [tbl | unit == UnitReplications] [] []
+              UnitExperimentRepetition -> EvalTables [] [] [tbl | unit == UnitExperimentRepetition] []
+              UnitScalar               -> EvalTables [] [] [] [tbl | unit == UnitScalar]
 
 
-writeTables :: [EvalTables a] -> LaTeXT SimpleDB ()
-writeTables !(force -> tables) = do
-  section "Scalar Number Evaluations:"
-  zipWithM_
-    (\nr exps ->
-       (mapM_
-          (\(mPs, vs) -> do
-             subsection $ "Experiment No. " <> raw (tshow nr)
-             maybe "There are no configured parameters!" printTable mPs
-             mapM_ printTableWithName vs)
-          exps))
-    [1 ..]
-    (map numbers tables)
-  -- unless (null experimentalReplicationTbls) $ do
-  section "Repetition Evaluations"
-  zipWithM_
-    (\nr exps ->
-       (mapM_
-          (\(mPs, vs) -> do
-             subsection $ "Experiment No. " <> raw (tshow nr)
-             maybe "There are no configured parameters!" printTable mPs
-             mapM_ printTableWithName vs)
-          exps))
-    [1 ..]
-    (map experimentReplications tables)
-  --  unless (null replicationTbls) $ do
-  section "Replication Evaluations"
-  zipWithM_
-    (\nr exps ->
-       (mapM_
-          (\(mPs, vs) -> do
-             subsection $ "Experiment No. " <> raw (tshow nr)
-             maybe "There are no configured parameters!" printTable mPs
-             mapM_ printTableWithName vs)
-          exps))
-    [1 ..]
-    (map replications tables)
-  -- unless (null periodicTbls) $ do
-  section "Periodic Evaluations"
-  zipWithM_
-    (\nr exps ->
-       mapM_
-         (\(mPs, vs) -> do
-            subsection $ "Experiment No. " <> raw (tshow nr)
-            maybe "There are no configured parameters!" printTable mPs
-            mapM_ printTableWithName vs)
-         exps)
-    [1 ..]
-    (map periodic tables)
+writeTables :: M.Map Int (Maybe Table) -> [EvalTables a] -> LaTeXT SimpleDB ()
+writeTables params !(force -> tables) = do
+  void $ writeTableFor "Scalar Value" (concatMap numbers tables)
+  void $ writeTableFor "Repetition" (concatMap experimentReplications tables)
+  void $ writeTableFor "Replications" (concatMap replications tables)
+  void $ writeTableFor "Periodic" (concatMap periodic tables)
+  where
+    writeTableFor :: LaTeXT SimpleDB () -> [(Int, [(StatsDef a, Table)])] -> LaTeXT SimpleDB [()]
+    writeTableFor name tbls = do
+      section (name <> " Evaluations")
+      forM (M.keys params) $ \k -> do
+        let tblsFiltered = filter  (( == k) . fst) tbls
+        unless (null tblsFiltered) $ do
+          subsection $ "Experiment No. " <> raw (tshow k)
+          maybe "There are no configured parameters!" printTable (M.findWithDefault Nothing k params)
+          mapM_ (\(_, tbls') -> forM tbls' $ \statsDefTbl -> printTableWithName statsDefTbl) tblsFiltered
 
 
 printTableWithName :: (MonadLogger m) => (StatsDef a, Table) -> LaTeXT m ()
 printTableWithName (nm, tbl) = do
   paragraph (raw $ prettyStatsDef nm)
   printTable tbl
-
-
--- groupEvaluations :: ExperimentEval a -> SimpleDB [(Unit, ExperimentEval a, [EvalResults a])]
--- groupEvaluations eval@(ExperimentEval _ res _) = do
---   res' <- mapM mkTransientlyAvailable res
---   return $ map (\xs@((_, x):_) -> (x, eval, map fst xs)) $ groupBy ((==) `on` snd) $ sortBy (compare `on` snd)
---     (map (\x -> (x, leastUnit x)) res')
 
 
 leastUnit :: EvalResults a -> Unit
@@ -256,15 +216,14 @@ mkNamesUntil unit res
       _ -> error $ "cannot unpack res: " <> show res
 
 
-mkExperimentTable :: Evals a -> (Unit, ExperimentEval a, [EvalResults a]) -> (Maybe Table, [(StatsDef a, Table)])
+mkExperimentTable :: Evals a -> (Unit, ExperimentEval a, [EvalResults a]) -> (Int, [(StatsDef a, Table)])
 mkExperimentTable evals (lowestUnit, eval, res) =
-  let params = paramSettingTable evals eval
-      resUnit = map (\rs -> (mkNames rs,unpackUntil lowestUnit rs)) res
+  let resUnit = map (\rs -> (mkNames rs, unpackUntil lowestUnit rs)) res
       tableRes = map (uncurry (zipWith (mkEvalResult lowestUnit))) resUnit
       tbls = map toTables tableRes
       mkNames = map (map CellT . return) . mkNamesUntil lowestUnit
       evalStatDefs = map (^. evalType) res
-   in (params, zip evalStatDefs tbls)
+   in (eval ^. evalExperimentNumber, zip evalStatDefs tbls)
 
 
 data TableResult = TableResult

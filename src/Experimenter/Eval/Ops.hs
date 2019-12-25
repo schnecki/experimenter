@@ -70,28 +70,35 @@ runner exps evals = do
   time <- liftIO getCurrentTime
   selectKeysList [EvalResultTime <=. addUTCTime (-60*60*24) time] [] >>= mapM_ delete
   -- Evaluate and get new data
-  !(force -> res) <- mapM mkEval (exps ^. experiments)
+  !(force -> res) <- mapMRnf mkEval (exps ^. experiments)
   return $ Evals (exps {_experiments = []}) res
   where
     mkEval e = do
-      xs <- mapM (genExperiment e >=> saveEvalResults . force) evals
+      -- !(force -> xs) <- mapM (genExperiment e >=> fmap force . saveEvalResults) evals
+      !(force -> xs) <- mapMRnf (genExperiment e >=> fmap force . saveEvalResults) evals
       return $ force $ ExperimentEval (e ^. experimentNumber) xs (e { _experimentResults = []})
+
+mapMRnf :: (NFData b, Monad m) => (a -> m b) -> [a] -> m [b]
+mapMRnf _ [] = return []
+mapMRnf f (x:xs) = do
+  !(force -> x') <- f x
+  (x' :) <$!!> mapMRnf f xs
 
 saveEvalResults :: (ExperimentDef a) => EvalResults a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Availability IO (EvalResults a))
 saveEvalResults ev = do
   let bs = runPut (put ev)
   time <- liftIO getCurrentTime
   eId <- insert $ EvalResult time bs
-  let errDB = "Could not get the eval data from the DB. Key " ++ show (fromSqlKey eId)
   return $
     AvailableOnDemand $ do
       mEvalRes <- DB.get eId
-      case mEvalRes of
-        Nothing                -> error errDB
-        Just (EvalResult _ bs) -> return $ fromEiSer $ runGet S.get bs
-  where
-    fromEiSer (Right x)  = x
-    fromEiSer (Left err) = error $ "Could not deserialise eval data: " <> err
+      return $
+        case mEvalRes of
+          Nothing -> error $ "Could not get the eval data from the DB. Key " ++ show (fromSqlKey eId)
+          Just (EvalResult _ bsDb) ->
+            case runGet S.get bsDb of
+              Left err -> error $ "Could not deserialise eval data: " <> err
+              Right x  -> x
 
 
 genExperiment :: (ExperimentDef a) => Experiment a -> StatsDef a -> DB a (EvalResults a)
@@ -109,7 +116,7 @@ genExperiment exp eval =
   where
     -- packGenRes [x] = x
     packGenRes xs  = EvalVector eval UnitExperimentRepetition xs
-    genExpRes f e = mapM (fmap force . genExperimentResult exp e) (f $ exp ^. experimentResults)
+    genExpRes f e = mapMRnf (fmap force . genExperimentResult exp e) (f $ exp ^. experimentResults)
     reduce eval' = reduceUnary eval . EvalVector (Id eval') UnitExperimentRepetition
 
 
@@ -123,7 +130,7 @@ genExperimentResult exp eval expRes =
     _                             -> packGenRes <$!!> genRepl eval
   where
     packGenRes = EvalVector eval UnitReplications
-    genRepl e = mapM (fmap force . genReplication exp e) (expRes ^. evaluationResults)
+    genRepl e = mapMRnf (fmap force . genReplication exp e) (expRes ^. evaluationResults)
     reduce !inp = force $! EvalVector eval (getUnit inp) $ map (reduceUnary eval) $ transpose UnitReplications inp
     getUnit (EvalVector _ unit _:_) = unit
     getUnit (EvalValue _ unit _ _ _:_) = unit
