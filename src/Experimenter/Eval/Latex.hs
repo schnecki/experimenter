@@ -13,18 +13,15 @@ module Experimenter.Eval.Latex
     , writeAndCompileLatex
     ) where
 
-import           Control.Arrow                ((&&&), (***))
+import           Control.Arrow                ((&&&))
 import           Control.DeepSeq
 import           Control.Lens                 hiding ((&))
-import           Control.Monad                (forM, unless, void, zipWithM_)
+import           Control.Monad                (forM, unless, void)
 import           Control.Monad.Logger
-import           Data.Function                (on)
-import           Data.List                    as L (find, foldl', groupBy, sortBy)
+import           Data.List                    as L (find, foldl')
 import qualified Data.Map.Strict              as M
-import           Data.Maybe                   (fromMaybe)
 import qualified Data.Serialize               as S
 import qualified Data.Text                    as T
-import           Database.Persist.Postgresql  (SqlBackend, runSqlConn, withPostgresqlConn)
 import           GHC.Generics
 import           System.Directory
 import           System.FilePath.Posix
@@ -36,6 +33,7 @@ import           Text.LaTeX.Packages.Inputenc
 
 import           Experimenter.Availability
 import           Experimenter.DatabaseSetting
+import           Experimenter.DB
 import           Experimenter.Eval.Table
 import           Experimenter.Eval.Type
 import           Experimenter.Eval.Util
@@ -43,7 +41,6 @@ import           Experimenter.Models
 import           Experimenter.Parameter.Type
 import           Experimenter.Result.Type
 import           Experimenter.Setting         (ExperimentInfoParameter (..))
-import           Experimenter.Type
 import           Experimenter.Util
 
 
@@ -66,7 +63,7 @@ writeLatex dbSetup evals = do
       dir = expsPath exps
       file = dir </> mainFile exps
   liftIO $ createDirectoryIfMissing True dir
-  res <- runStdoutLoggingT $ filterLogger (\s _ -> s /= "SQL") $ withPostgresqlConn (connectionString dbSetup) $ \backend -> flip runSqlConn backend $ execLaTeXT (root evals)
+  res <- runDB dbSetup $ execLaTeXT (root evals)
   renderFile file res
 
 

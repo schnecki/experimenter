@@ -19,10 +19,10 @@ import           Prelude                     hiding (sum)
 
 
 import           Experimenter.Availability
+import           Experimenter.DB
 import           Experimenter.Models
 import           Experimenter.Result.Type    hiding (Experiments)
 import qualified Experimenter.Result.Type    as R
-import           Experimenter.Type
 
 -- | Over datatype to reduce data vectors.
 

@@ -49,6 +49,7 @@ dependencies:
   - vector
   - containers
   - filepath
+  - conduit
 
 library:
   source-dirs: src

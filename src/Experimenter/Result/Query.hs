@@ -19,8 +19,10 @@ module Experimenter.Result.Query
     , loadReplicationMeasures
     , loadResDataEndState
     , loadResDataStartState
+    , loadParamSetup
     , deserialise
     , mDeserialise
+    , setParams
     , fromRandGen
     , toRandGen
     , serialiseSeed
@@ -239,7 +241,7 @@ splitState bs
     splitLength = 128000000     -- 128MB as ByteString is composed of Word8 (8-bit unsigned integer = 1 byte) elements
 
 
-setParams :: (PersistUniqueRead backend, PersistQueryRead backend, BackendCompatible SqlBackend backend, ExperimentDef a) => Key Exp -> a -> ReaderT backend (LoggingT (ExpM a)) a
+setParams :: (MonadIO m, ExperimentDef a) => Key Exp -> a -> ReaderT SqlBackend (LoggingT m) a
 setParams expId st = do
   paramSettings <- loadParamSetup expId
   foldM setParams' st paramSettings
@@ -300,8 +302,8 @@ toRandGen bs = do
     Left err -> error $ "Could not deserialise random generator. Error Message: " <> err
     Right (vec :: V.Vector Word32) -> liftIO (restore $ toSeed vec)
 
--- loadParamSetup :: (PersistStoreRead backend, ExperimentDef a) => Key Exp -> ReaderT backend (LoggingT (ExpM a)) [ParameterSetting a]
--- loadParamSetup kExp = L.sortBy (compare `on` view parameterSettingName) . map (mkParameterSetting' . entityVal) <$> selectList [ParamSettingExp ==. kExp] []
+
+loadParamSetup :: (MonadIO m) => Key Exp -> ReaderT SqlBackend m [ParameterSetting a1]
 loadParamSetup kExp = L.sortBy (compare `on` view parameterSettingName) . map (mkParameterSetting' . entityVal) <$> (E.select $ E.from $ \pm -> E.where_ (pm E.^. ParamSettingExp E.==. E.val kExp) >> return pm)
   where
     mkParameterSetting' (ParamSetting _ n v b design) = ParameterSetting n v b (toEnum design)

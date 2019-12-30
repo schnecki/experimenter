@@ -33,6 +33,7 @@ import           Database.Persist.Sql         (fromSqlKey, toSqlKey)
 
 import           Experimenter.Availability
 import           Experimenter.DatabaseSetting
+import           Experimenter.DB
 import           Experimenter.Eval.Reduce
 import           Experimenter.Eval.Type       as E
 import           Experimenter.Experiment
@@ -40,24 +41,13 @@ import           Experimenter.Measure
 import           Experimenter.Models
 import           Experimenter.Result.Type
 import           Experimenter.StepResult
-import           Experimenter.Type
-
--- -- | This function makes only the needed data available, as otherwise the memory requirement is huge for no reason. In
--- -- case needed data is not available an `error` will indicate this bug.
--- makeResDataAvailable :: (ExperimentDef a) => Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Experiments a)
--- makeResDataAvailable exps =
---   mapMOf (experiments . traversed . experimentResults . traversed . evaluationResults . traversed . evalResults . traversed . results) mkAvailableList exps >>=
---   mapMOf (experiments . traversed . experimentResults . traversed . evaluationResults . traversed . evalResults . traversed . inputValues) mkAvailableList
 
 
 genEvalsIO :: (ExperimentDef a, IO ~ ExpM a) => DatabaseSetting -> Experiments a -> [StatsDef a] -> IO (Evals a)
-genEvalsIO dbSetup exps evals =
-  (runStdoutLoggingT . filterLogger (\s _ -> s /= "SQL")) $ withPostgresqlConn (connectionString dbSetup) $ \backend -> flip runSqlConn backend $ runner exps evals
+genEvalsIO = genEvals id
 
 genEvals :: (ExperimentDef a) => (ExpM a (Evals a) -> IO (Evals a)) -> DatabaseSetting -> Experiments a -> [StatsDef a] -> IO (Evals a)
-genEvals runExpM dbSetup exps evals =
-  runExpM $
-  (runStdoutLoggingT . filterLogger (\s _ -> s /= "SQL")) $ withPostgresqlConn (connectionString dbSetup) $ \backend -> flip runSqlConn backend $ runner exps evals
+genEvals runExpM dbSetup exps evals = runExpM $ runDB dbSetup $ runner exps evals
 
 
 runner ::

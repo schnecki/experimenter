@@ -33,6 +33,7 @@ import           Control.Monad.Logger         (LogLevel (..), LoggingT, MonadLog
                                                filterLogger, logDebug, logError, logInfo,
                                                runFileLoggingT, runLoggingT, runNoLoggingT,
                                                runStderrLoggingT, runStdoutLoggingT)
+import qualified Data.ByteString              as B
 import           Data.IORef
 import           Data.List                    (foldl')
 
@@ -56,6 +57,7 @@ import           System.Random.MWC
 
 import           Experimenter.Availability
 import           Experimenter.DatabaseSetting
+import           Experimenter.DB
 import           Experimenter.Experiment
 import           Experimenter.Input
 import           Experimenter.MasterSlave
@@ -97,68 +99,103 @@ runner runExpM dbSetup setup initInpSt mkInitSt =
   fmap force $ do
     runStdoutLoggingT $ withPostgresqlPool (connectionString dbSetup) (parallelConnections dbSetup) $ liftSqlPersistMPool $ runMigration migrateAll
     runExpM $
-      runStdoutLoggingT $ filterLogger (\s _ -> s /= "SQL") $
-      withPostgresqlConn (connectionString dbSetup) $ \backend ->
-        flip runSqlConn backend $ do
-          initSt <- lift $ lift mkInitSt
-          $(logInfo) "Created initial state and will now check the DB for loading or creating experiments"
-          let expSetting = setup initSt
-          loadExperiments expSetting initInpSt initSt >>= checkUniqueParamNames >>= runExperimenter dbSetup expSetting initInpSt initSt
+      runDBWithM id dbSetup $ do
+        initSt <- lift $ lift mkInitSt
+        $(logInfo) "Created initial state and will now check the DB for loading or creating experiments"
+        let expSetting = setup initSt
+        loadExperiments expSetting initInpSt initSt >>= checkUniqueParamNames >>= runExperimenter dbSetup expSetting initInpSt initSt
 
-loadStateAfterPreparation2 :: ExperimentDef a =>   (ExpM a (Maybe a) -> IO (Maybe a))  -> DatabaseSetting -> (a -> ExperimentSetting) -> InputState a -> ExpM a a -> Int -> Int -> IO (Maybe a)
-loadStateAfterPreparation2 runExpM dbSetup setup initInpSt mkInitSt expNr expRepNr =
-  fmap force $ runExpM $ runStdoutLoggingT $ filterLogger (\s _ -> s /= "SQL") $ withPostgresqlConn (connectionString dbSetup) $ \backend ->
+loadStateAfterPreparation2 ::
+     ExperimentDef a => (ExpM a b -> IO b) -> DatabaseSetting -> (a -> ExperimentSetting) -> InputState a -> ExpM a a -> Int -> Int -> (a -> ExpM a b) -> IO b
+loadStateAfterPreparation2 runExpM dbSetup setup initInpSt mkInitSt expNr repNr runOnExperiments = do
+  runStdoutLoggingT $ withPostgresqlPool (connectionString dbSetup) (parallelConnections dbSetup) $ liftSqlPersistMPool $ runMigration migrateAll
+  runExpM $
+    runStdoutLoggingT $
+    filterLogger (\s _ -> s /= "SQL") $
+    withPostgresqlConn (connectionString dbSetup) $ \backend ->
+      flip runSqlConn backend $ do
+        initSt <- lift $ lift mkInitSt
+        $(logInfo) "Created initial state and will now check the DB for loading or creating experiments"
+        let expSetting = setup initSt
+        exps <- loadExperiments expSetting initInpSt initSt
+        let xs = exps ^.. experiments . traversed . filtered isExp . experimentResults . traversed . filtered isExpRep . preparationResults . traversed . endState
+            isExp x = x ^. experimentNumber == expNr
+            isExpRep x = x ^. repetitionNumber == repNr
+            fromAvailable (Available x) = x
+            fromAvailable _ = error "unexpected AvailableOnDemand in loadStateAfterPreparation"
+        borl <- fromAvailable <$> mkAvailable (head xs)
+        $(logInfo) "Made BORL available"
+        lift $ lift $ runOnExperiments (fromJust borl) -- >>= checkUniqueParamNames >>= runExperimenter dbSetup expSetting initInpSt initSt
+
+
+  -- fmap force $ runExpM $ runStdoutLoggingT $ filterLogger (\s _ -> s /= "SQL") $ withPostgresqlConn (connectionString dbSetup) $ \backend ->
+  --   flip runSqlConn backend $ do
+  --     initSt <- lift $ lift mkInitSt
+  --     $(logInfo) "Created initial state and will now check the DB for loading or creating experiments"
+  --     let expSetting = setup initSt
+  --     exps <- loadExperiments expSetting initInpSt initSt
+  --     $(logInfo) "Loaded exps"
+  --     let xs = exps ^.. experiments . traversed . filtered isExp . experimentResults . traversed . filtered isExpRep . preparationResults . traversed . endState
+  --     case xs of
+  --       [] -> error "Could not find this experiment or the requested experiment repetition"
+  --       (x:_) -> do
+  --         av <- fromAvailable <$> mkAvailable x
+  --         $(logInfo) "Made state available"
+  --         return av
+  -- where
+  --   fromAvailable (Available x) = x
+  --   fromAvailable _ = error "unexpected AvailableOnDemand in loadStateAfterPreparation"
+  --   isExp x = x ^. experimentNumber == expNr
+  --   isExpRep x = x ^. repetitionNumber == expRepNr
+
+
+loadStateAfterPreparation :: (ExperimentDef a) => DatabaseSetting -> Int64 -> Int -> Int -> ExpM a (Maybe a)
+loadStateAfterPreparation dbSetup expsId expNr expRepNr =
+  runStdoutLoggingT $
+  filterLogger (\s _ -> s /= "SQL") $
+  withPostgresqlConn (connectionString dbSetup) $ \(backend :: SqlBackend) ->
     flip runSqlConn backend $ do
-      initSt <- lift $ lift mkInitSt
-      $(logInfo) "Created initial state and will now check the DB for loading or creating experiments"
-      let expSetting = setup initSt
-      exps <- loadExperiments expSetting initInpSt initSt
-      $(logInfo) "Loaded exps"
-      let xs = exps ^.. experiments . traversed . filtered isExp . experimentResults . traversed . filtered isExpRep . preparationResults . traversed . endState
-      case xs of
-        [] -> error "Could not find this experiment or the requested experiment repetition"
-        (x:_) -> do
-          av <- fromAvailable <$> mkAvailable x
-          $(logInfo) "Made state available"
-          return av
-  where
-    fromAvailable (Available x) = x
-    fromAvailable _ = error "unexpected AvailableOnDemand in loadStateAfterPreparation"
-    isExp x = x ^. experimentNumber == expNr
-    isExpRep x = x ^. repetitionNumber == expRepNr
-
-
-loadStateAfterPreparation ::
-     (ExperimentDef a)
-  => (ExpM a (Maybe b) -> IO (Maybe b))
-  -> DatabaseSetting
-  -> MkExperimentSetting a
-  -> InputState a
-  -> ExpM a a
-  -> Int
-  -> Int
-  -> (a -> ExpM a b)
-  -> IO (Maybe b)
-loadStateAfterPreparation runExpM dbSetup setup initInpSt mkInitSt expNr expRepNr f =
-  runExpM $ do
-    mSt <-
-      runStdoutLoggingT $ filterLogger (\s _ -> s /= "SQL") $ withPostgresqlConn (connectionString dbSetup) $ \backend ->
-        flip runSqlConn backend $ do
-          initSt <- lift (lift mkInitSt)
-          let expSetting = setup initSt
-              isExp x = x ^. experimentNumber == expNr
-              isExpRep x = x ^. repetitionNumber == expRepNr
-          exp <- loadExperiments expSetting initInpSt initSt
-          let xs = exp ^.. experiments . traversed . filtered isExp . experimentResults . traversed . filtered isExpRep . preparationResults . traversed . endState
-          case xs of
-            [] -> error "Could not find this experiment or the requested experiment repetition"
-            (x:_) -> fmap fromAvailable $ mkAvailable x
-    case mSt of
-      Nothing -> return Nothing
-      Just st -> return <$> f st
-  where
-    fromAvailable (Available x) = x
-    fromAvailable _ = error "unexpected AvailableOnDemand in loadStateAfterPreparation"
+      (Entity expId _) <- fromMaybe (error "experiments not found") <$> selectFirst [ExpExps ==. toSqlKey expsId, ExpNumber ==. expNr] []
+      (Entity expResId expRes) <- fromMaybe (error "experiment not found") <$> selectFirst [ExpResultExp ==. expId] []
+      case expRes ^. expResultPrepResultData of
+        Nothing -> return Nothing
+        Just prepResDataId -> do
+          parts <- fmap (view prepEndStatePartData . entityVal) <$> selectList [PrepEndStatePartResultData ==. prepResDataId] [Asc PrepEndStatePartNumber]
+          if null parts
+            then return Nothing
+            else do
+              mSer <- lift $ deserialise (T.pack "end state") (B.concat parts)
+              res <- lift $ lift $ maybe (return Nothing) (fmap Just . deserialisable) mSer
+              force <$> traverse (setParams expId) res
+  -- where
+  --   setParams :: (MonadIO m, ExperimentDef a) => Key Exp -> a -> ReaderT SqlBackend m a
+  --   setParams expId st = do
+  --     paramSettings <- loadParamSetup expId
+  --     return $ foldl' setParams' st paramSettings
+  --     where
+  --       parameterSetup = parameters st
+  --       setParams' st (ParameterSetting n bs drp _) =
+  --         case L.find (\(ParameterSetup name _ _ _ _ _ _) -> name == n) parameterSetup of
+  --           Nothing -> st
+  --           Just (ParameterSetup _ setter _ _ _ drp _) ->
+  --             case runGet S.get bs of
+  --               Left err -> error $ "Could not read value of parameter " <> T.unpack n <> ". Aborting! Serializtion error was: " ++ err
+  --               Right val -> setter val st
+  --         initSt <- lift (lift mkInitSt)
+  --         let expSetting = setup initSt
+  --             isExp x = x ^. experimentNumber == expNr
+  --             isExpRep x = x ^. repetitionNumber == expRepNr
+  --         exp <- loadExperiments expSetting initInpSt initSt
+  --         let xs = exp ^.. experiments . traversed . filtered isExp . experimentResults . traversed . filtered isExpRep . preparationResults . traversed . endState
+  --         case xs of
+  --           [] -> error "Could not find this experiment or the requested experiment repetition"
+  --           (x:_) -> fmap fromAvailable $ mkAvailable x
+  --   case mSt of
+  --     Nothing -> return Nothing
+  --     Just st -> return <$> f st
+  -- where
+  --   fromAvailable (Available x) = x
+  --   fromAvailable _ = error "unexpected AvailableOnDemand in loadStateAfterPreparation"
 
 type OnlyFinishedExperiments = Bool
 
