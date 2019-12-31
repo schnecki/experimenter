@@ -24,6 +24,7 @@ module Experimenter.Run
     ) where
 
 import           Control.Arrow                (first, (&&&), (***))
+import           Control.Concurrent.MVar
 import           Control.DeepSeq
 import           Control.Lens
 import           Control.Monad                (forM)
@@ -36,6 +37,7 @@ import           Control.Monad.Logger         (LogLevel (..), LoggingT, MonadLog
 import qualified Data.ByteString              as B
 import           Data.IORef
 import           Data.List                    (foldl')
+import           System.IO.Unsafe             (unsafePerformIO)
 
 import           Control.Monad.Reader
 import           Data.Function                (on)
@@ -160,9 +162,10 @@ loadExperimentsResultsM filtFin runExpM dbSetup setup initInpSt mkInitSt key =
   runExpM $ runDB dbSetup $ do
     initSt <- lift $ lift $ lift mkInitSt
     let setting = setup initSt
+        skipPrep exp = any (^. parameterSettingSkipPreparationPhase) (exp ^. parameterSetup)
         isFinished exp =
           length (exp ^. experimentResults) == setting ^. experimentRepetitions && -- repetitions
-          all (\expRes -> maybe 0 (lengthAvailabilityList . view results) (expRes ^. preparationResults) == setting ^. preparationSteps) (exp ^. experimentResults) && -- preparation length
+          (skipPrep exp || all (\expRes -> maybe 0 (lengthAvailabilityList . view results) (expRes ^. preparationResults) == setting ^. preparationSteps) (exp ^. experimentResults)) && -- preparation length
           all (\expRes -> length (expRes ^. evaluationResults) == setting ^. evaluationReplications) (exp ^. experimentResults) && -- replications
           all
             (\expRes -> maybe 0 (lengthAvailabilityList . view results) (expRes ^. warmUpResults) == setting ^. evaluationWarmUpSteps)
@@ -755,6 +758,20 @@ foldM' f acc (x:xs) = do
   acc' `seq` foldM' f acc' xs
 
 
+splitSizeMVar :: MVar Int
+splitSizeMVar = unsafePerformIO $ newMVar 5000
+{-# NOINLINE splitSizeMVar #-}
+
+increaseSplitSize :: IO ()
+increaseSplitSize = liftIO $ modifyMVar_ splitSizeMVar (return . min 100000 . (*2))
+
+decreaseSplitSize :: IO ()
+decreaseSplitSize = liftIO $ modifyMVar_ splitSizeMVar (return . max 500 . (`div` 2))
+
+getSplitSize :: IO Int
+getSplitSize = liftIO $ fromMaybe 5000 <$> tryReadMVar splitSizeMVar
+
+
 runResultData :: (ExperimentDef a) => Key Exp -> Int -> RepResultType -> ResultData a -> DB (ExpM a) (Updated, ResultData a)
 runResultData expId len repResType resData = do
   ~startStAvail <- mkAvailable (resData ^. startState)
@@ -762,6 +779,9 @@ runResultData expId len repResType resData = do
   let stInp = fromMaybe (resData ^. startInputState) (resData ^. endInputState)
   let g = fromMaybe (resData ^. startRandGen) (resData ^. endRandGen)
   $(logInfo) $ "Number of steps already run is " <> tshow curLen <> ", thus still need to run " <> tshow (len - curLen) <> " steps."
+  splitPeriods <- liftIO getSplitSize
+  let nrOfPeriodsToRun = min splitPeriods (len - curLen)
+      periodsToRun = map (+ curLen) [1 .. nrOfPeriodsToRun]
   let updated = not (null periodsToRun)
   sTime <- liftIO getCurrentTime
   let phase = fromEnum $ phaseFromResultDataKey (resData ^. resultDataKey)
@@ -782,14 +802,17 @@ runResultData expId len repResType resData = do
       upd repResType resData'
       transactionSave
       eTime' <- liftIO getCurrentTime
+      let runTime = diffUTCTime (fromJust eTime) sTime
+          saveTime = diffUTCTime eTime' sTime'
+      when (nrOfPeriodsToRun == splitPeriods) $ liftIO $ do
+        when (runTime <= 10 * saveTime) increaseSplitSize
+        when (runTime > 30 * saveTime) decreaseSplitSize
       if len - curLen - length periodsToRun > 0
         then do
-          $(logInfo) $ "Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow (diffUTCTime (fromJust eTime) sTime) <> ". Saving Time: " <>
-            tshow (diffUTCTime eTime' sTime')
+          $(logInfo) $ "Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow runTime <> ". Saving Time: " <> tshow saveTime
           runResultData expId len repResType resData'
         else do
-          $(logInfo) $ "Done and saved. Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow (diffUTCTime (fromJust eTime) sTime) <> ". Saving Time: " <>
-            tshow (diffUTCTime eTime' sTime') <>
+          $(logInfo) $ "Done and saved. Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow runTime <> ". Saving Time: " <> tshow saveTime <>
             ". Releasing memory."
           return (True, set endState mkEndStateAvailableOnDemand $ set startState mkStartStateAvailableOnDemand resData')
     else return (False, resData)
@@ -800,9 +823,6 @@ runResultData expId len repResType resData = do
     curLen = lengthAvailabilityList (resData ^. results)
     delInputs = lengthAvailabilityList (resData ^. results) - lengthAvailabilityList (resData ^. inputValues) > 0
     isNew = curLen == 0
-    splitPeriods = 5000
-    nrOfPeriodsToRun = min splitPeriods (len - curLen)
-    periodsToRun = map (+ curLen) [1 .. nrOfPeriodsToRun]
     mkStartStateAvailableOnDemand =
       case resData ^. resultDataKey of
         ResultDataPrep key -> AvailableOnDemand $ loadResDataStartState expId (StartStatePrep key)
