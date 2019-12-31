@@ -36,6 +36,7 @@ import           System.Process
 
 
 import           Experimenter.DatabaseSetting
+import           Experimenter.DB
 import           Experimenter.Experiment
 import           Experimenter.Models
 import           Experimenter.Result
@@ -66,7 +67,7 @@ createKeepAliveFork dbSetup updateFunction deletionFunction = do
           keepAlive ref
         else deletionFunction
 
-waitForSlaves :: (ExperimentDef a) => Experiments a -> ReaderT SqlBackend (LoggingT (ExpM a)) Bool
+waitForSlaves :: (MonadIO m) => Experiments a -> DB m Bool
 waitForSlaves exps = do
   pid <- liftIO getProcessID
   hostName <- T.pack <$> liftIO getHostName

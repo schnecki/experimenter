@@ -18,6 +18,7 @@ import           Control.DeepSeq
 import           Control.Lens                 hiding (Cons, Over, over)
 import           Control.Monad.Logger
 import           Control.Monad.Reader
+import           Control.Monad.Trans.Resource
 import           Data.Function                (on)
 import           Data.List                    (find, sortBy)
 import           Data.Maybe                   (fromMaybe)
@@ -47,14 +48,10 @@ genEvalsIO :: (ExperimentDef a, IO ~ ExpM a) => DatabaseSetting -> Experiments a
 genEvalsIO = genEvals id
 
 genEvals :: (ExperimentDef a) => (ExpM a (Evals a) -> IO (Evals a)) -> DatabaseSetting -> Experiments a -> [StatsDef a] -> IO (Evals a)
-genEvals runExpM dbSetup exps evals = runExpM $ runDB dbSetup $ runner exps evals
+genEvals runExpM dbSetup exps evals = runExpM $ runDBWithM runResourceT dbSetup $ runner exps evals
 
 
-runner ::
-     forall a. (ExperimentDef a)
-  => Experiments a
-  -> [StatsDef a]
-  -> DB a (Evals a)
+runner :: (ExperimentDef a) => Experiments a -> [StatsDef a] -> DB (ExpM a) (Evals a)
 runner exps evals = do
   -- Delete old temporary data
   time <- liftIO getCurrentTime
@@ -74,7 +71,7 @@ mapMRnf f (x:xs) = do
   !(force -> x') <- f x
   (x' :) <$!!> mapMRnf f xs
 
-saveEvalResults :: (ExperimentDef a) => EvalResults a -> ReaderT SqlBackend (LoggingT (ExpM a)) (Availability IO (EvalResults a))
+saveEvalResults :: (ExperimentDef a) => EvalResults a -> DB (ExpM a) (Availability IO (EvalResults a))
 saveEvalResults ev = do
   let bs = runPut (put ev)
   time <- liftIO getCurrentTime
@@ -91,7 +88,7 @@ saveEvalResults ev = do
               Right x  -> x
 
 
-genExperiment :: (ExperimentDef a) => Experiment a -> StatsDef a -> DB a (EvalResults a)
+genExperiment :: (ExperimentDef a) => Experiment a -> StatsDef a -> DB (ExpM a) (EvalResults a)
 genExperiment exp (Named eval name) = addName <$!!> genExperiment exp eval
   where addName res = res { _evalType = Named (res ^. evalType) name }
 genExperiment exp eval =
@@ -110,7 +107,7 @@ genExperiment exp eval =
     reduce eval' = reduceUnary eval . EvalVector (Id eval') UnitExperimentRepetition
 
 
-genExperimentResult :: (ExperimentDef a) => Experiment a -> StatsDef a -> ExperimentResult a -> DB a (EvalResults a)
+genExperimentResult :: (ExperimentDef a) => Experiment a -> StatsDef a -> ExperimentResult a -> DB (ExpM a) (EvalResults a)
 genExperimentResult _ (Named _ n) _ = error $ "An evaluation may only be named on the outermost function in evaluation " <> T.unpack (E.decodeUtf8 n)
 genExperimentResult exp eval expRes =
   case eval of
@@ -128,11 +125,11 @@ genExperimentResult exp eval expRes =
     getUnit [] = error "Unexpected empty data in getUnit in genExperimentResult in Eval.Ops"
 
 
-genReplication :: (ExperimentDef a) => Experiment a -> StatsDef a -> ReplicationResult a -> DB a (EvalResults a)
+genReplication :: (ExperimentDef a) => Experiment a -> StatsDef a -> ReplicationResult a -> DB (ExpM a) (EvalResults a)
 genReplication exp eval repl = fromMaybe (error "Evaluation data is incomplete!") <$!!> sequence (fmap force . genResultData exp eval <$!> (repl ^. evalResults))
 
 
-genResultData :: (ExperimentDef a) => Experiment a -> StatsDef a -> ResultData a -> DB a (EvalResults a)
+genResultData :: (ExperimentDef a) => Experiment a -> StatsDef a -> ResultData a -> DB (ExpM a) (EvalResults a)
 genResultData _ (Named _ n) _ = error $ "An evaluation may only be named on the outermost function in evaluation " <> T.unpack (E.decodeUtf8 n)
 genResultData exp eval repl =
   case eval of
@@ -144,11 +141,11 @@ genResultData exp eval repl =
     _                        -> force <$!> genExperiment exp eval
 
 
-evalOf :: (ExperimentDef a) => Experiment a -> Of a -> ResultData a -> DB a (EvalResults a)
+evalOf :: (ExperimentDef a) => Experiment a -> Of a -> ResultData a -> DB (ExpM a) (EvalResults a)
 evalOf exp eval resData =
   case eval of
     Of name -> do
-      !(force -> xs) <- mkTransientlyAvailable $ snd (resData ^. results)
+      !(force -> xs) <- mkTransientlyAvailableList (resData ^. results)
       return $ force $ EvalVector (Id $ Of name) UnitPeriods $ sortBy (compare `on` (^?! evalX)) $ map (fromMeasure $ E.decodeUtf8 name) xs
     Stats def -> genExperiment exp def
     Div eval1 eval2 -> reduceBinaryOf eval <$!!> evalOf exp eval1 resData <*> evalOf exp eval2 resData

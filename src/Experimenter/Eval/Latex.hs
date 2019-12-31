@@ -7,7 +7,6 @@
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TemplateHaskell     #-}
 module Experimenter.Eval.Latex
     ( writeLatex
     , writeAndCompileLatex
@@ -63,7 +62,7 @@ writeLatex dbSetup evals = do
       dir = expsPath exps
       file = dir </> mainFile exps
   liftIO $ createDirectoryIfMissing True dir
-  res <- runDB dbSetup $ execLaTeXT (root evals)
+  res <- runDBSimple dbSetup $ execLaTeXT (root evals)
   renderFile file res
 
 

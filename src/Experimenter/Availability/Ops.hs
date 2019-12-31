@@ -6,22 +6,29 @@ module Experimenter.Availability.Ops where
 
 import           Experimenter.Availability.Type
 
-import           Control.Monad.Logger
-import           Control.Monad.Reader
-import           Database.Persist.Postgresql    (SqlBackend)
+import           Conduit                        as C
+import           Data.Conduit.List              as CL
+
+import           Experimenter.DB
+
+mkAvailable :: (Monad m) => Availability m b -> DB m (Availability m b)
+mkAvailable (AvailableOnDemand query) = Available <$> query
+mkAvailable (Available x)             = return (Available x)
+
+mkTransientlyAvailable :: (Monad m) => Availability m b -> DB m b
+mkTransientlyAvailable (Available x)             = return x
+mkTransientlyAvailable (AvailableOnDemand query) = query
+
+mkAvailableList :: (Monad m) => AvailabilityList m b -> DB m (AvailabilityList m b)
+mkAvailableList (AvailableList (nr, xs))       = return $ AvailableList (nr, xs)
+mkAvailableList (AvailableListOnDemand (_, query)) = (\xs -> AvailableList (length xs, xs)) <$> C.runConduit (query C..| CL.consume)
+
+mkTransientlyAvailableList :: (Monad m) => AvailabilityList m b -> DB m [b]
+mkTransientlyAvailableList (AvailableList (_,x))             = return x
+mkTransientlyAvailableList (AvailableListOnDemand (_,query)) = C.runConduit $ query C..| CL.consume
 
 
 lengthAvailabilityList :: AvailabilityList m b -> Int
-lengthAvailabilityList (nr, _) = nr
+lengthAvailabilityList (AvailableList (nr, _))         = nr
+lengthAvailabilityList (AvailableListOnDemand (nr, _)) = nr
 
-mkAvailableList :: (Monad m, Foldable t) => (Int, Availability m (t b)) -> ReaderT SqlBackend (LoggingT m) (Int, Availability m (t b))
-mkAvailableList (nr, Available xs)         = return (nr, Available xs)
-mkAvailableList (_, AvailableOnDemand query) = (\xs -> (length xs, Available xs)) <$> query
-
-mkAvailable :: (Monad m) => Availability m b -> ReaderT SqlBackend (LoggingT m) (Availability m b)
-mkAvailable (Available xs)            = return (Available xs)
-mkAvailable (AvailableOnDemand query) = Available <$> query
-
-mkTransientlyAvailable :: (Monad m) => Availability m b -> ReaderT SqlBackend (LoggingT m) b
-mkTransientlyAvailable (Available xs)            = return xs
-mkTransientlyAvailable (AvailableOnDemand query) = query

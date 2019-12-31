@@ -39,10 +39,10 @@ type MeasureName = T.Text
 writeCsvMeasure :: DatabaseSetting -> Experiments a -> Smoothing -> [MeasureName] -> IO ()
 writeCsvMeasure dbSetup exps smoothing measures = runDBWithM runResourceT dbSetup $ mapM_ (smoothAndWriteFile exps smoothing) measures
 
-smoothAndWriteFile :: Experiments a -> Smoothing -> MeasureName -> ReaderT SqlBackend (LoggingT (ResourceT IO)) ()
+smoothAndWriteFile :: Experiments a -> Smoothing -> MeasureName -> DB IO ()
 smoothAndWriteFile exps smoothing measureName = mapM_ (smoothAndWriteFileExp exps smoothing measureName) (exps ^. experiments)
 
-smoothAndWriteFileExp :: Experiments a -> Smoothing -> MeasureName -> Experiment a -> ReaderT SqlBackend (LoggingT (ResourceT IO)) ()
+smoothAndWriteFileExp :: Experiments a -> Smoothing -> MeasureName -> Experiment a -> DB IO ()
 smoothAndWriteFileExp exps smoothing measureName exp =
   mapM_
     (\expRes -> do
@@ -94,7 +94,7 @@ movAvg (sm, xs) = set (measureResults.traversed.resultYValue) (sm / fromIntegral
   where x = last xs
 
 
-smoothAndWriteFileResultData :: Experiments a -> T.Text -> Smoothing -> MeasureName -> ResultData a -> ReaderT SqlBackend (LoggingT (ResourceT IO)) ()
+smoothAndWriteFileResultData :: Experiments a -> T.Text -> Smoothing -> MeasureName -> ResultData a -> DB IO ()
 smoothAndWriteFileResultData exps prefix smoothing measureName resData = do
   $(logInfo) $ "Processing measure " <> measureName <> ". Saving data to: " <> T.pack folder
   liftIO $ createDirectoryIfMissing True folder
@@ -115,9 +115,9 @@ smoothAndWriteFileResultData exps prefix smoothing measureName resData = do
           ResultDataRep key -> undefined
   let toMeasure (E.Value p, E.Value v) = Measure p [StepResult measureName Nothing v]
   C.runConduit $
-    src C..| C.mapC toMeasure C..| smoothC smoothing C..| C.mapC toFileCts C..| C.filterC (not . null) C..| C.mapC (encodeUtf8 . T.pack . (++ "\n")) C..| sinkHandle fileH
+    src C..| C.mapC toMeasure C..| smoothC smoothing C..| C.mapC toFileCts C..| C.filterC (not . null) C..| C.mapC (T.pack . (++ "\n")) C..| C.encodeUtf8C C..| sinkHandle fileH
   liftIO $ hFlush fileH >> hClose fileH
-  end   <- liftIO getCurrentTime
+  end <- liftIO getCurrentTime
   $(logInfo) $ "Done. Computation Time: " <> tshow (diffUTCTime end start)
   where
     filePath = folder </> T.unpack (prefix <> "_" <> measureName <> ".csv")
