@@ -14,11 +14,14 @@ module Experimenter.Eval.Ops
     , genEvalsIO
     ) where
 
+import           Conduit                      as C
 import           Control.DeepSeq
 import           Control.Lens                 hiding (Cons, Over, over)
 import           Control.Monad.Logger
 import           Control.Monad.Reader
 import           Control.Monad.Trans.Resource
+import           Data.Conduit
+import qualified Data.Conduit.List            as CL
 import           Data.Function                (on)
 import           Data.List                    (find, sortBy)
 import           Data.Maybe                   (fromMaybe)
@@ -133,20 +136,35 @@ genResultData :: (ExperimentDef a) => Experiment a -> StatsDef a -> ResultData a
 genResultData _ (Named _ n) _ = error $ "An evaluation may only be named on the outermost function in evaluation " <> T.unpack (E.decodeUtf8 n)
 genResultData exp eval repl =
   case eval of
-    Mean OverPeriods eval'   -> reduceUnary eval <$!!> genResultData exp (Id eval') repl
+    Mean OverPeriods (Of name) -> do
+      res <- runConduit $ srcAvailableList (repl ^. results) .| mapC ((^?! evalY) . fromMeasure nameBS) .| sumC
+      return $ EvalReducedValue (Mean OverPeriods (Of name)) UnitPeriods (res / fromIntegral (lengthAvailabilityList (repl ^. results)))
+      where nameBS = E.decodeUtf8 name
+    Mean OverPeriods eval' -> reduceUnary eval <$!!> genResultData exp (Id eval') repl
     StdDev OverPeriods eval' -> reduceUnary eval <$!!> genResultData exp (Id eval') repl
-    -- Sum OverPeriods of'@Of{} -> reduceUnary eval <$!!> evalOf exp of' repl
-    Sum OverPeriods eval'    -> reduceUnary eval <$!!> genResultData exp (Id eval') repl
-    Id eval'                 -> force <$!> evalOf exp eval' repl
-    _                        -> force <$!> genExperiment exp eval
+    Sum OverPeriods (Of name) -> do
+      res <- runConduit $ srcAvailableList (repl ^. results) .| mapC ((^?! evalY) . fromMeasure nameBS) .| sumC
+      return $ EvalReducedValue (Sum OverPeriods (Of name)) UnitPeriods res
+      where nameBS = E.decodeUtf8 name
+    Sum OverPeriods eval' -> reduceUnary eval <$!!> genResultData exp (Id eval') repl
+    Id eval' -> force <$!> evalOf exp eval' repl
+    _ -> force <$!> genExperiment exp eval
 
 
-evalOf :: (ExperimentDef a) => Experiment a -> Of a -> ResultData a -> DB (ExpM a) (EvalResults a)
+evalOf :: (ExperimentDef a) => Experiment a -> Of a -> ResultData a ->
+  -- ConduitT () Void (DB (ExpM a)) (EvalResults a)
+  DB (ExpM a) (EvalResults a)
 evalOf exp eval resData =
   case eval of
     Of name -> do
-      !(force -> xs) <- mkTransientlyAvailableList (resData ^. results)
-      return $ force $ EvalVector (Id $ Of name) UnitPeriods $ sortBy (compare `on` (^?! evalX)) $ map (fromMeasure $ E.decodeUtf8 name) xs
+      res <- runConduit $ srcAvailableList (resData ^. results) .| mapC (fromMeasure nameBS) .| CL.consume
+      return $ EvalVector (Id $ Of name) UnitPeriods (mSortBy (compare `on` (^?! evalX)) res)
+      where nameBS = E.decodeUtf8 name
+            mSortBy _ [] = []
+            mSortBy cmp xs@(x:_) =
+              case x ^?! evalX of
+                Left {}  -> xs -- already sorted by DB
+                Right {} -> sortBy cmp xs
     Stats def -> genExperiment exp def
     Div eval1 eval2 -> reduceBinaryOf eval <$!!> evalOf exp eval1 resData <*> evalOf exp eval2 resData
     Add eval1 eval2 -> reduceBinaryOf eval <$!!> evalOf exp eval1 resData <*> evalOf exp eval2 resData
@@ -162,4 +180,19 @@ fromMeasure name (Measure p res) = case find ((==name) . view resultName) res of
   Nothing -> error $ "Variable with name " <> T.unpack name <> " could not be found!"
   Just (StepResult n mX y) -> EvalValue (Id $ Of $ E.encodeUtf8 n) UnitPeriods (E.encodeUtf8 n) (maybe (Left p) Right mX) y
 
+-- evalOf :: (ExperimentDef a) => Experiment a -> Of a -> ResultData a -> DB (ExpM a) (EvalResults a)
+-- evalOf exp eval resData =
+--   case eval of
+--     Of name -> do
+--       !(force -> xs) <- mkTransientlyAvailableList (resData ^. results)
+--       return $ force $ EvalVector (Id $ Of name) UnitPeriods $ sortBy (compare `on` (^?! evalX)) $ map (fromMeasure $ E.decodeUtf8 name) xs
+--     Stats def -> genExperiment exp def
+--     Div eval1 eval2 -> reduceBinaryOf eval <$!!> evalOf exp eval1 resData <*> evalOf exp eval2 resData
+--     Add eval1 eval2 -> reduceBinaryOf eval <$!!> evalOf exp eval1 resData <*> evalOf exp eval2 resData
+--     Sub eval1 eval2 -> reduceBinaryOf eval <$!!> evalOf exp eval1 resData <*> evalOf exp eval2 resData
+--     Mult eval1 eval2 -> reduceBinaryOf eval <$!!> evalOf exp eval1 resData <*> evalOf exp eval2 resData
+--     First eval' -> reduceUnaryOf eval <$!!> evalOf exp eval' resData
+--     Last eval' -> reduceUnaryOf eval <$!!> evalOf exp eval' resData
+--     EveryXthElem _ eval' -> reduceUnaryOf eval <$!!> evalOf exp eval' resData
+--     Length eval' -> reduceUnaryOf eval <$!!> evalOf exp eval' resData
 

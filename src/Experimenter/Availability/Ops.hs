@@ -27,8 +27,10 @@ mkTransientlyAvailableList :: (Monad m) => AvailabilityList m b -> DB m [b]
 mkTransientlyAvailableList (AvailableList (_,x))             = return x
 mkTransientlyAvailableList (AvailableListOnDemand (_,query)) = C.runConduit $ query C..| CL.consume
 
-
 lengthAvailabilityList :: AvailabilityList m b -> Int
 lengthAvailabilityList (AvailableList (nr, _))         = nr
 lengthAvailabilityList (AvailableListOnDemand (nr, _)) = nr
 
+srcAvailableList :: (Monad m) => AvailabilityList m a -> ConduitT () a (DB m) ()
+srcAvailableList (AvailableList (_, xs))         = CL.sourceList xs
+srcAvailableList (AvailableListOnDemand (_,src)) = src

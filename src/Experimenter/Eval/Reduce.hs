@@ -7,6 +7,7 @@ module Experimenter.Eval.Reduce
     , reduceUnaryOf
     , reduceBinaryOf
     , transpose
+    , flatten
     ) where
 
 import           Control.DeepSeq

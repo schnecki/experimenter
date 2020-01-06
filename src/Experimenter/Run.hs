@@ -763,7 +763,7 @@ splitSizeMVar = unsafePerformIO $ newMVar 5000
 {-# NOINLINE splitSizeMVar #-}
 
 increaseSplitSize :: IO ()
-increaseSplitSize = liftIO $ modifyMVar_ splitSizeMVar (return . min 100000 . (*2))
+increaseSplitSize = liftIO $ modifyMVar_ splitSizeMVar (return . min 50000 . (*2))
 
 decreaseSplitSize :: IO ()
 decreaseSplitSize = liftIO $ modifyMVar_ splitSizeMVar (return . max 500 . (`div` 2))
