@@ -349,7 +349,7 @@ loadPrepartionMeasures kExpRes = do
         E.from $ \(prepM, prepRS) -> do
           E.where_ (prepM E.^. PrepMeasureId E.==. prepRS E.^. PrepResultStepMeasure)
           E.where_ (prepM E.^. PrepMeasurePrepResultData E.==. E.val kExpRes)
-          E.orderBy [E.asc (prepM E.^. PrepMeasurePeriod)]
+          E.orderBy [E.asc (prepRS E.^. PrepResultStepXValue), E.asc (prepM E.^. PrepMeasurePeriod)]
           return (prepM, prepRS)
   src C..| C.mapC mkMeasure C..| CL.groupBy ((==) `on` view measurePeriod) C..| C.mapC combineMeasures
   -- return $ map combineMeasures $ L.groupBy ((==) `on` view measurePeriod) $ map mkMeasure res
@@ -441,7 +441,7 @@ loadReplicationWarmUpMeasures kExpRes = do
         E.from $ \(warmUpM, warmUpRS) -> do
           E.where_ (warmUpM E.^. WarmUpMeasureId E.==. warmUpRS E.^. WarmUpResultStepMeasure)
           E.where_ (warmUpM E.^. WarmUpMeasureRepResult E.==. E.val kExpRes)
-          E.orderBy [E.asc (warmUpM E.^. WarmUpMeasurePeriod)]
+          E.orderBy [E.asc (warmUpRS E.^. WarmUpResultStepXValue), E.asc (warmUpM E.^. WarmUpMeasurePeriod)]
           return (warmUpM, warmUpRS)
   src C..| C.mapC mkMeasure C..| CL.groupBy ((==) `on` view measurePeriod) C..| C.mapC combineMeasures
   -- return $ map combineMeasures $ L.groupBy ((==) `on` view measurePeriod) $ map mkMeasure res
@@ -480,7 +480,7 @@ loadReplicationMeasures kExpRes = do
         E.from $ \(repM, repRS) -> do
           E.where_ (repM E.^. RepMeasureId E.==. repRS E.^. RepResultStepMeasure)
           E.where_ (repM E.^. RepMeasureRepResult E.==. E.val kExpRes)
-          E.orderBy [E.asc (repM E.^. RepMeasurePeriod)]
+          E.orderBy [E.asc (repRS E.^. RepResultStepXValue), E.asc (repM E.^. RepMeasurePeriod)]
           return (repM, repRS)
   src C..| C.mapC mkMeasure C..| CL.groupBy ((==) `on` view measurePeriod) C..| C.mapC combineMeasures
   -- return $ map combineMeasures $ L.groupBy ((==) `on` view measurePeriod) $ map mkMeasure res

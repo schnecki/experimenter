@@ -157,42 +157,29 @@ evalOf :: (ExperimentDef a) => Experiment a -> Of a -> ResultData a ->
 evalOf exp eval resData =
   case eval of
     Of name -> do
-      res <- runConduit $ srcAvailableList (resData ^. results) .| mapC (fromMeasure nameBS) .| CL.consume
-      return $ EvalVector (Id $ Of name) UnitPeriods (mSortBy (compare `on` (^?! evalX)) res)
-      where nameBS = E.decodeUtf8 name
-            mSortBy _ [] = []
-            mSortBy cmp xs@(x:_) =
-              case x ^?! evalX of
-                Left {}  -> xs -- already sorted by DB
-                Right {} -> sortBy cmp xs
+      res <- runConduit $ srcAvailableList (resData ^. results) .| mapC (fromMeasure $ E.decodeUtf8 name) .| CL.consume
+      return $ EvalVector (Id $ Of name) UnitPeriods res
     Stats def -> genExperiment exp def
     Div eval1 eval2 -> reduceBinaryOf eval <$!!> evalOf exp eval1 resData <*> evalOf exp eval2 resData
     Add eval1 eval2 -> reduceBinaryOf eval <$!!> evalOf exp eval1 resData <*> evalOf exp eval2 resData
     Sub eval1 eval2 -> reduceBinaryOf eval <$!!> evalOf exp eval1 resData <*> evalOf exp eval2 resData
     Mult eval1 eval2 -> reduceBinaryOf eval <$!!> evalOf exp eval1 resData <*> evalOf exp eval2 resData
+    First (Of name) -> do
+      res <- runConduit $ srcAvailableList (resData ^. results) .| mapC (fromMeasure $ E.decodeUtf8 name) .| headC
+      return $ EvalVector (Id $ First $ Stats $ Id $ Of name) UnitPeriods [fromMaybe (error $ "empty elements in evalOf First(Of " <> show name <> ")") res]
     First eval' -> reduceUnaryOf eval <$!!> evalOf exp eval' resData
+    Last (Of name) -> do
+      res <- runConduit $ srcAvailableList (resData ^. results) .| mapC (fromMeasure $ E.decodeUtf8 name) .| lastC
+      return $ EvalVector (Id $ Last $ Stats $ Id $ Of name) UnitPeriods [fromMaybe (error $ "empty elements in evalOf Last(Of " <> show name <> ")") res]
     Last eval' -> reduceUnaryOf eval <$!!> evalOf exp eval' resData
     EveryXthElem _ eval' -> reduceUnaryOf eval <$!!> evalOf exp eval' resData
+    Length (Of name) -> do
+      res <- runConduit $ srcAvailableList (resData ^. results) .| mapC (fromMeasure $ E.decodeUtf8 name) .| lengthC
+      return $ EvalReducedValue (Id $ Length $ Stats $ Id $ Of name) UnitScalar res
     Length eval' -> reduceUnaryOf eval <$!!> evalOf exp eval' resData
 
 fromMeasure :: T.Text -> Measure -> EvalResults a
 fromMeasure name (Measure p res) = case find ((==name) . view resultName) res of
   Nothing -> error $ "Variable with name " <> T.unpack name <> " could not be found!"
   Just (StepResult n mX y) -> EvalValue (Id $ Of $ E.encodeUtf8 n) UnitPeriods (E.encodeUtf8 n) (maybe (Left p) Right mX) y
-
--- evalOf :: (ExperimentDef a) => Experiment a -> Of a -> ResultData a -> DB (ExpM a) (EvalResults a)
--- evalOf exp eval resData =
---   case eval of
---     Of name -> do
---       !(force -> xs) <- mkTransientlyAvailableList (resData ^. results)
---       return $ force $ EvalVector (Id $ Of name) UnitPeriods $ sortBy (compare `on` (^?! evalX)) $ map (fromMeasure $ E.decodeUtf8 name) xs
---     Stats def -> genExperiment exp def
---     Div eval1 eval2 -> reduceBinaryOf eval <$!!> evalOf exp eval1 resData <*> evalOf exp eval2 resData
---     Add eval1 eval2 -> reduceBinaryOf eval <$!!> evalOf exp eval1 resData <*> evalOf exp eval2 resData
---     Sub eval1 eval2 -> reduceBinaryOf eval <$!!> evalOf exp eval1 resData <*> evalOf exp eval2 resData
---     Mult eval1 eval2 -> reduceBinaryOf eval <$!!> evalOf exp eval1 resData <*> evalOf exp eval2 resData
---     First eval' -> reduceUnaryOf eval <$!!> evalOf exp eval' resData
---     Last eval' -> reduceUnaryOf eval <$!!> evalOf exp eval' resData
---     EveryXthElem _ eval' -> reduceUnaryOf eval <$!!> evalOf exp eval' resData
---     Length eval' -> reduceUnaryOf eval <$!!> evalOf exp eval' resData
 
