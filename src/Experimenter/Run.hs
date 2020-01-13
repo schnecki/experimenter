@@ -722,7 +722,7 @@ runEval seed exps expId warmUpUpdated repResId (expNr, repetNr, repliNr) initSt 
       return (delNeeded len, mResData')
   where
     delNeeded len = warmUpUpdated || maybe False (\_ -> evalSteps < len) mResData --  || maybe False ((>0) . lengthAvailabilityList) (mResData ^? traversed.results)
-    runNeeded len = maybe (evalSteps > 0) (\_ -> evalSteps > len) mResData
+    runNeeded len = maybe (evalSteps > 0) (\_ -> evalSteps > len  || (delNeeded len && evalSteps > 0)) mResData
     evalSteps = exps ^. experimentsSetup . expsSetupEvaluationSteps
     new initStEval = newResultData seed (Rep repResId) initStEval initInpSt
     run len rD = ((delNeeded len ||) *** Just) <$> runResultData expId evalSteps (Rep repResId) rD
