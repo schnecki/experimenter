@@ -74,10 +74,15 @@ main = do
   putStrLn $ "Any change: " ++ show changed
   let evals = [ Mean OverExperimentRepetitions (Of "draw") `Named` "Mean Repetitions"
               , StdDev OverExperimentRepetitions (Of "draw") `Named` "StdDev Repetitions"
-              , Mean OverReplications (Of "draw") `Named` "Mean Repls"
-              , StdDev OverReplications (Of "draw") `Named` "StdDev Repls"
-              , Id (Of "draw") `Named` "draws 1"
-              , Id (Of "draw") `Named` "draws 2"
+
+              , Mean OverReplications (EveryXthElem 100 $ Of "draw") `Named` "Mean Repls1"
+              , StdDev OverReplications (EveryXthElem 100 $ Of "draw") `Named` "StdDev Repls"
+
+              -- not allowed as OverExperimentRepetitions and OverReplications have to be the outermost elements!
+              -- , Id (EveryXthElem 100 (Stats $ Mean OverReplications (Of "draw"))) `Named` "Mean Repls2"
+
+              , Id (EveryXthElem 100 (Of "draw")) `Named` "draws 1"
+              , Id (EveryXthElem 100 (Of "draw")) `Named` "draws 2"
               ]
   evalRes <- genEvalsIO databaseSetup res evals
   print (view evalsResults evalRes)

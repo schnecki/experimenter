@@ -371,17 +371,17 @@ loadPreparationMeasuresWhere kExpRes GetAll = loadPreparationMeasuresWhere kExpR
 loadPreparationMeasuresWhere _ where' = error $ "Wrong Where clause: " ++ show where' ++ " where PrepMeasuresWhere was expected"
 
 
-loadPreparationAggregateWhere :: (MonadIO m) => Key PrepResultData -> AvailabilityListWhere -> DB m Double
-loadPreparationAggregateWhere kExpRes (PrepMeasureWhere where') =
+loadPreparationAggregateWhere :: (MonadIO m) => Key PrepResultData -> AggregateFunction -> AvailabilityListWhere -> DB m Double
+loadPreparationAggregateWhere kExpRes agg (PrepMeasureWhere where') =
   fmap (fromMaybe 0 . E.unValue . head) $
   E.select $
   E.from $ \(prepM, prepRS) -> do
     E.where_ (prepM E.^. PrepMeasureId E.==. prepRS E.^. PrepResultStepMeasure)
     E.where_ (prepM E.^. PrepMeasurePrepResultData E.==. E.val kExpRes)
     where' prepM prepRS
-    return (E.sum_ $ prepRS E.^. PrepResultStepYValue)
-loadPreparationAggregateWhere kExpRes GetAll = loadPreparationAggregateWhere kExpRes (PrepMeasureWhere (\_ _ -> return ()))
-loadPreparationAggregateWhere _ where' = error $ "Wrong Where clause: " ++ show where' ++ " where PrepMeasuresWhere was expected"
+    return (agg $ prepRS E.^. PrepResultStepYValue)
+loadPreparationAggregateWhere kExpRes agg GetAll = loadPreparationAggregateWhere kExpRes agg (PrepMeasureWhere (\_ _ -> return ()))
+loadPreparationAggregateWhere _ _ where' = error $ "Wrong Where clause: " ++ show where' ++ " where loadPreparationAggregateWhere was expected"
 
 
 loadReplicationResults :: (ExperimentDef a) => Key Exp -> Key ExpResult -> DB (ExpM a) [ReplicationResult a]
@@ -481,17 +481,17 @@ loadReplicationWarmUpMeasuresWhere kExpRes (WarmUpMeasureWhere where') = do
 loadReplicationWarmUpMeasuresWhere kExpRes GetAll = loadReplicationWarmUpMeasuresWhere kExpRes (WarmUpMeasureWhere (\_ _ -> return ()))
 loadReplicationWarmUpMeasuresWhere _ where' = error $ "Wrong Where clause: " ++ show where' ++ " where PrepMeasuresWhere was expected"
 
-loadReplicationWarmUpAggregateWhere :: (MonadIO m) => Key WarmUpResultData -> AvailabilityListWhere -> DB m Double
-loadReplicationWarmUpAggregateWhere kExpRes (WarmUpMeasureWhere where') =
+loadReplicationWarmUpAggregateWhere :: (MonadIO m) => Key WarmUpResultData -> AggregateFunction -> AvailabilityListWhere -> DB m Double
+loadReplicationWarmUpAggregateWhere kExpRes agg (WarmUpMeasureWhere where') =
   fmap (fromMaybe 0 . E.unValue . head) $
   E.select $
   E.from $ \(warmUpM, warmUpRS) -> do
     E.where_ (warmUpM E.^. WarmUpMeasureId E.==. warmUpRS E.^. WarmUpResultStepMeasure)
     E.where_ (warmUpM E.^. WarmUpMeasureRepResult E.==. E.val kExpRes)
     where' warmUpM warmUpRS
-    return (E.sum_ $ warmUpRS E.^. WarmUpResultStepYValue)
-loadReplicationWarmUpAggregateWhere kExpRes GetAll = loadReplicationWarmUpAggregateWhere kExpRes (WarmUpMeasureWhere (\_ _ -> return ()))
-loadReplicationWarmUpAggregateWhere _ where' = error $ "Wrong Where clause: " ++ show where' ++ " where WarmUpMeasuresWhere was expected"
+    return (agg $ warmUpRS E.^. WarmUpResultStepYValue)
+loadReplicationWarmUpAggregateWhere kExpRes agg GetAll = loadReplicationWarmUpAggregateWhere kExpRes agg (WarmUpMeasureWhere (\_ _ -> return ()))
+loadReplicationWarmUpAggregateWhere _ _ where' = error $ "Wrong Where clause: " ++ show where' ++ " where loadReplicationWarmUpAggregateWhere was expected"
 
 
 loadReplicationInputCount :: (MonadIO m) => Key RepResultData -> ReaderT SqlBackend m Int
@@ -539,17 +539,17 @@ loadReplicationMeasuresWhere kExpRes GetAll = loadReplicationMeasuresWhere kExpR
 loadReplicationMeasuresWhere _ where' = error $ "Wrong Where clause: " ++ show where' ++ " where RepMeasuresWhere was expected"
 
 
-loadReparationAggregateWhere :: (MonadIO m) => Key RepResultData -> AvailabilityListWhere -> DB m Double
-loadReparationAggregateWhere kExpRes (RepMeasureWhere where') =
+loadReparationAggregateWhere :: (MonadIO m) => Key RepResultData -> AggregateFunction -> AvailabilityListWhere -> DB m Double
+loadReparationAggregateWhere kExpRes agg (RepMeasureWhere where') =
   fmap (fromMaybe 0 . E.unValue . head) $
   E.select $
   E.from $ \(repM, repRS) -> do
     E.where_ (repM E.^. RepMeasureId E.==. repRS E.^. RepResultStepMeasure)
     E.where_ (repM E.^. RepMeasureRepResult E.==. E.val kExpRes)
     where' repM repRS
-    return (E.sum_ $ repRS E.^. RepResultStepYValue)
-loadReparationAggregateWhere kExpRes GetAll = loadReparationAggregateWhere kExpRes (RepMeasureWhere (\_ _ -> return ()))
-loadReparationAggregateWhere _ where' = error $ "Wrong Where clause: " ++ show where' ++ " where RepAggregateWhere was expected"
+    return (agg $ repRS E.^. RepResultStepYValue)
+loadReparationAggregateWhere kExpRes agg GetAll = loadReparationAggregateWhere kExpRes agg (RepMeasureWhere (\_ _ -> return ()))
+loadReparationAggregateWhere _ _ where' = error $ "Wrong Where clause: " ++ show where' ++ " where RepAggregateWhere was expected"
 
 
 getOrCreateExps :: forall a . (ExperimentDef a) => ExperimentSetting -> InputState a -> a -> DB (ExpM a) (Entity Exps)

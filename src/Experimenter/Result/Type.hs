@@ -85,7 +85,6 @@ makeLenses ''ExperimentResult
 instance NFData a => NFData (ExperimentResult a) where
   rnf (ExperimentResult !_ nr prep ev) = rnf nr `seq` rnf prep `seq` rnf ev
 
-
 data Experiment a = Experiment
   { _experimentKey       :: !(Key Exp)
   , _experimentNumber    :: !Int

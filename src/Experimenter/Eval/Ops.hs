@@ -17,7 +17,7 @@ module Experimenter.Eval.Ops
 import           Conduit                      as C
 import           Control.Concurrent.MVar
 import           Control.DeepSeq
-import           Control.Lens                 hiding (Cons, Over, over)
+import           Control.Lens                 hiding (Cons, Over)
 import           Control.Monad.IO.Class       (liftIO)
 import           Control.Monad.Logger
 import           Control.Monad.Reader
@@ -27,7 +27,7 @@ import qualified Data.Conduit.List            as CL
 import           Data.Function                (on)
 import           Data.List                    (find, sortBy)
 import qualified Data.Map.Strict              as M
-import           Data.Maybe                   (fromMaybe)
+import           Data.Maybe                   (fromMaybe, isJust)
 import           Data.Serialize               as S
 import qualified Data.Text                    as T
 import qualified Data.Text.Encoding           as E
@@ -37,6 +37,7 @@ import           Database.Persist.Postgresql  as DB (SqlBackend, delete, get, in
                                                      runSqlConn, selectKeysList,
                                                      withPostgresqlConn, (<=.))
 import           Database.Persist.Sql         (fromSqlKey, toSqlKey)
+import           Prelude                      hiding (exp)
 import           System.IO.Unsafe             (unsafePerformIO)
 
 
@@ -75,13 +76,13 @@ runner exps evals = do
       !(force -> xs) <- mapMRnf (genExperiment e >=> fmap force . saveEvalResults) evals
       return $ force $ ExperimentEval (e ^. experimentNumber) xs (e { _experimentResults = []})
 
--- mapMRnf :: (NFData b, Monad m) => (a -> m b) -> [a] -> m [b]
--- mapMRnf _ [] = return []
--- mapMRnf f (x:xs) = do
---   !(force -> x') <- f x
---   (x' :) <$!!> mapMRnf f xs
 mapMRnf :: (NFData b, Monad m) => (a -> m b) -> [a] -> m [b]
-mapMRnf = mapM
+mapMRnf _ [] = return []
+mapMRnf f (x:xs) = do
+  !(force -> x') <- f x
+  (x' :) <$!!> mapMRnf f xs
+-- mapMRnf :: (NFData b, Monad m) => (a -> m b) -> [a] -> m [b]
+-- mapMRnf = mapM
 
 saveEvalResults :: (ExperimentDef a) => EvalResults a -> DB (ExpM a) (Availability IO (EvalResults a))
 saveEvalResults ev = do
@@ -103,32 +104,30 @@ saveEvalResults ev = do
 genExperiment :: (ExperimentDef a) => Experiment a -> StatsDef a -> DB (ExpM a) (EvalResults a)
 genExperiment exp (Named eval name) = addName <$!!> genExperiment exp eval
   where addName res = res { _evalType = Named (res ^. evalType) name }
+genExperiment exp (Name name eval) = addName <$!!> genExperiment exp eval
+  where addName res = res { _evalType = Named (res ^. evalType) name }
 genExperiment exp eval =
   case eval of
-    Mean OverExperimentRepetitions (Stats eval')   -> reduce <$!!> genExpRes id eval'
-    Mean OverExperimentRepetitions eval'           -> reduce <$!!> genExpRes id (Id eval')
-    Sum OverExperimentRepetitions (Stats eval')    -> reduce <$!!> genExpRes id eval'
-    Sum OverExperimentRepetitions eval'            -> reduce <$!!> genExpRes id (Id eval')
-    StdDev OverExperimentRepetitions (Stats eval') -> reduce <$!!> genExpRes id eval'
-    StdDev OverExperimentRepetitions eval'         -> reduce <$!!> genExpRes id (Id eval')
+    Mean OverExperimentRepetitions (Stats eval')   -> reduce (Stats eval') <$!!> genExpRes id eval'
+    Mean OverExperimentRepetitions eval'           -> reduce eval' <$!!> genExpRes id (Id eval')
+    Sum OverExperimentRepetitions (Stats eval')    -> reduce (Stats eval') <$!!> genExpRes id eval'
+    Sum OverExperimentRepetitions eval'            -> reduce eval' <$!!> genExpRes id (Id eval')
+    StdDev OverExperimentRepetitions (Stats eval') -> reduce (Stats eval') <$!!> genExpRes id eval'
+    StdDev OverExperimentRepetitions eval'         -> reduce eval' <$!!> genExpRes id (Id eval')
     -- Mean (OverBestXExperimentRepetitions nr cmp) eval' -> reduce eval' <$> genExpRes (take nr . sortBy (cmp `on` id)) (Id eval')
     -- Sum (OverBestXExperimentRepetitions nr cmp) eval' -> reduce eval' <$> genExpRes (take nr . sortBy (cmp `on` id)) (Id eval')
     -- StdDev (OverBestXExperimentRepetitions nr cmp) eval' -> reduce eval' <$> genExpRes (take nr . sortBy (cmp `on` id)) (Id eval')
     _ -> packGenRes <$!!> genExpRes id eval
-    -- packGenRes [x] = x
   where
     packGenRes = EvalVector eval UnitExperimentRepetition
-    genExpRes f e = do
-      liftIO $ putStrLn $ "genExperiment keys: " ++ show (map (fromSqlKey . view experimentResultKey) $ exp ^. experimentResults)
-      liftIO $ putStrLn $ "genExperiment Length: " ++ show (length $ exp ^. experimentResults)
-      liftIO $ putStrLn $ "genExperiment Eval: " ++ show eval
-      mapMRnf (fmap force . genExperimentResult exp e) (f $ exp ^. experimentResults)
-    reduce = reduceUnary eval . EvalVector eval UnitExperimentRepetition
-    -- reduce eval' = reduceUnary eval . EvalVector (Id eval') UnitExperimentRepetition
+    genExpRes f e = mapMRnf (fmap force . genExperimentResult exp e) (f $ exp ^. experimentResults)
+    -- reduce = reduceUnary eval . EvalVector eval UnitExperimentRepetition
+    reduce eval' = reduceUnary eval . EvalVector (Id eval') UnitExperimentRepetition
 
 
 genExperimentResult :: (ExperimentDef a) => Experiment a -> StatsDef a -> ExperimentResult a -> DB (ExpM a) (EvalResults a)
 genExperimentResult _ (Named _ n) _ = error $ "An evaluation may only be named on the outermost function in evaluation " <> T.unpack (E.decodeUtf8 n)
+genExperimentResult _ (Name n _) _ = error $ "An evaluation may only be named on the outermost function in evaluation " <> T.unpack (E.decodeUtf8 n)
 genExperimentResult exp eval expRes =
   case eval of
     Mean OverReplications (Stats eval')   -> reduce <$!!> genRepl eval'
@@ -141,12 +140,7 @@ genExperimentResult exp eval expRes =
   where
     packGenRes = EvalVector eval UnitReplications
     -- genRepl e = mapMRnf (fmap force . genReplication exp e) (expRes ^. evaluationResults)
-    genRepl e = do
-      liftIO $ putStrLn $ "genExperimentResult keys: " ++ show (map (fromSqlKey . view replicationResultKey) $ expRes ^. evaluationResults)
-      liftIO $ putStrLn $ "genExperimentResult Length: " ++ show (length $ expRes ^. evaluationResults)
-      liftIO $ putStrLn $ "genExperimentResult Eval: " ++ show eval
-
-      mapMRnf (fmap force . genReplication exp e) (expRes ^. evaluationResults)
+    genRepl e = mapMRnf (fmap force . genReplication exp e) (expRes ^.. evaluationResults.traversed.filtered (\x -> isJust (x ^. evalResults) ))
     reduce !inp = force $! EvalVector eval (getUnit inp) $ map (reduceUnary eval) $ transpose UnitReplications inp
     getUnit (EvalVector _ unit _:_) = unit
     getUnit (EvalValue _ unit _ _ _:_) = unit
@@ -160,29 +154,22 @@ genReplication exp eval repl = fromMaybe (error "Evaluation data is incomplete!"
 
 genResultData :: (ExperimentDef a) => Experiment a -> StatsDef a -> ResultData a -> DB (ExpM a) (EvalResults a)
 genResultData _ (Named _ n) _ = error $ "An evaluation may only be named on the outermost function in evaluation " <> T.unpack (E.decodeUtf8 n)
+genResultData _ (Name n _) _ = error $ "An evaluation may only be named on the outermost function in evaluation " <> T.unpack (E.decodeUtf8 n)
 genResultData exp eval resData =
-  case eval
-    -- Mean OverPeriods (Of name) -> do
-    --   res <- runConduit $ srcAvailableList (repl ^. results) .| mapC ((^?! evalY) . fromMeasure nameBS) .| sumC
-    --   return $ EvalReducedValue (Mean OverPeriods (Of name)) UnitPeriods (res / fromIntegral (lengthAvailabilityList (repl ^. results)))
-    --   where nameBS = E.decodeUtf8 name
-        of
+  case eval of
+    -- Mean OverPeriods (Of name) -> aggregate name E.avg_
     Mean OverPeriods eval' -> reduceUnary eval <$!!> genResultData exp (Id eval') resData
     StdDev OverPeriods eval' -> reduceUnary eval <$!!> genResultData exp (Id eval') resData
-    Sum OverPeriods (Of name) -> do
-      -- fmap (EvalReducedValue (Sum OverPeriods (Of name)) UnitPeriods) $ do
-        v <- case resData ^. resultDataKey of
-          ResultDataPrep k   -> loadPreparationAggregateWhere k (whereName name)
-          ResultDataWarmUp k -> loadReplicationWarmUpAggregateWhere k (whereName name)
-          ResultDataRep k    -> do
-            liftIO $ putStrLn $ "Getting V for k: " ++ show k
-            loadReparationAggregateWhere k (whereName name)
-        liftIO $ putStrLn $ "V: " ++ show v
-        return $ EvalReducedValue (Sum OverPeriods (Of name)) UnitPeriods v
+    -- Sum OverPeriods (Of name) -> aggregate name E.sum_
     Sum OverPeriods eval' -> reduceUnary eval <$!!> genResultData exp (Id eval') resData
     Id eval' -> force <$!> evalOf exp eval' resData
     _ -> force <$!> genExperiment exp eval
   where
+    -- aggregate name agg = fmap (EvalReducedValue eval UnitPeriods) $
+    --     case resData ^. resultDataKey of
+    --       ResultDataPrep k   -> loadPreparationAggregateWhere k agg (whereName name)
+    --       ResultDataWarmUp k -> loadReplicationWarmUpAggregateWhere k agg (whereName name)
+    --       ResultDataRep k    -> loadReparationAggregateWhere k agg (whereName name)
     whereName name =
       case resData ^. resultDataKey of
         ResultDataPrep k -> PrepMeasureWhere $ \meas resStep -> E.where_ (resStep E.^. PrepResultStepName E.==. E.val (E.decodeUtf8 name))
@@ -216,6 +203,21 @@ evalOf exp eval resData =
           liftIO $ addCache (eval, resData ^. resultDataKey) evalVector
           return evalVector
         Just evalVector -> return evalVector
+    Stats def -- alter experiment and restart evaluation
+      | maybe False (> OverPeriods) (getOver def) -> do
+        error "OverExperimentRepetitions and OverReplications have to be the two outermost evaluations or not present"
+        let k = resData ^. resultDataKey
+            isK = (== k)
+            check Nothing = Nothing
+            check (Just rD)
+              | isK (rD ^. resultDataKey) = Just rD
+              | otherwise = Nothing
+            fil lns = over lns check
+        let exp' = over (experimentResults . traversed) (over (evaluationResults . traversed) (fil warmUpResults . fil evalResults) . over preparationResults check) exp
+            allResData x = x ^.. evaluationResults . traversed . evalResults . traversed ++ x ^.. evaluationResults . traversed . warmUpResults . traversed ++ x ^.. preparationResults . traversed
+            expFiltered = over experimentResults (filter (not . null . allResData)) exp'
+        liftIO$ putStrLn $ "Filtered: " ++ show (length $ concatMap allResData (expFiltered ^. experimentResults))
+        genExperiment expFiltered def
     Stats def -> genResultData exp def resData
     Div eval1 eval2 -> reduceBinaryOf eval <$!!> evalOf exp eval1 resData <*> evalOf exp eval2 resData
     Add eval1 eval2 -> reduceBinaryOf eval <$!!> evalOf exp eval1 resData <*> evalOf exp eval2 resData

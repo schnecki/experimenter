@@ -188,6 +188,7 @@ printTableWithName (nm, tbl) = do
 leastUnit :: EvalResults a -> Unit
 leastUnit (EvalValue _ u _ _ _)    = u
 leastUnit (EvalReducedValue _ u _) = u
+leastUnit (EvalVector _ u [])      = u
 leastUnit (EvalVector _ u vals)    = min u (leastUnit (head vals))
 
 
@@ -231,7 +232,8 @@ toTables :: [TableResult] -> Table
 toTables xs = Table (header $ head xs) (concatMap rows xs)
 
 mkEvalResult :: Unit -> [Cell] -> EvalResults a -> TableResult
-mkEvalResult leastUnit _ (EvalVector _ unit []) = error "Empty evaluation. Check your eval setup."
+mkEvalResult leastUnit name (EvalVector _ unit []) = --TableResult (Row [CellT (unitName leastUnit)] [Row $ [CellT "empty table"]]
+  error "Empty evaluation. Check your eval setup."
 mkEvalResult leastUnit name eval@(EvalVector _ unit vals) =
   TableResult (Row $ CellT (unitName leastUnit) : map (CellT . tshow) [1 .. length vals]) (map Row (foldl' mkRows [name] rowVals))
   where

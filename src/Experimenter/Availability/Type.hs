@@ -25,6 +25,9 @@ instance (NFData b) => NFData (Availability m b) where
   rnf (AvailableOnDemand !_) = ()
 
 
+type AggregateFunction = E.SqlExpr (E.Value Double) -> E.SqlExpr (E.Value (Maybe Double))
+
+
 data AvailabilityListWhere
   = GetAll
   | PrepInputWhere     (E.SqlExpr (Entity PrepInput)     -> E.SqlExpr (Entity PrepInputValue)   -> E.SqlQuery ())

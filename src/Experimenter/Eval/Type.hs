@@ -48,15 +48,20 @@ instance Show (Over a) where
   -- show (OverBestXExperimentRepetitions nr _) = "(BestXExperimentEvaluations " <> show nr <> ")"
 
 instance Ord (Over a) where
+  compare OverExperimentRepetitions OverExperimentRepetitions = EQ
+  compare OverExperimentRepetitions _                         = GT
   compare OverReplications OverReplications                   = EQ
-  compare OverReplications _                                  = LT
-  compare OverPeriods OverReplications                        = GT
+  compare OverReplications _                                  = GT
   compare OverPeriods OverPeriods                             = EQ
   compare OverPeriods _                                       = LT
-  compare OverExperimentRepetitions OverReplications          = GT
-  compare OverExperimentRepetitions OverPeriods               = GT
-  compare OverExperimentRepetitions OverExperimentRepetitions = EQ
-  compare OverExperimentRepetitions _                         = LT
+
+  -- compare OverExperimentRepetitions OverReplications          = GT
+  -- compare OverExperimentRepetitions OverPeriods               = GT
+
+  -- compare OverReplications _                                  = LT
+  -- compare OverReplications OverPeriods                        = GT
+  -- compare OverPeriods OverPeriods                             = EQ
+  -- compare OverPeriods _                                       = LT
   -- compare OverBestXExperimentRepetitions{} OverBestXExperimentRepetitions{} = EQ
   -- compare OverBestXExperimentRepetitions{} _                                = GT
 
@@ -68,9 +73,21 @@ data StatsDef a
   = Mean !(Over a) !(Of a)
   | StdDev !(Over a) !(Of a)
   | Sum !(Over a) !(Of a)
+  --  | TakeBest Int (StatsDef a) (Of a)
   | Id !(Of a)
   | Named !(StatsDef a) !ByteString
+  | Name !ByteString !(StatsDef a)
   deriving (Generic, Serialize, Show, Eq, Ord, NFData)
+
+-- type Name =
+
+getOver :: StatsDef a -> Maybe (Over a)
+getOver (Mean o _)   = Just o
+getOver (StdDev o _) = Just o
+getOver (Sum o _)    = Just o
+getOver (Id _)       = Nothing
+getOver (Named _ _)  = Nothing
+getOver (Name _ _)   = Nothing
 
 
 data Of a
@@ -87,13 +104,15 @@ data Of a
   deriving (Generic, Serialize, Show, Eq, Ord, NFData)
 
 prettyStatsDef :: StatsDef a -> T.Text
-prettyStatsDef statsDef = case statsDef of
-  Named _ txt     -> E.decodeUtf8 txt
-  Mean over of'   -> "Mean " <> prettyOver over <> " " <> prettyOf of'
-  StdDev over of' -> "StdDev " <> prettyOver over <> " " <> prettyOf of'
-  Sum over of'    -> "Sum " <> prettyOver over <> " " <> prettyOf of'
-  Id (Of name)    -> E.decodeUtf8 name <> "s"
-  Id of'          -> prettyOf of'
+prettyStatsDef statsDef =
+  case statsDef of
+    Named _ txt     -> E.decodeUtf8 txt
+    Name txt _      -> E.decodeUtf8 txt
+    Mean over of'   -> "Mean " <> prettyOver over <> " " <> prettyOf of'
+    StdDev over of' -> "StdDev " <> prettyOver over <> " " <> prettyOf of'
+    Sum over of'    -> "Sum " <> prettyOver over <> " " <> prettyOf of'
+    Id (Of name)    -> E.decodeUtf8 name <> "s"
+    Id of'          -> prettyOf of'
 
 prettyOf :: Of a -> T.Text
 prettyOf = dropDoublePars . prettyOf'
