@@ -34,6 +34,7 @@ data AvailabilityListWhere
   | WarmUpMeasureWhere (E.SqlExpr (Entity WarmUpMeasure) -> E.SqlExpr (Entity WarmUpResultStep) -> E.SqlQuery ())
   | RepMeasureWhere    (E.SqlExpr (Entity RepMeasure)    -> E.SqlExpr (Entity RepResultStep)    -> E.SqlQuery ())
 
+
 instance Show AvailabilityListWhere where
   show GetAll{}             = "GetAll"
   show PrepInputWhere{}     = "PrepInputWhere"
