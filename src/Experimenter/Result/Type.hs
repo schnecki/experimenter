@@ -41,7 +41,7 @@ data ResultDataKey
   = ResultDataPrep (Key PrepResultData)
   | ResultDataWarmUp (Key WarmUpResultData)
   | ResultDataRep (Key RepResultData)
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show)
 
 
 data ResultData a = ResultData

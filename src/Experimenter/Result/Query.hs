@@ -12,12 +12,12 @@ module Experimenter.Result.Query
     ( loadExperiments
     , loadExperimentResults
     , loadExperimentsResults
-    , loadPrepartionMeasures
-    , loadPreparationInput
-    , loadReplicationWarmUpMeasures
-    , loadReplicationWarmUpInput
-    , loadReplicationInput
-    , loadReplicationMeasures
+    , loadPreparationInputWhere
+    , loadPreparationMeasuresWhere
+    , loadReplicationWarmUpInputWhere
+    , loadReplicationWarmUpMeasuresWhere
+    , loadReplicationInputWhere
+    , loadReplicationMeasuresWhere
     , loadResDataEndState
     , loadResDataStartState
     , loadParamSetup
@@ -273,8 +273,8 @@ loadExperimentResult (Entity k (ExpResult expId rep mPrepResDataId)) = do
         resultCount <- loadPrepartionMeasuresCount resDataKey
         startRandGen <- toRandGen startRandGenBS
         endRandGen <- maybe (return Nothing) (fmap Just . toRandGen) endRandGenBS
-        let inputVals = AvailableListOnDemand (inpCount, loadPreparationInput resDataKey)
-        let results = AvailableListOnDemand (resultCount, loadPrepartionMeasures resDataKey)
+        let inputVals = AvailableListOnDemand (inpCount, loadPreparationInputWhere resDataKey)
+        let results = AvailableListOnDemand (resultCount, loadPreparationMeasuresWhere resDataKey)
         return $ ResultData (ResultDataPrep resDataKey) startT endT startRandGen endRandGen inputVals results startSt endSt <$> mStartInpSt <*> mEndInpSt
   evalResults <- loadReplicationResults expId k
   return $ ExperimentResult k rep prepRes evalResults
@@ -314,13 +314,14 @@ loadParamSetup kExp =
 loadPreparationInputCount  :: (MonadIO m) => Key PrepResultData -> ReaderT SqlBackend m Int
 loadPreparationInputCount kExpRes = count [PrepInputPrepResultData ==. kExpRes]
 
-loadPreparationInput :: (ExperimentDef a, MonadIO m) => Key PrepResultData -> ConduitT () (Input a) (DB m) ()
-loadPreparationInput kExpRes = do
+loadPreparationInputWhere :: (MonadIO m, ExperimentDef a) => Key PrepResultData -> AvailabilityListWhere -> ConduitM () (Input a) (DB m) ()
+loadPreparationInputWhere kExpRes (PrepInputWhere where') = do
   let src =
         E.selectSource $
         E.from $ \(prepI, prepIV) -> do
           E.where_ (prepI E.^. PrepInputId E.==. prepIV E.^. PrepInputValuePrepInput)
           E.where_ (prepI E.^. PrepInputPrepResultData E.==. E.val kExpRes)
+          where' prepI prepIV
           return (prepI, prepIV)
   src C..| C.mapMC mkInput C..| sequenceC []
   -- sequence <$> mapM mkInput res
@@ -329,6 +330,8 @@ loadPreparationInput kExpRes = do
     mkInput (Entity _ (PrepInput _ p), Entity _ (PrepInputValue _ v)) = do
       v' <- deserialise "prep input value" v
       return $ Input p <$> v'
+loadPreparationInputWhere kExpRes GetAll = loadPreparationInputWhere kExpRes (PrepInputWhere (\_ _ -> return ()))
+loadPreparationInputWhere _ where' = error $ "Wrong Where clause: " ++ show where' ++ " where PrepInputWhere was expected"
 
 
 sequenceC :: Monad m => [Maybe o] -> ConduitT (Maybe o) o m ()
@@ -342,13 +345,17 @@ sequenceC xs = do
 loadPrepartionMeasuresCount :: (MonadIO m) => Key PrepResultData -> DB m Int
 loadPrepartionMeasuresCount kExpRes = count [PrepMeasurePrepResultData ==. kExpRes]
 
-loadPrepartionMeasures :: (MonadIO m) => Key PrepResultData -> ConduitT () Measure (DB m) ()
-loadPrepartionMeasures kExpRes = do
+-- loadPrepartionMeasures :: (MonadIO m) => Key PrepResultData -> ConduitT () Measure (DB m) ()
+-- loadPrepartionMeasures = loadPrepartionMeasuresWith (\_ _ -> return ())
+
+loadPreparationMeasuresWhere :: (MonadIO m) => Key PrepResultData -> AvailabilityListWhere -> ConduitT () Measure (DB m) ()
+loadPreparationMeasuresWhere kExpRes (PrepMeasureWhere where') = do
   let src =
         E.selectSource $
         E.from $ \(prepM, prepRS) -> do
           E.where_ (prepM E.^. PrepMeasureId E.==. prepRS E.^. PrepResultStepMeasure)
           E.where_ (prepM E.^. PrepMeasurePrepResultData E.==. E.val kExpRes)
+          where' prepM prepRS
           E.orderBy [E.asc (prepM E.^. PrepMeasurePeriod)]
           return (prepM, prepRS)
   src C..| C.mapC mkMeasure C..| CL.groupBy ((==) `on` view measurePeriod) C..| C.mapC combineMeasures
@@ -357,6 +364,9 @@ loadPrepartionMeasures kExpRes = do
     mkMeasure (Entity _ (PrepMeasure _ p), Entity _ (PrepResultStep _ n x y)) = Measure p [StepResult n x y]
     combineMeasures xs@(Measure p _:_) = Measure p (concatMap (view measureResults) xs)
     combineMeasures _                  = error "not possible"
+loadPreparationMeasuresWhere kExpRes GetAll = loadPreparationMeasuresWhere kExpRes (PrepMeasureWhere (\_ _ -> return ()))
+loadPreparationMeasuresWhere _ where' = error $ "Wrong Where clause: " ++ show where' ++ " where PrepMeasuresWhere was expected"
+
 
 loadReplicationResults :: (ExperimentDef a) => Key Exp -> Key ExpResult -> DB (ExpM a) [ReplicationResult a]
 loadReplicationResults expId kExpRes = do
@@ -389,8 +399,8 @@ loadReplicationResult expId (Entity k (RepResult _ repNr mWmUpResId mRepResId)) 
       mWmUpEndInpSt <- mDeserialise "warm up end input state" (view warmUpResultDataEndInputState wmUpRes)
       wmUpInpValsCount <- loadReplicationWarmUpInputCount wmUpResKey
       wmUpMeasuresCount <- loadReplicationWarmUpMeasuresCount wmUpResKey
-      let wmUpInpVals = AvailableListOnDemand (wmUpInpValsCount, loadReplicationWarmUpInput wmUpResKey)
-          wmUpMeasures = AvailableListOnDemand (wmUpMeasuresCount, loadReplicationWarmUpMeasures wmUpResKey)
+      let wmUpInpVals = AvailableListOnDemand (wmUpInpValsCount, loadReplicationWarmUpInputWhere wmUpResKey)
+          wmUpMeasures = AvailableListOnDemand (wmUpMeasuresCount, loadReplicationWarmUpMeasuresWhere wmUpResKey)
       return $
         ResultData (ResultDataWarmUp wmUpResKey) wmUpStartTime wmUpEndTime wmUpStartRandGen wmUpEndRandGen wmUpInpVals wmUpMeasures wmUpStartSt wmUpEndSt <$> mWmUpStartInpSt <*>
         mWmUpEndInpSt
@@ -403,8 +413,8 @@ loadReplicationResult expId (Entity k (RepResult _ repNr mWmUpResId mRepResId)) 
       mRepEndInpSt <- mDeserialise "rep end input state" (view repResultDataEndInputState repRes)
       repInpValsCount <- loadReplicationInputCount repResKey
       repMeasuresCount <- loadReplicationMeasuresCount repResKey
-      let repInpVals = AvailableListOnDemand (repInpValsCount, loadReplicationInput repResKey)
-          repMeasures = AvailableListOnDemand (repMeasuresCount, loadReplicationMeasures repResKey)
+      let repInpVals = AvailableListOnDemand (repInpValsCount, loadReplicationInputWhere repResKey)
+          repMeasures = AvailableListOnDemand (repMeasuresCount, loadReplicationMeasuresWhere repResKey)
       let repStartSt = AvailableOnDemand (loadResDataStartState expId (StartStateRep repResKey))
       let repEndSt = AvailableOnDemand (loadResDataEndState expId (EndStateRep repResKey))
       return $
@@ -415,13 +425,14 @@ loadReplicationWarmUpInputCount :: (MonadIO m) => Key WarmUpResultData -> Reader
 loadReplicationWarmUpInputCount kExpRes = count [WarmUpInputRepResult ==. kExpRes]
 
 
-loadReplicationWarmUpInput :: (ExperimentDef a, MonadIO m) => Key WarmUpResultData -> ConduitT () (Input a) (DB m) ()
-loadReplicationWarmUpInput kExpRes = do
+loadReplicationWarmUpInputWhere :: (ExperimentDef a, MonadIO m) => Key WarmUpResultData -> AvailabilityListWhere -> ConduitT () (Input a) (DB m) ()
+loadReplicationWarmUpInputWhere kExpRes (WarmUpInputWhere where') = do
   let src =
        E.selectSource $
        E.from $ \(warmUpI, warmUpIV) -> do
          E.where_ (warmUpI E.^. WarmUpInputId E.==. warmUpIV E.^. WarmUpInputValueWarmUpInput)
          E.where_ (warmUpI E.^. WarmUpInputRepResult E.==. E.val kExpRes)
+         where' warmUpI warmUpIV
          return (warmUpI, warmUpIV)
   src C..| C.mapMC mkInput C..| sequenceC []
   -- sequence <$> mapM mkInput res
@@ -429,37 +440,43 @@ loadReplicationWarmUpInput kExpRes = do
     mkInput (Entity _ (WarmUpInput _ p), Entity _ (WarmUpInputValue _ v)) = do
       v' <- deserialise "warm up input value" v
       return $ Input p <$> v'
+loadReplicationWarmUpInputWhere kExpRes GetAll = loadReplicationWarmUpInputWhere kExpRes (WarmUpInputWhere (\_ _ -> return ()))
+loadReplicationWarmUpInputWhere _ where' = error $ "Wrong Where clause: " ++ show where' ++ " where PrepInputWhere was expected"
 
 
 loadReplicationWarmUpMeasuresCount :: (MonadIO m) => Key WarmUpResultData -> ReaderT SqlBackend m Int
 loadReplicationWarmUpMeasuresCount kExpRes = count [WarmUpMeasureRepResult ==. kExpRes]
 
-loadReplicationWarmUpMeasures :: (MonadIO m) => Key WarmUpResultData -> ConduitT () Measure (DB m) ()
-loadReplicationWarmUpMeasures kExpRes = do
+loadReplicationWarmUpMeasuresWhere :: (MonadIO m) => Key WarmUpResultData -> AvailabilityListWhere -> ConduitM () Measure (DB m) ()
+loadReplicationWarmUpMeasuresWhere kExpRes (WarmUpMeasureWhere where') = do
   let src =
         E.selectSource $
         E.from $ \(warmUpM, warmUpRS) -> do
           E.where_ (warmUpM E.^. WarmUpMeasureId E.==. warmUpRS E.^. WarmUpResultStepMeasure)
           E.where_ (warmUpM E.^. WarmUpMeasureRepResult E.==. E.val kExpRes)
+          where' warmUpM warmUpRS
           E.orderBy [E.asc (warmUpM E.^. WarmUpMeasurePeriod)]
           return (warmUpM, warmUpRS)
   src C..| C.mapC mkMeasure C..| CL.groupBy ((==) `on` view measurePeriod) C..| C.mapC combineMeasures
-  -- return $ map combineMeasures $ L.groupBy ((==) `on` view measurePeriod) $ map mkMeasure res
   where
     mkMeasure (Entity _ (WarmUpMeasure _ p), Entity _ (WarmUpResultStep _ n x y)) = Measure p [StepResult n x y]
     combineMeasures xs@(Measure p _:_) = Measure p (concatMap (view measureResults) xs)
     combineMeasures _                  = error "not possible"
+loadReplicationWarmUpMeasuresWhere kExpRes GetAll = loadReplicationWarmUpMeasuresWhere kExpRes (WarmUpMeasureWhere (\_ _ -> return ()))
+loadReplicationWarmUpMeasuresWhere _ where' = error $ "Wrong Where clause: " ++ show where' ++ " where PrepMeasuresWhere was expected"
+
 
 loadReplicationInputCount :: (MonadIO m) => Key RepResultData -> ReaderT SqlBackend m Int
 loadReplicationInputCount kExpRes = count [RepInputRepResult ==. kExpRes]
 
-loadReplicationInput :: (ExperimentDef a, MonadIO m) => Key RepResultData -> ConduitT () (Input a) (DB m) ()
-loadReplicationInput kExpRes = do
+loadReplicationInputWhere :: (ExperimentDef a, MonadIO m) => Key RepResultData -> AvailabilityListWhere -> ConduitT () (Input a) (DB m) ()
+loadReplicationInputWhere kExpRes (RepInputWhere where') = do
   let src =
        E.selectSource $
        E.from $ \(repI, repIV) -> do
          E.where_ (repI E.^. RepInputId E.==. repIV E.^. RepInputValueRepInput)
          E.where_ (repI E.^. RepInputRepResult E.==. E.val kExpRes)
+         where' repI repIV
          return (repI, repIV)
   src C..| C.mapMC mkInput C..| sequenceC []
   -- sequence <$> mapM mkInput res
@@ -467,27 +484,31 @@ loadReplicationInput kExpRes = do
     mkInput (Entity _ (RepInput _ p), Entity _ (RepInputValue _ v)) = do
       v' <- deserialise "eval input value" v
       return $ Input p <$> v'
+loadReplicationInputWhere kExpRes GetAll = loadReplicationInputWhere kExpRes (RepInputWhere (\_ _ -> return ()))
+loadReplicationInputWhere _ where' = error $ "Wrong Where clause: " ++ show where' ++ " where PrepInputWhere was expected"
 
 
 loadReplicationMeasuresCount :: (MonadIO m) => Key RepResultData -> ReaderT SqlBackend m Int
 loadReplicationMeasuresCount kExpRes = count [RepMeasureRepResult ==. kExpRes]
 
 
-loadReplicationMeasures :: (MonadIO m) => Key RepResultData -> ConduitT () Measure (DB m) ()
-loadReplicationMeasures kExpRes = do
+loadReplicationMeasuresWhere :: (MonadIO m) => Key RepResultData -> AvailabilityListWhere -> ConduitT () Measure (DB m) ()
+loadReplicationMeasuresWhere kExpRes (RepMeasureWhere where') = do
   let src =
         E.selectSource $
         E.from $ \(repM, repRS) -> do
           E.where_ (repM E.^. RepMeasureId E.==. repRS E.^. RepResultStepMeasure)
           E.where_ (repM E.^. RepMeasureRepResult E.==. E.val kExpRes)
+          where' repM repRS
           E.orderBy [E.asc (repM E.^. RepMeasurePeriod)]
           return (repM, repRS)
   src C..| C.mapC mkMeasure C..| CL.groupBy ((==) `on` view measurePeriod) C..| C.mapC combineMeasures
-  -- return $ map combineMeasures $ L.groupBy ((==) `on` view measurePeriod) $ map mkMeasure res
   where
     mkMeasure (Entity _ (RepMeasure _ p), Entity _ (RepResultStep _ n x y)) = Measure p [StepResult n x y]
     combineMeasures xs@(Measure p _:_) = Measure p (concatMap (view measureResults) xs)
     combineMeasures _                  = error "not possible"
+loadReplicationMeasuresWhere kExpRes GetAll = loadReplicationMeasuresWhere kExpRes (RepMeasureWhere (\_ _ -> return ()))
+loadReplicationMeasuresWhere _ where' = error $ "Wrong Where clause: " ++ show where' ++ " where PrepMeasuresWhere was expected"
 
 
 getOrCreateExps :: forall a . (ExperimentDef a) => ExperimentSetting -> InputState a -> a -> DB (ExpM a) (Entity Exps)

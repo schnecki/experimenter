@@ -526,8 +526,9 @@ newResultData seed repResType st inpSt = do
         setResDataStartState (StartStateRep repResDataId) (runPut $ put serSt)
         update repResId [RepResultRepResultData =. Just repResDataId]
         return $ ResultDataRep repResDataId
+  let (fInp, fMeas) = (error "called Conduit for input on unsaved result data", error "called Conduit for measures on unsaved result data")
   g <- liftIO $ restore seed
-  return $ ResultData k time Nothing g Nothing (AvailableList (0, [])) (AvailableList (0, [])) (Available st) (Available Nothing) inpSt Nothing
+  return $ ResultData k time Nothing g Nothing (AvailableList (0, []) fInp) (AvailableList (0, []) fMeas) (Available st) (Available Nothing) inpSt Nothing
 
 
 runExperimentResult ::
@@ -838,31 +839,31 @@ runResultData expId len repResType resData = do
           countInputValues' = lengthAvailabilityList (resData ^. inputValues) + length inputVals
        in case resData ^. resultDataKey of
             ResultDataPrep key -> do
-              when (delInputs) $ deleteCascadeWhere [PrepInputPrepResultData ==. key, PrepInputPeriod >=. curLen + 1]
+              when delInputs $ deleteCascadeWhere [PrepInputPrepResultData ==. key, PrepInputPeriod >=. curLen + 1]
               inpKeys <- insertMany $ map (PrepInput key . view inputValuePeriod) inputVals
               insertMany_ $ zipWith (\k v -> PrepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
               measureKeys <- insertMany $ map (PrepMeasure key . view measurePeriod) measures
               insertMany_ $ concat $ zipWith (\k (Measure _ xs) -> map (\(StepResult n mX y) -> PrepResultStep k n mX y) xs) measureKeys measures
-              return $ results .~ AvailableListOnDemand (countResults', (loadPrepartionMeasures key)) $ inputValues .~
-                AvailableListOnDemand (countInputValues', loadPreparationInput key) $
+              return $ results .~ AvailableListOnDemand (countResults', loadPreparationMeasuresWhere key) $ inputValues .~
+                AvailableListOnDemand (countInputValues', loadPreparationInputWhere key) $
                 resData
             ResultDataWarmUp key -> do
-              when (delInputs) $ deleteCascadeWhere [WarmUpInputRepResult ==. key, WarmUpInputPeriod >=. curLen + 1]
+              when delInputs $ deleteCascadeWhere [WarmUpInputRepResult ==. key, WarmUpInputPeriod >=. curLen + 1]
               inpKeys <- insertMany $ map (WarmUpInput key . view inputValuePeriod) inputVals
               insertMany_ $ zipWith (\k v -> WarmUpInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
               measureKeys <- insertMany $ map (WarmUpMeasure key . view measurePeriod) measures
               insertMany_ $ concat $ zipWith (\k (Measure _ xs) -> map (\(StepResult n mX y) -> WarmUpResultStep k n mX y) xs) measureKeys measures
-              return $ results .~ AvailableListOnDemand (countResults', (loadReplicationWarmUpMeasures key)) $ inputValues .~
-                AvailableListOnDemand (countInputValues', loadReplicationWarmUpInput key) $
+              return $ results .~ AvailableListOnDemand (countResults', loadReplicationWarmUpMeasuresWhere key) $ inputValues .~
+                AvailableListOnDemand (countInputValues', loadReplicationWarmUpInputWhere key) $
                 resData
             ResultDataRep key -> do
-              when (delInputs) $ deleteCascadeWhere [RepInputRepResult ==. key, RepInputPeriod >=. curLen + 1]
+              when delInputs $ deleteCascadeWhere [RepInputRepResult ==. key, RepInputPeriod >=. curLen + 1]
               inpKeys <- insertMany $ map (RepInput key . view inputValuePeriod) inputVals
               insertMany_ $ zipWith (\k v -> RepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
               measureKeys <- insertMany $ map (RepMeasure key . view measurePeriod) measures
               insertMany_ $ concat $ zipWith (\k (Measure _ xs) -> map (\(StepResult n mX y) -> RepResultStep k n mX y) xs) measureKeys measures
-              return $ results .~ AvailableListOnDemand (countResults', (loadReplicationMeasures key)) $ inputValues .~
-                AvailableListOnDemand (countInputValues', loadReplicationInput key) $
+              return $ results .~ AvailableListOnDemand (countResults', loadReplicationMeasuresWhere key) $ inputValues .~
+                AvailableListOnDemand (countInputValues', loadReplicationInputWhere key) $
                 resData
     upd :: (ExperimentDef a) => RepResultType -> ResultData a -> DB (ExpM a) ()
     upd (Prep expResId) (ResultData (ResultDataPrep k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do

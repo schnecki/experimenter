@@ -15,8 +15,10 @@ module Experimenter.Eval.Ops
     ) where
 
 import           Conduit                      as C
+import           Control.Concurrent.MVar
 import           Control.DeepSeq
 import           Control.Lens                 hiding (Cons, Over, over)
+import           Control.Monad.IO.Class       (liftIO)
 import           Control.Monad.Logger
 import           Control.Monad.Reader
 import           Control.Monad.Trans.Resource
@@ -24,15 +26,18 @@ import           Data.Conduit
 import qualified Data.Conduit.List            as CL
 import           Data.Function                (on)
 import           Data.List                    (find, sortBy)
+import qualified Data.Map.Strict              as M
 import           Data.Maybe                   (fromMaybe)
 import           Data.Serialize               as S
 import qualified Data.Text                    as T
 import qualified Data.Text.Encoding           as E
 import           Data.Time                    (addUTCTime, getCurrentTime)
+import qualified Database.Esqueleto           as E
 import           Database.Persist.Postgresql  as DB (SqlBackend, delete, get, insert,
                                                      runSqlConn, selectKeysList,
                                                      withPostgresqlConn, (<=.))
 import           Database.Persist.Sql         (fromSqlKey, toSqlKey)
+import           System.IO.Unsafe             (unsafePerformIO)
 
 
 import           Experimenter.Availability
@@ -134,49 +139,83 @@ genReplication exp eval repl = fromMaybe (error "Evaluation data is incomplete!"
 
 genResultData :: (ExperimentDef a) => Experiment a -> StatsDef a -> ResultData a -> DB (ExpM a) (EvalResults a)
 genResultData _ (Named _ n) _ = error $ "An evaluation may only be named on the outermost function in evaluation " <> T.unpack (E.decodeUtf8 n)
-genResultData exp eval repl =
+genResultData exp eval resData =
   case eval of
-    Mean OverPeriods (Of name) -> do
-      res <- runConduit $ srcAvailableList (repl ^. results) .| mapC ((^?! evalY) . fromMeasure nameBS) .| sumC
-      return $ EvalReducedValue (Mean OverPeriods (Of name)) UnitPeriods (res / fromIntegral (lengthAvailabilityList (repl ^. results)))
-      where nameBS = E.decodeUtf8 name
-    Mean OverPeriods eval' -> reduceUnary eval <$!!> genResultData exp (Id eval') repl
-    StdDev OverPeriods eval' -> reduceUnary eval <$!!> genResultData exp (Id eval') repl
-    Sum OverPeriods (Of name) -> do
-      res <- runConduit $ srcAvailableList (repl ^. results) .| mapC ((^?! evalY) . fromMeasure nameBS) .| sumC
-      return $ EvalReducedValue (Sum OverPeriods (Of name)) UnitPeriods res
-      where nameBS = E.decodeUtf8 name
-    Sum OverPeriods eval' -> reduceUnary eval <$!!> genResultData exp (Id eval') repl
-    Id eval' -> force <$!> evalOf exp eval' repl
-    _ -> force <$!> genExperiment exp eval
+    -- Mean OverPeriods (Of name) -> do
+    --   res <- runConduit $ srcAvailableList (repl ^. results) .| mapC ((^?! evalY) . fromMeasure nameBS) .| sumC
+    --   return $ EvalReducedValue (Mean OverPeriods (Of name)) UnitPeriods (res / fromIntegral (lengthAvailabilityList (repl ^. results)))
+    --   where nameBS = E.decodeUtf8 name
+    Mean OverPeriods eval'   -> reduceUnary eval <$!!> genResultData exp (Id eval') resData
+    StdDev OverPeriods eval' -> reduceUnary eval <$!!> genResultData exp (Id eval') resData
+    -- Sum OverPeriods (Of name) -> do
+    --   res <- runConduit $ srcAvailableListWhere (whereName name) (resData ^. results) .| mapC ((^?! evalY) . fromMeasure nameBS) .| sumC
+    --   return $ EvalReducedValue (Sum OverPeriods (Of name)) UnitPeriods res
+    --   where nameBS = E.decodeUtf8 name
+    Sum OverPeriods eval'    -> reduceUnary eval <$!!> genResultData exp (Id eval') resData
+    Id eval'                 -> force <$!> evalOf exp eval' resData
+    _                        -> force <$!> genExperiment exp eval
+  where
+    sum' name = case resData ^. resultDataKey of
+        ResultDataPrep k -> PrepMeasureWhere $ \meas resStep -> E.groupBy (resStep E.^. PrepResultStepName E.==. E.val (E.decodeUtf8 name))
+        ResultDataWarmUp k -> WarmUpMeasureWhere $ \meas resStep -> E.where_ (resStep E.^. WarmUpResultStepName E.==. E.val (E.decodeUtf8 name))
+        ResultDataRep k -> RepMeasureWhere $ \meas resStep -> E.where_ (resStep E.^. RepResultStepName E.==. E.val (E.decodeUtf8 name))
+    whereName name =
+      case resData ^. resultDataKey of
+        ResultDataPrep k -> PrepMeasureWhere $ \meas resStep -> E.where_ (resStep E.^. PrepResultStepName E.==. E.val (E.decodeUtf8 name))
+        ResultDataWarmUp k -> WarmUpMeasureWhere $ \meas resStep -> E.where_ (resStep E.^. WarmUpResultStepName E.==. E.val (E.decodeUtf8 name))
+        ResultDataRep k -> RepMeasureWhere $ \meas resStep -> E.where_ (resStep E.^. RepResultStepName E.==. E.val (E.decodeUtf8 name))
 
 
-evalOf :: (ExperimentDef a) => Experiment a -> Of a -> ResultData a ->
-  -- ConduitT () Void (DB (ExpM a)) (EvalResults a)
-  DB (ExpM a) (EvalResults a)
+cacheMVar :: MVar (M.Map (Of a, ResultDataKey) (EvalResults a))
+cacheMVar = unsafePerformIO $ newMVar mempty
+{-# NOINLINE cacheMVar #-}
+
+emptyCache :: IO ()
+emptyCache = liftIO $ modifyMVar_ cacheMVar (const mempty)
+
+addCache :: (Of a, ResultDataKey) -> EvalResults a -> IO ()
+addCache k v = liftIO $ modifyMVar_ cacheMVar (return . M.insert k v)
+
+lookupCache :: (Of a, ResultDataKey) -> IO (Maybe (EvalResults a))
+lookupCache k = liftIO $ (M.lookup k =<<) <$> tryReadMVar cacheMVar
+
+
+evalOf :: (ExperimentDef a) => Experiment a -> Of a -> ResultData a -> DB (ExpM a) (EvalResults a)
 evalOf exp eval resData =
   case eval of
     Of name -> do
-      res <- runConduit $ srcAvailableList (resData ^. results) .| mapC (fromMeasure $ E.decodeUtf8 name) .| CL.consume
-      return $ EvalVector (Id $ Of name) UnitPeriods res
+      mCache <- liftIO $ lookupCache (eval, resData ^. resultDataKey)
+      case mCache of
+        Nothing -> do
+          res <- runConduit $ srcAvailableListWhere (whereName name) (resData ^. results) .| mapC (fromMeasure $ E.decodeUtf8 name) .| CL.consume
+          let evalVector = EvalVector (Id $ Of name) UnitPeriods res
+          liftIO $ addCache (eval, resData ^. resultDataKey) evalVector
+          return evalVector
+        Just evalVector -> return evalVector
     Stats def -> genExperiment exp def
     Div eval1 eval2 -> reduceBinaryOf eval <$!!> evalOf exp eval1 resData <*> evalOf exp eval2 resData
     Add eval1 eval2 -> reduceBinaryOf eval <$!!> evalOf exp eval1 resData <*> evalOf exp eval2 resData
     Sub eval1 eval2 -> reduceBinaryOf eval <$!!> evalOf exp eval1 resData <*> evalOf exp eval2 resData
     Mult eval1 eval2 -> reduceBinaryOf eval <$!!> evalOf exp eval1 resData <*> evalOf exp eval2 resData
     First (Of name) -> do
-      res <- runConduit $ srcAvailableList (resData ^. results) .| mapC (fromMeasure $ E.decodeUtf8 name) .| headC
+      res <- runConduit $ srcAvailableListWhere (whereName name) (resData ^. results) .| mapC (fromMeasure $ E.decodeUtf8 name) .| headC
       return $ EvalVector (Id $ First $ Stats $ Id $ Of name) UnitPeriods [fromMaybe (error $ "empty elements in evalOf First(Of " <> show name <> ")") res]
     First eval' -> reduceUnaryOf eval <$!!> evalOf exp eval' resData
     Last (Of name) -> do
-      res <- runConduit $ srcAvailableList (resData ^. results) .| mapC (fromMeasure $ E.decodeUtf8 name) .| lastC
+      res <- runConduit $ srcAvailableListWhere (whereName name) (resData ^. results) .| mapC (fromMeasure $ E.decodeUtf8 name) .| lastC
       return $ EvalVector (Id $ Last $ Stats $ Id $ Of name) UnitPeriods [fromMaybe (error $ "empty elements in evalOf Last(Of " <> show name <> ")") res]
     Last eval' -> reduceUnaryOf eval <$!!> evalOf exp eval' resData
     EveryXthElem _ eval' -> reduceUnaryOf eval <$!!> evalOf exp eval' resData
     Length (Of name) -> do
-      res <- runConduit $ srcAvailableList (resData ^. results) .| mapC (fromMeasure $ E.decodeUtf8 name) .| lengthC
+      res <- runConduit $ srcAvailableListWhere (whereName name) (resData ^. results) .| mapC (fromMeasure $ E.decodeUtf8 name) .| lengthC
       return $ EvalReducedValue (Id $ Length $ Stats $ Id $ Of name) UnitScalar res
     Length eval' -> reduceUnaryOf eval <$!!> evalOf exp eval' resData
+  where
+    whereName name =
+      case resData ^. resultDataKey of
+        ResultDataPrep k -> PrepMeasureWhere $ \meas resStep -> E.where_ (resStep E.^. PrepResultStepName E.==. E.val (E.decodeUtf8 name))
+        ResultDataWarmUp k -> WarmUpMeasureWhere $ \meas resStep -> E.where_ (resStep E.^. WarmUpResultStepName E.==. E.val (E.decodeUtf8 name))
+        ResultDataRep k -> RepMeasureWhere $ \meas resStep -> E.where_ (resStep E.^. RepResultStepName E.==. E.val (E.decodeUtf8 name))
 
 fromMeasure :: T.Text -> Measure -> EvalResults a
 fromMeasure name (Measure p res) = case find ((==name) . view resultName) res of
