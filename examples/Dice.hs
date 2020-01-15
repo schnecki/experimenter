@@ -40,7 +40,7 @@ instance ExperimentDef Dice where
   deserialisable = return
 
   generateInput _ _ _ _ = return ((), ())
-  runStep (Dice g mD) _ p =
+  runStep _ (Dice g mD) _ p =
     let (nr, g') = next g
         result = StepResult "draw" Nothing (fromIntegral $ 1 + nr `mod` 6)
     in return ([result], Dice g' mD)

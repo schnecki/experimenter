@@ -785,11 +785,12 @@ runResultData expId len repResType resData = do
       periodsToRun = map (+ curLen) [1 .. nrOfPeriodsToRun]
   let updated = not (null periodsToRun)
   sTime <- liftIO getCurrentTime
-  let phase = fromEnum $ phaseFromResultDataKey (resData ^. resultDataKey)
-  void $ upsertBy (UniqueExpProgress expId) (ExpProgress expId phase curLen) [ExpProgressPhase =. phase, ExpProgressStep =. curLen]
-  (g', force -> st', force -> stInp', inputs, force -> measures) <- foldM' run (g, st, stInp, [], []) periodsToRun
+  let phase = phaseFromResultDataKey (resData ^. resultDataKey)
+      phaseNr = fromEnum phase
+  void $ upsertBy (UniqueExpProgress expId) (ExpProgress expId phaseNr curLen) [ExpProgressPhase =. phaseNr, ExpProgressStep =. curLen]
+  (g', force -> st', force -> stInp', inputs, force -> measures) <- foldM' (run phase) (g, st, stInp, [], []) periodsToRun
   when updated $ void $
-    upsertBy (UniqueExpProgress expId) (ExpProgress expId phase (curLen + nrOfPeriodsToRun)) [ExpProgressPhase =. phase, ExpProgressStep =. curLen + nrOfPeriodsToRun]
+    upsertBy (UniqueExpProgress expId) (ExpProgress expId phaseNr (curLen + nrOfPeriodsToRun)) [ExpProgressPhase =. phaseNr, ExpProgressStep =. curLen + nrOfPeriodsToRun]
   if updated
     then do
       eTime <- pure <$> liftIO getCurrentTime
@@ -920,9 +921,9 @@ runResultData expId len repResType resData = do
     upd _ _ = error "Unexpected update combination. This is a bug, please report it!"
 
 
-run :: (ExperimentDef a) => (GenIO, a, InputState a, [Input a], [Measure]) -> Int -> DB (ExpM a) (GenIO, a, InputState a, [Input a], [Measure])
-run (g, st, stInp, inpVals, res) period = do
+run :: (ExperimentDef a) => Phase -> (GenIO, a, InputState a, [Input a], [Measure]) -> Int -> DB (ExpM a) (GenIO, a, InputState a, [Input a], [Measure])
+run ph (g, st, stInp, inpVals, res) period = do
   -- let (randGen, g') = split g
   (inpVal', inpSt') <- lift $ lift $ lift $ generateInput g st stInp period
-  (res', st') <- lift $ lift $ lift $ runStep st inpVal' period
+  (res', st') <- lift $ lift $ lift $ runStep ph st inpVal' period
   return (g, st', inpSt', Input period inpVal' : inpVals, Measure period res' : res)

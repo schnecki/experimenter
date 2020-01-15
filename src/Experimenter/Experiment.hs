@@ -1,4 +1,6 @@
 {-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE DeriveAnyClass    #-}
+{-# LANGUAGE DeriveGeneric     #-}
 {-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE RankNTypes        #-}
 {-# LANGUAGE TypeFamilies      #-}
@@ -9,6 +11,7 @@ module Experimenter.Experiment where
 import           Control.DeepSeq
 import           Control.Monad.IO.Unlift
 import           Data.Serialize          (Serialize)
+import           GHC.Generics
 import           System.Random.MWC
 
 import           Experimenter.Parameter
@@ -19,6 +22,12 @@ type Period = Int
 type ExperimentNumber = Int
 type RepetitionNumber = Int
 type ReplicationNumber = Int
+
+data Phase
+  = PreparationPhase
+  | WarmUpPhase
+  | EvaluationPhase
+  deriving (Eq, Ord, Show, Enum)
 
 
 class (Monad (ExpM a), MonadUnliftIO (ExpM a), NFData a, NFData (InputState a), Serialize (InputValue a), Serialize (InputState a), Serialize (Serializable a)) => ExperimentDef a where
@@ -44,7 +53,7 @@ class (Monad (ExpM a), MonadUnliftIO (ExpM a), NFData a, NFData (InputState a), 
   generateInput :: GenIO -> a -> InputState a -> Period -> (ExpM a) (InputValue a, InputState a)
 
   -- ^ Run a step of the environment and return new state and result.
-  runStep :: a -> InputValue a -> Period -> (ExpM a) ([StepResult], a)
+  runStep :: Phase -> a -> InputValue a -> Period -> (ExpM a) ([StepResult], a)
 
   -- ^ Provides the parameter setting.
   parameters :: a -> [ParameterSetup a]

@@ -51,7 +51,7 @@ instance ExperimentDef Dice where
   generateInput g _ _ _ = do
     seed <- save g
     return (seed, ())
-  runStep (Dice mD) seed _ = do
+  runStep _ (Dice mD) seed _ = do
     g <- restore seed
     (nr :: Int) <- uniformR (1,6) g
     let result = StepResult "draw" Nothing (fromIntegral $ 1 + nr `mod` 6)

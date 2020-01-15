@@ -26,12 +26,6 @@ import           Data.Time
 import           System.Random.MWC
 
 
-data Phase
-  = PreparationPhase
-  | WarmUpPhase
-  | EvaluationPhase
-  deriving (Eq, Ord, Show, Enum)
-
 phaseFromResultDataKey :: ResultDataKey -> Phase
 phaseFromResultDataKey ResultDataPrep{}   = PreparationPhase
 phaseFromResultDataKey ResultDataWarmUp{} = WarmUpPhase

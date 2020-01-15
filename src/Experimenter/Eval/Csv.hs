@@ -25,6 +25,7 @@ import           System.IO
 import           Experimenter.DatabaseSetting
 import           Experimenter.DB
 import           Experimenter.Eval.Util
+import           Experimenter.Experiment      (Phase (..))
 import           Experimenter.Measure
 import           Experimenter.Models
 import           Experimenter.Result.Type
