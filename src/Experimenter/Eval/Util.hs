@@ -33,7 +33,7 @@ mainFilePdf :: Experiments a -> FilePath
 mainFilePdf exps = T.unpack (T.dropWhileEnd (/= '.') (T.pack $ mainFile exps)) <> "pdf"
 
 getExpsName :: Experiments a -> String
-getExpsName exps  = T.unpack $ T.replace " " "_" $ exps ^. experimentsName
+getExpsName exps  = T.unpack $ T.replace "/" "_" $ T.replace " " "_" $ exps ^. experimentsName
 
 expsPath :: Experiments a -> FilePath
 expsPath exps = rootPath </> getExpsName exps

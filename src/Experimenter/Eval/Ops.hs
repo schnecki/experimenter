@@ -157,19 +157,19 @@ genResultData _ (Named _ n) _ = error $ "An evaluation may only be named on the 
 genResultData _ (Name n _) _ = error $ "An evaluation may only be named on the outermost function in evaluation " <> T.unpack (E.decodeUtf8 n)
 genResultData exp eval resData =
   case eval of
-    -- Mean OverPeriods (Of name) -> aggregate name E.avg_
+    Mean OverPeriods (Of name) -> aggregate name E.avg_
     Mean OverPeriods eval' -> reduceUnary eval <$!!> genResultData exp (Id eval') resData
     StdDev OverPeriods eval' -> reduceUnary eval <$!!> genResultData exp (Id eval') resData
-    -- Sum OverPeriods (Of name) -> aggregate name E.sum_
+    Sum OverPeriods (Of name) -> aggregate name E.sum_
     Sum OverPeriods eval' -> reduceUnary eval <$!!> genResultData exp (Id eval') resData
     Id eval' -> force <$!> evalOf exp eval' resData
     _ -> force <$!> genExperiment exp eval
   where
-    -- aggregate name agg = fmap (EvalReducedValue eval UnitPeriods) $
-    --     case resData ^. resultDataKey of
-    --       ResultDataPrep k   -> loadPreparationAggregateWhere k agg (whereName name)
-    --       ResultDataWarmUp k -> loadReplicationWarmUpAggregateWhere k agg (whereName name)
-    --       ResultDataRep k    -> loadReparationAggregateWhere k agg (whereName name)
+    aggregate name agg = fmap (EvalReducedValue eval UnitPeriods) $
+        case resData ^. resultDataKey of
+          ResultDataPrep k   -> loadPreparationAggregateWhere k agg (whereName name)
+          ResultDataWarmUp k -> loadReplicationWarmUpAggregateWhere k agg (whereName name)
+          ResultDataRep k    -> loadReparationAggregateWhere k agg (whereName name)
     whereName name =
       case resData ^. resultDataKey of
         ResultDataPrep k -> PrepMeasureWhere $ \meas resStep -> E.where_ (resStep E.^. PrepResultStepName E.==. E.val (E.decodeUtf8 name))
@@ -224,7 +224,11 @@ evalOf exp eval resData =
     Sub eval1 eval2 -> reduceBinaryOf eval <$!!> evalOf exp eval1 resData <*> evalOf exp eval2 resData
     Mult eval1 eval2 -> reduceBinaryOf eval <$!!> evalOf exp eval1 resData <*> evalOf exp eval2 resData
     First (Of name) -> do
-      res <- runConduit $ srcAvailableListWhere (whereName name) (resData ^. results) .| mapC (fromMeasure $ E.decodeUtf8 name) .| headC
+
+      -- res <- aggregate (E.orderBy [E.asc (repM E.^. RepMeasurePeriod)]) name
+
+      -- todo: sorting!!!
+      res <- runConduit $ srcAvailableListWhere (whereName' (E.limit 1) name) (resData ^. results) .| mapC (fromMeasure $ E.decodeUtf8 name) .| headC
       return $ EvalVector (Id $ First $ Stats $ Id $ Of name) UnitPeriods [fromMaybe (error $ "empty elements in evalOf First(Of " <> show name <> ")") res]
     First eval' -> reduceUnaryOf eval <$!!> evalOf exp eval' resData
     Last (Of name) -> do
@@ -237,11 +241,17 @@ evalOf exp eval resData =
       return $ EvalReducedValue (Id $ Length $ Stats $ Id $ Of name) UnitScalar res
     Length eval' -> reduceUnaryOf eval <$!!> evalOf exp eval' resData
   where
-    whereName name =
+    whereName = whereName' (return ())
+    whereName' add name =
       case resData ^. resultDataKey of
-        ResultDataPrep k -> PrepMeasureWhere $ \meas resStep -> E.where_ (resStep E.^. PrepResultStepName E.==. E.val (E.decodeUtf8 name))
-        ResultDataWarmUp k -> WarmUpMeasureWhere $ \meas resStep -> E.where_ (resStep E.^. WarmUpResultStepName E.==. E.val (E.decodeUtf8 name))
-        ResultDataRep k -> RepMeasureWhere $ \meas resStep -> E.where_ (resStep E.^. RepResultStepName E.==. E.val (E.decodeUtf8 name))
+        ResultDataPrep k -> PrepMeasureWhere $ \meas resStep -> E.where_ (resStep E.^. PrepResultStepName E.==. E.val (E.decodeUtf8 name)) >> add -- meas resStep
+        ResultDataWarmUp k -> WarmUpMeasureWhere $ \meas resStep -> E.where_ (resStep E.^. WarmUpResultStepName E.==. E.val (E.decodeUtf8 name)) >> add -- meas resStep
+        ResultDataRep k -> RepMeasureWhere $ \meas resStep -> E.where_ (resStep E.^. RepResultStepName E.==. E.val (E.decodeUtf8 name)) >> add -- meas resStep
+    -- aggregate add name agg =
+    --     case resData ^. resultDataKey of
+    --       ResultDataPrep k   -> loadPreparationAggregateWhere k agg (whereName' add name)
+    --       ResultDataWarmUp k -> loadReplicationWarmUpAggregateWhere k agg (whereName' add name)
+    --       ResultDataRep k    -> loadReparationAggregateWhere k agg (whereName' add name)
 
 fromMeasure :: T.Text -> Measure -> EvalResults a
 fromMeasure name (Measure p res) = case find ((==name) . view resultName) res of
