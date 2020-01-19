@@ -50,6 +50,8 @@ dependencies:
   - containers
   - filepath
   - conduit
+  - stm
+  - parallel
 
 library:
   source-dirs: src

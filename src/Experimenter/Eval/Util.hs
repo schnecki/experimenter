@@ -47,5 +47,7 @@ mkTime name a = do
   start <- liftIO getCurrentTime
   !val <- force <$> a
   end <- liftIO getCurrentTime
-  liftIO $ putStrLn (name <> " Computation Time: " ++ show (diffUTCTime end start))
+  let name' | null name = name
+            | otherwise = name ++ [' ']
+  liftIO $ putStrLn (name' <> "Computation Time: " ++ show (diffUTCTime end start))
   return val
