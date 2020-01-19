@@ -1,8 +1,12 @@
+{-# LANGUAGE BangPatterns      #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Experimenter.Eval.Util where
 
+import           Control.DeepSeq
 import           Control.Lens             hiding (Cons, Over, over)
+import           Control.Monad.IO.Class
 import qualified Data.Text                as T
+import           Data.Time.Clock          (diffUTCTime, getCurrentTime)
 import           System.FilePath.Posix
 
 import           Experimenter.Result.Type
@@ -38,3 +42,10 @@ getExpsName exps  = T.unpack $ T.replace "/" "_" $ T.replace " " "_" $ exps ^. e
 expsPath :: Experiments a -> FilePath
 expsPath exps = rootPath </> getExpsName exps
 
+mkTime :: (MonadIO m, NFData t) => String -> m t -> m t
+mkTime name a = do
+  start <- liftIO getCurrentTime
+  !val <- force <$> a
+  end <- liftIO getCurrentTime
+  liftIO $ putStrLn (name <> " Computation Time: " ++ show (diffUTCTime end start))
+  return val

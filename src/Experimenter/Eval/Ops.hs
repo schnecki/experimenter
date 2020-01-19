@@ -46,6 +46,7 @@ import           Experimenter.DatabaseSetting
 import           Experimenter.DB
 import           Experimenter.Eval.Reduce
 import           Experimenter.Eval.Type       as E
+import           Experimenter.Eval.Util
 import           Experimenter.Experiment
 import           Experimenter.Measure
 import           Experimenter.Models
@@ -63,18 +64,26 @@ genEvals runExpM dbSetup exps evals = runExpM $ runDBWithM runResourceT dbSetup 
 
 
 runner :: (ExperimentDef a) => Experiments a -> [StatsDef a] -> DB (ExpM a) (Evals a)
-runner exps evals = do
+runner exps evals
   -- Delete old temporary data
+ = do
   time <- liftIO getCurrentTime
-  selectKeysList [EvalResultTime <=. addUTCTime (-60*60*24) time] [] >>= mapM_ delete
+  selectKeysList [EvalResultTime <=. addUTCTime (-60 * 60 * 24) time] [] >>= mapM_ delete
   -- Evaluate and get new data
   !(force -> res) <- mapMRnf mkEval (exps ^. experiments)
+  liftIO $ putStrLn "Evaluations are done!"
   return $ Evals (exps {_experiments = []}) res
   where
     mkEval e = do
-      -- !(force -> xs) <- mapM (genExperiment e >=> fmap force . saveEvalResults) evals
-      !(force -> xs) <- mapMRnf (genExperiment e >=> fmap force . saveEvalResults) evals
-      return $ force $ ExperimentEval (e ^. experimentNumber) xs (e { _experimentResults = []})
+      liftIO $ putStrLn $ "Generating results for experiment: " ++ show (e ^. experimentNumber)
+      -- !(force -> xs) <- mapMRnf (genExperiment e >=> fmap force . saveEvalResults) evals
+      !xs <- mapMRnf (mkTime . mkEvalWithPrint e) evals
+      -- !xs <- mapMRnf (fmap Available . genExperiment e) evals
+      return $ force $ ExperimentEval (e ^. experimentNumber) xs (e {_experimentResults = []})
+    mkEvalWithPrint e eval = do
+      liftIO $ putStr $ "\tEval: " ++ T.unpack (prettyStatsDef eval) ++ "\n\n"
+      Available <$> genExperiment e eval
+
 
 mapMRnf :: (NFData b, Monad m) => (a -> m b) -> [a] -> m [b]
 mapMRnf _ [] = return []
