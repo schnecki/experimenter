@@ -99,7 +99,7 @@ runExperimentsIO dbSetup setup initInpSt initSt = runner id dbSetup setup initIn
 runner :: (ExperimentDef a) => (ExpM a (Bool, Experiments a) -> IO (Bool, Experiments a)) -> DatabaseSetting -> MkExperimentSetting a -> InputState a -> ExpM a a -> IO (Bool, Experiments a)
 runner runExpM dbSetup setup initInpSt mkInitSt =
   fmap force $ do
-    runStdoutLoggingT $ withPostgresqlPool (connectionString dbSetup) (parallelConnections dbSetup) $ liftSqlPersistMPool $ runMigration migrateAll
+    runStdoutLoggingT $ withPostgresqlPool (connectionString dbSetup) (parallelConnections dbSetup) $ liftSqlPersistMPool $ runMigration migrateAll >> indexCreation
     runExpM $
       runDB dbSetup $ do
         initSt <- lift $ lift $ lift mkInitSt
