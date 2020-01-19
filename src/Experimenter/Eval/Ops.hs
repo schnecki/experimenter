@@ -23,7 +23,6 @@ import           Control.Monad.IO.Class       (liftIO)
 import           Control.Monad.Logger
 import           Control.Monad.Reader
 import           Control.Monad.Trans.Resource
-import           Control.Parallel.Strategies  hiding ((.|))
 import           Data.Conduit
 import qualified Data.Conduit.List            as CL
 import           Data.Function                (on)
