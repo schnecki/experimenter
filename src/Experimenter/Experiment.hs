@@ -103,7 +103,7 @@ class (Monad (ExpM a), MonadUnliftIO (ExpM a), NFData a, NFData (InputState a), 
 
 
   -- ^ Function to call after the evaluation phase, e.g. it can be used to move files. This function is only executed if
-  -- the evaluation phase is updated. The first parameter is the input state and is only used for type checking.
+  -- the evaluation phase is updated. The first parameter is the input state before the evaluation and is only used for type checking.
   afterEvaluationHook :: a -> ExperimentNumber -> RepetitionNumber -> ReplicationNumber -> IO ()
   default afterEvaluationHook :: a -> ExperimentNumber -> RepetitionNumber -> ReplicationNumber -> IO ()
   afterEvaluationHook _ _ _ _ = return ()

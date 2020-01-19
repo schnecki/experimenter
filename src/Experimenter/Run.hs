@@ -447,8 +447,9 @@ continueExperiment dbSetup rands exps expIn = do
         then do
           eTime <- return <$> liftIO getCurrentTime
           update (exp ^. experimentKey) [ExpEndTime =. eTime]
+          delete lock
           return (updated, set experimentResults res $ set experimentEndTime eTime exp)
-        else return (updated, set experimentResults res exp)
+        else delete lock >> return (updated, set experimentResults res exp)
   where
     printParamSetup exp = do
       $(logInfo) "------------------------------"
