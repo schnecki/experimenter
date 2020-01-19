@@ -12,6 +12,7 @@
 module Experimenter.Eval.Ops
     ( genEvals
     , genEvalsIO
+    , genEvalsConcurrent
     ) where
 
 import           Conduit                      as C
@@ -63,22 +64,24 @@ import           Debug.Trace
 genEvalsIO :: (ExperimentDef a, IO ~ ExpM a) => DatabaseSetting -> Experiments a -> [StatsDef a] -> IO (Evals a)
 genEvalsIO = genEvals id
 
-genEvals :: (ExperimentDef a) => (ExpM a (ExperimentEval a) -> IO (ExperimentEval a)) -> DatabaseSetting -> Experiments a -> [StatsDef a] -> IO (Evals a)
-genEvals runExpM dbSetup exps evals = do
 
-  -- time <- liftIO getCurrentTime
-  -- Delete old temporary data
-  -- selectKeysList [EvalResultTime <=. addUTCTime (-60 * 60 * 24) time] [] >>= mapM_ delete
-  -- Evaluate and get new data
-  res <- mapConurrentIO 3 mkEval (exps ^. experiments)
+genEvals :: (ExperimentDef a) => (ExpM a (Evals a) -> IO (Evals a)) -> DatabaseSetting -> Experiments a -> [StatsDef a] -> IO (Evals a)
+genEvals runExpM dbSetup exps evals = runExpM $ runDBWithM runResourceT dbSetup $ do
+  res <- mapM (mkEvals evals) (exps ^. experiments)
   return $ Evals (exps {_experiments = []}) res
+
+
+genEvalsConcurrent :: (ExperimentDef a) => Int -> (ExpM a (ExperimentEval a) -> IO (ExperimentEval a)) -> DatabaseSetting -> Experiments a -> [StatsDef a] -> IO (Evals a)
+genEvalsConcurrent parallelWorkers runExpM dbSetup exps evals = do
+  res <- mapConurrentIO parallelWorkers (runExpM . runDBWithM runResourceT dbSetup . mkEvals evals) (exps ^. experiments)
+  return $ Evals (exps {_experiments = []}) res
+
+mkEvals :: (ExperimentDef a ) => [StatsDef a] -> Experiment a -> ReaderT SqlBackend (LoggingT (ResourceT (ExpM a))) (ExperimentEval a)
+mkEvals evals e = do
+  liftIO $ putStrLn $ "Generating results for experiment: " ++ show (e ^. experimentNumber)
+  xs <- mkTime "  Experiment evaluations" $ mapMRnf (printEval >=> fmap Available . genExperiment e) evals
+  return $ force $ ExperimentEval (e ^. experimentNumber) xs (e {_experimentResults = []})
   where
-    mkEval e = runExpM $ runDBWithM runResourceT dbSetup $ do
-      liftIO $ putStrLn $ "Generating results for experiment: " ++ show (e ^. experimentNumber)
-      liftIO $ hFlush stdout
-      xs <- mkTime "  Experiment evaluations" $ mapMRnf (printEval >=> fmap Available . genExperiment e) evals
-      -- !xs <- mapMRnf (fmap Available . genExperiment e) evals
-      return $ force $ ExperimentEval (e ^. experimentNumber) xs (e {_experimentResults = []})
     printEval eval = do
       liftIO $ putStrLn $ "  Experiment evaulation for eval " ++ T.unpack (prettyStatsDef eval)
       return eval
@@ -91,22 +94,6 @@ genEvals runExpM dbSetup exps evals = do
 --   (x' :) <$!> mapMRnf f xs
 mapMRnf :: (NFData b, Monad m) => (a -> m b) -> [a] -> m [b]
 mapMRnf = mapM
-
-saveEvalResults :: (ExperimentDef a) => EvalResults a -> DB (ExpM a) (Availability IO (EvalResults a))
-saveEvalResults ev = do
-  let bs = runPut (put ev)
-  time <- liftIO getCurrentTime
-  eId <- insert $ EvalResult time bs
-  return $
-    AvailableOnDemand $ do
-      mEvalRes <- DB.get eId
-      return $
-        case mEvalRes of
-          Nothing -> error $ "Could not get the eval data from the DB. Key " ++ show (fromSqlKey eId)
-          Just (EvalResult _ bsDb) ->
-            case runGet S.get bsDb of
-              Left err -> error $ "Could not deserialise eval data: " <> err
-              Right x  -> x
 
 
 genExperiment :: (ExperimentDef a) => Experiment a -> StatsDef a -> DB (ExpM a) (EvalResults a)
