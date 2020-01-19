@@ -127,7 +127,6 @@ experimentsEvals evals = do
   !(force -> tablesS) <- lift $! mkResultTablesFor UnitScalar evals
   let tables = tablesP <> tablesR <> tablesE <> tablesS
       mParams = M.fromList $ map (view evalExperimentNumber &&& paramSettingTable evals) (evals ^. evalsResults)
-  liftIO $ print tables
   writeTables mParams (force tables)
 
 
