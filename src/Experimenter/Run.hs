@@ -435,9 +435,9 @@ continueExperiment dbSetup rands exps expIn = do
       ref <- liftIO $ createKeepAliveFork dbSetup (\t -> update lock [ExpExecutionLockLastAliveSign =. t]) (delete lock)
       liftIO (writeIORef ref Working)
       exps' <- loadParameters exps exp -- loads parameters into the init state
-      $(logInfo) "Checking if new experiments can be created"
+      $(logInfo) "Checking if new experiments repetitions can be created"
       !expResList <- force <$> (getExpRes exps' (exp ^. experimentResults) >>= truncateExperiments repetits)
-      $(logInfo) $ "Number of experiment results loaded: " <> tshow (length expResList)
+      $(logInfo) $ "Number of experiment repetition results loaded: " <> tshow (length expResList)
       let skipPrep = any (^. parameterSettingSkipPreparationPhase) (exp ^. parameterSetup)
       expRes <- force <$> mapM (runExperimentResult skipPrep rands exps' expId expNr) expResList
       let updated = any fst expRes
@@ -471,11 +471,11 @@ continueExperiment dbSetup rands exps expIn = do
            kExpRes <- insert $ ExpResult expId nr Nothing
            return $ ExperimentResult kExpRes nr Nothing [])
     truncateExperiments nr xs = do
-      let dels = drop nr xs
+      let dels = filter ((> nr) . view repetitionNumber) xs
       unless (null dels) $ $(logInfo) $ "Number of experiment repetitions being deleted " <> tshow (length dels)
       mapM_ deleteExperimentResult dels
       unless (null dels) transactionSave
-      return $ take nr xs
+      return $ filter ((<= nr) . view repetitionNumber) xs
 
 printParamSetting :: (ExperimentDef a) => Experiments a -> ParameterSetting a -> DB (ExpM a) ()
 printParamSetting exps (ParameterSetting n bs skipPrep expDes) =
@@ -723,7 +723,7 @@ runEval seed exps expId warmUpUpdated repResId (expNr, repetNr, repliNr) initSt 
       $(logInfo) $ "No evaluation run needed for replication with ID " <> tshow (unSqlBackendKey $ unRepResultKey repResId) <> ". All needed data comes from the DB!"
       return (delNeeded len, mResData')
   where
-    delNeeded len = warmUpUpdated || maybe False (\_ -> evalSteps < len) mResData --  || maybe False ((>0) . lengthAvailabilityList) (mResData ^? traversed.results)
+    delNeeded len = warmUpUpdated || maybe False (\_ -> evalSteps < len) mResData
     runNeeded len = maybe (evalSteps > 0) (\_ -> evalSteps > len  || (delNeeded len && evalSteps > 0)) mResData
     evalSteps = exps ^. experimentsSetup . expsSetupEvaluationSteps
     new initStEval = newResultData seed (Rep repResId) initStEval initInpSt

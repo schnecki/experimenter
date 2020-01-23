@@ -161,7 +161,7 @@ deserialise n bs =
 
 loadExperimentResults :: (ExperimentDef a) => Key Exp -> DB (ExpM a) [ExperimentResult a]
 loadExperimentResults kExp = do
-  xs <- selectList [ExpResultExp ==. kExp] []
+  xs <- selectList [ExpResultExp ==. kExp] [Asc ExpResultRepetition]
   mapM loadExperimentResult xs
 
 
@@ -386,8 +386,8 @@ loadPreparationAggregateWhere _ _ where' = error $ "Wrong Where clause: " ++ sho
 
 loadReplicationResults :: (ExperimentDef a) => Key Exp -> Key ExpResult -> DB (ExpM a) [ReplicationResult a]
 loadReplicationResults expId kExpRes = do
-  xs <- selectList [RepResultExpResult ==. kExpRes] []
-  L.sortBy (compare `on` view replicationNumber) <$> mapM (loadReplicationResult expId) xs
+  xs <- selectList [RepResultExpResult ==. kExpRes] [Asc RepResultRepNr]
+  mapM (loadReplicationResult expId) xs
 
 
 loadReplicationResult :: (ExperimentDef a) => Key Exp -> Entity RepResult -> DB (ExpM a) (ReplicationResult a)
