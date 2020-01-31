@@ -1,7 +1,8 @@
-{-# LANGUAGE GADTs             #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell   #-}
-{-# LANGUAGE TypeFamilies      #-}
+{-# LANGUAGE GADTs               #-}
+{-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell     #-}
+{-# LANGUAGE TypeFamilies        #-}
 module Experimenter.Eval.Csv
     ( writeCsvMeasure
     , Smoothing (..)
@@ -13,6 +14,7 @@ import           Control.Lens                 hiding (Cons, Over)
 import           Control.Monad.Logger
 import           Control.Monad.Reader
 import           Data.List                    (foldl')
+import           Data.Maybe                   (fromMaybe)
 import qualified Data.Text                    as T
 import           Data.Text.Encoding
 import           Data.Time.Clock              (diffUTCTime, getCurrentTime)
@@ -45,10 +47,12 @@ smoothAndWriteFile exps smoothing measureName = mapM_ (smoothAndWriteFileExp exp
 
 smoothAndWriteFileExp :: Experiments a -> Smoothing -> MeasureName -> Experiment a -> DB IO ()
 smoothAndWriteFileExp exps smoothing measureName exp = do
+  $(logDebug) $ "Processing CSV for experiment number " <> tshow (exp ^. experimentNumber)
   mapM_
     (\expRes -> do
+       $(logDebug) $ "Processing CSV for experiment repetition number " <> tshow (expRes ^. repetitionNumber)
        mapM_
-         (smoothAndWriteFileResultData exps (namePrefix expNr PreparationPhase (None (expRes ^. repetitionNumber) Nothing)) smoothing measureName)
+         (smoothAndWriteFileResultData exps (namePrefix expNr PreparationPhase (None (expRes ^. repetitionNumber) Nothing)) smoothing measureName . return)
          (expRes ^.. preparationResults . traversed)
        -- mapM_
        --   (\replRes -> do
@@ -65,12 +69,17 @@ smoothAndWriteFileExp exps smoothing measureName exp = do
     (exp ^.. experimentResults . traversed)
   -- avg over experiments
   when (length (exp ^. experimentResults) > 1) $ do
-    undefined
+    $(logDebug) $ "Processing aggregated CSV for experiment  number " <> tshow (exp ^. experimentNumber)
+    mapM_
+      (\expRes -> do
+          undefined
+          ) (exp ^. experimentResults)
+
   where
     expNr = exp ^. experimentNumber
 
 
-smoothC :: (Monad m) => Smoothing -> C.ConduitT Measure Measure m ()
+smoothC :: (Monad m) => Smoothing -> C.ConduitT (Int, Double) (Int, Double) m ()
 smoothC NoSmoothing = C.filterC (const True)
 smoothC (SmoothingMovAvg nr) = process (0, [])
   where
@@ -79,80 +88,67 @@ smoothC (SmoothingMovAvg nr) = process (0, [])
       unless (null xs) $ yield (movAvg inp)
       case mx of
         Nothing -> return ()
-        Just x -> do
+        Just (x :: (Int, Double)) -> do
           let m
                 | length xs < nr = 0
-                | otherwise = last xs ^?! measureResults . _head . resultYValue
-              v = x ^?! measureResults . _head . resultYValue
+                | otherwise = snd $ last xs
+              v = snd x
           process (sm + v - m, take nr (x : xs))
 
 -- movAvg :: [Measure] -> Measure
 -- movAvg [] = error "empty list when makeing movAvg"
 -- movAvg xs@(x:_) = set (measureResults.traversed.resultYValue) (Prelude.sum (concatMap (^.. (measureResults.traversed.resultYValue)) xs) / fromIntegral (length xs)) x
 
-movAvg :: (Double, [Measure]) -> Measure
+movAvg :: (Double, [(Int, Double)]) -> (Int, Double)
 movAvg (_,[])   = error "No input for movAvg. Programming error!"
-movAvg (sm, xs) = set (measureResults.traversed.resultYValue) (sm / fromIntegral (length xs)) x
+movAvg (sm, xs) = (fst x, sm / fromIntegral (length xs))
   where x = last xs
 
+data Keys = ResultDataPrepKeys [Key PrepResultData]
+          | ResultDataWarmUpKeys [Key WarmUpResultData]
+          | ResultDataRepKeys [Key RepResultData]
 
-smoothAndWriteFileResultDataAgg :: Experiments a -> T.Text -> Smoothing -> MeasureName -> ResultData a -> DB IO ()
-smoothAndWriteFileResultDataAgg exps prefix smoothing measureName resData = do
-  $(logInfo) $ "Processing measure " <> measureName <> ". Saving data to: " <> T.pack folder
-  liftIO $ createDirectoryIfMissing True folder
-  liftIO $ writeFile filePath header >> writeFile filePathPlotSh plotSh
-  fileH <- liftIO $ openFile filePath AppendMode
-  start <- liftIO getCurrentTime
-  let src =
-        E.selectSource $
-        case resData ^. resultDataKey of
-          ResultDataPrep key ->
-            E.from $ \(measure `E.InnerJoin` result) -> do
-              E.on (measure E.^. PrepMeasureId E.==. result E.^. PrepResultStepMeasure)
-              E.where_ (measure E.^. PrepMeasurePrepResultData E.==. E.val key)
-              E.where_ (result E.^. PrepResultStepName E.==. E.val measureName)
-              E.orderBy [E.asc (measure E.^. PrepMeasurePeriod)]
-              return (measure E.^. PrepMeasurePeriod, result E.^. PrepResultStepYValue)
-          ResultDataWarmUp key -> undefined
-          ResultDataRep key -> undefined
-  let toMeasure (E.Value p, E.Value v) = Measure p [StepResult measureName Nothing v]
-  C.runConduit $
-    src C..| C.mapC toMeasure C..| smoothC smoothing C..| C.mapC toFileCts C..| C.filterC (not . null) C..| C.mapC (T.pack . (++ "\n")) C..| C.encodeUtf8C C..| sinkHandle fileH
-  liftIO $ hFlush fileH >> hClose fileH
-  end <- liftIO getCurrentTime
-  $(logInfo) $ "Done. Computation Time: " <> tshow (diffUTCTime end start)
-  where
-    filePath = folder </> T.unpack (prefix <> "_" <> measureName <> ".csv")
-    filePathPlotSh = folder </> "plot.sh"
-    folder = expsPath exps </> "csv"
-    header = "Period\t" <> T.unpack (prefix <> "_" <> measureName) <> "\n"
-    toFileCts (Measure p []) = []
-    toFileCts (Measure p [res]) = show p <> "\t" <> show (res ^. resultYValue)
-    toFileCts (Measure p _) = error $ "The measure " <> T.unpack measureName <> " has more than one results in period " <> show p
+concatKeys :: Keys -> Keys -> Keys
+concatKeys (ResultDataPrepKeys xs) (ResultDataPrepKeys ys) = ResultDataPrepKeys (xs ++ ys)
+concatKeys (ResultDataWarmUpKeys xs) (ResultDataWarmUpKeys ys)= ResultDataWarmUpKeys (xs ++ ys)
+concatKeys (ResultDataRepKeys xs) (ResultDataRepKeys ys) = ResultDataRepKeys (xs ++ ys)
+concatKeys _ _ = error "cannot concat different key types in Csv.hs"
 
-
-smoothAndWriteFileResultData :: Experiments a -> T.Text -> Smoothing -> MeasureName -> ResultData a -> DB IO ()
+smoothAndWriteFileResultData :: Experiments a -> T.Text -> Smoothing -> MeasureName -> [ResultData a] -> DB IO ()
+smoothAndWriteFileResultData _ _ _ _ [] = return ()
 smoothAndWriteFileResultData exps prefix smoothing measureName resData = do
   $(logInfo) $ "Processing measure " <> measureName <> ". Saving data to: " <> T.pack folder
   liftIO $ createDirectoryIfMissing True folder
   liftIO $ writeFile filePath header >> writeFile filePathPlotSh plotSh
   fileH <- liftIO $ openFile filePath AppendMode
   start <- liftIO getCurrentTime
-  let src =
+  let vals =
+        -- fmap (map (fromMaybe 0 . E.unValue)) $
+        -- E.select $ -- E.selectSource $
         E.selectSource $
-        case resData ^. resultDataKey of
-          ResultDataPrep key ->
+        case foldl1 concatKeys keys of
+          ResultDataPrepKeys xs ->
             E.from $ \(measure `E.InnerJoin` result) -> do
               E.on (measure E.^. PrepMeasureId E.==. result E.^. PrepResultStepMeasure)
-              E.where_ (measure E.^. PrepMeasurePrepResultData E.==. E.val key)
+              case xs of
+                [x] -> E.where_ (measure E.^. PrepMeasurePrepResultData E.==. E.val x)
+                _ -> E.where_ (measure E.^. PrepMeasurePrepResultData `E.in_` E.valList xs)
               E.where_ (result E.^. PrepResultStepName E.==. E.val measureName)
               E.orderBy [E.asc (measure E.^. PrepMeasurePeriod)]
-              return (measure E.^. PrepMeasurePeriod, result E.^. PrepResultStepYValue)
-          ResultDataWarmUp key -> undefined
-          ResultDataRep key -> undefined
-  let toMeasure (E.Value p, E.Value v) = Measure p [StepResult measureName Nothing v]
+              E.groupBy (measure E.^. PrepMeasurePeriod)
+              return (measure E.^. PrepMeasurePeriod, E.avg_ $ result E.^. PrepResultStepYValue)
+          ResultDataWarmUpKeys key -> undefined
+          ResultDataRepKeys key -> undefined
+      keys = map (toKeys . view resultDataKey) resData
+      toKeys (ResultDataRep key)    = ResultDataRepKeys [key]
+      toKeys (ResultDataWarmUp key) = ResultDataWarmUpKeys [key]
+      toKeys (ResultDataPrep key)   = ResultDataPrepKeys [key]
+
+
+  -- let toMeasure (E.Value p, E.Value v) = Measure p [StepResult measureName Nothing v]
   C.runConduit $
-    src C..| C.mapC toMeasure C..| smoothC smoothing C..| C.mapC toFileCts C..| C.filterC (not . null) C..| C.mapC (T.pack . (++ "\n")) C..| C.encodeUtf8C C..| sinkHandle fileH
+    vals C..| C.mapC fromValueC C..| smoothC smoothing C..| C.mapC toFileCts C..| C.filterC (not . null) C..| C.mapC (T.pack . (++ "\n")) C..| C.encodeUtf8C C..| sinkHandle fileH
+
   liftIO $ hFlush fileH >> hClose fileH
   end <- liftIO getCurrentTime
   $(logInfo) $ "Done. Computation Time: " <> tshow (diffUTCTime end start)
@@ -161,9 +157,44 @@ smoothAndWriteFileResultData exps prefix smoothing measureName resData = do
     filePathPlotSh = folder </> "plot.sh"
     folder = expsPath exps </> "csv"
     header = "Period\t" <> T.unpack (prefix <> "_" <> measureName) <> "\n"
-    toFileCts (Measure p []) = []
-    toFileCts (Measure p [res]) = show p <> "\t" <> show (res ^. resultYValue)
-    toFileCts (Measure p _) = error $ "The measure " <> T.unpack measureName <> " has more than one results in period " <> show p
+    toFileCts (p, res) = show p <> "\t" <> show res
+    fromValueC :: (E.Value Int, E.Value (Maybe Double)) -> (Int, Double)
+    fromValueC (vPeriod, vMVal) = (E.unValue vPeriod, fromMaybe 0 $ E.unValue vMVal)
+
+
+-- smoothAndWriteFileResultData :: Experiments a -> T.Text -> Smoothing -> MeasureName -> ResultData a -> DB IO ()
+-- smoothAndWriteFileResultData exps prefix smoothing measureName resData = do
+--   $(logInfo) $ "Processing measure " <> measureName <> ". Saving data to: " <> T.pack folder
+--   liftIO $ createDirectoryIfMissing True folder
+--   liftIO $ writeFile filePath header >> writeFile filePathPlotSh plotSh
+--   fileH <- liftIO $ openFile filePath AppendMode
+--   start <- liftIO getCurrentTime
+--   let src =
+--         E.selectSource $
+--         case resData ^. resultDataKey of
+--           ResultDataPrep key ->
+--             E.from $ \(measure `E.InnerJoin` result) -> do
+--               E.on (measure E.^. PrepMeasureId E.==. result E.^. PrepResultStepMeasure)
+--               E.where_ (measure E.^. PrepMeasurePrepResultData E.==. E.val key)
+--               E.where_ (result E.^. PrepResultStepName E.==. E.val measureName)
+--               E.orderBy [E.asc (measure E.^. PrepMeasurePeriod)]
+--               return (measure E.^. PrepMeasurePeriod, result E.^. PrepResultStepYValue)
+--           ResultDataWarmUp key -> undefined
+--           ResultDataRep key -> undefined
+--   let toMeasure (E.Value p, E.Value v) = Measure p [StepResult measureName Nothing v]
+--   C.runConduit $
+--     src C..| C.mapC toMeasure C..| smoothC smoothing C..| C.mapC toFileCts C..| C.filterC (not . null) C..| C.mapC (T.pack . (++ "\n")) C..| C.encodeUtf8C C..| sinkHandle fileH
+--   liftIO $ hFlush fileH >> hClose fileH
+--   end <- liftIO getCurrentTime
+--   $(logInfo) $ "Done. Computation Time: " <> tshow (diffUTCTime end start)
+--   where
+--     filePath = folder </> T.unpack (prefix <> "_" <> measureName <> ".csv")
+--     filePathPlotSh = folder </> "plot.sh"
+--     folder = expsPath exps </> "csv"
+--     header = "Period\t" <> T.unpack (prefix <> "_" <> measureName) <> "\n"
+--     toFileCts (Measure p []) = []
+--     toFileCts (Measure p [res]) = show p <> "\t" <> show (res ^. resultYValue)
+--     toFileCts (Measure p _) = error $ "The measure " <> T.unpack measureName <> " has more than one results in period " <> show p
 
 
 namePrefix :: Int -> Phase -> Avg -> T.Text
