@@ -85,6 +85,6 @@ main = do
               , Id (EveryXthElem 100 (Of "draw")) `Named` "draws 2"
               ]
   evalRes <- genEvalsIO databaseSetup res evals
-  print (view evalsResults evalRes)
+  -- print (view evalsResults evalRes)
   writeAndCompileLatex databaseSetup evalRes
   return ()
