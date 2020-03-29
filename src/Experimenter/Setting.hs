@@ -17,8 +17,8 @@ import           GHC.Generics
 data ExperimentInfoParameter =
   forall b. (Show b, Eq b, Serialize b) =>
             ExperimentInfoParameter
-              { infoParameterName :: T.Text
-              , infoParameter     :: b
+              { infoParameterName :: !T.Text
+              , infoParameter     :: !b
               }
 
 instance NFData ExperimentInfoParameter where
@@ -29,15 +29,15 @@ instance NFData ExperimentInfoParameter where
 type MkExperimentSetting a = a -> ExperimentSetting
 
 data ExperimentSetting = ExperimentSetting
-  { _experimentBaseName         :: T.Text                    -- ^ Base name of experiment.
-  , _experimentInfoParameters   :: [ExperimentInfoParameter] -- ^ List of Parameters defining the experiment. Adding
+  { _experimentBaseName         :: !T.Text                    -- ^ Base name of experiment.
+  , _experimentInfoParameters   :: ![ExperimentInfoParameter] -- ^ List of Parameters defining the experiment. Adding
                                                              -- more information does not effect equality.
-  , _experimentRepetitions      :: Int                       -- ^ Repetitions of each experiment (>=1).
-  , _preparationSteps           :: Int                       -- ^ Preparation phase length (e.g. learning phase) (>=0).
-  , _evaluationWarmUpSteps      :: Int -- ^ Warm up phase length before each evaluation of each experiment (>=0).
-  , _evaluationSteps            :: Int -- ^ Evaluation phase length (>=0).
-  , _evaluationReplications     :: Int -- ^ Replications of evaluation for each experiment (>=1).
-  , _maximumParallelEvaluations :: Int -- ^ Maximum number of parallel evaluations (>=1).
+  , _experimentRepetitions      :: !Int                       -- ^ Repetitions of each experiment (>=1).
+  , _preparationSteps           :: !Int                       -- ^ Preparation phase length (e.g. learning phase) (>=0).
+  , _evaluationWarmUpSteps      :: !Int -- ^ Warm up phase length before each evaluation of each experiment (>=0).
+  , _evaluationSteps            :: !Int -- ^ Evaluation phase length (>=0).
+  , _evaluationReplications     :: !Int -- ^ Replications of evaluation for each experiment (>=1).
+  , _maximumParallelEvaluations :: !Int -- ^ Maximum number of parallel evaluations (>=1).
   } deriving (Generic, NFData)
 makeLenses ''ExperimentSetting
 

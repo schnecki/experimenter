@@ -35,7 +35,7 @@ import           Experimenter.StepResult
 import           Experimenter.Util
 
 
-data Smoothing = NoSmoothing | SmoothingMovAvg Int
+data Smoothing = NoSmoothing | SmoothingMovAvg !Int
 
 type MeasureName = T.Text
 
@@ -104,9 +104,9 @@ movAvg (_,[])   = error "No input for movAvg. Programming error!"
 movAvg (sm, xs) = (fst x, sm / fromIntegral (length xs))
   where x = last xs
 
-data Keys = ResultDataPrepKeys [Key PrepResultData]
-          | ResultDataWarmUpKeys [Key WarmUpResultData]
-          | ResultDataRepKeys [Key RepResultData]
+data Keys = ResultDataPrepKeys ![Key PrepResultData]
+          | ResultDataWarmUpKeys ![Key WarmUpResultData]
+          | ResultDataRepKeys ![Key RepResultData]
 
 concatKeys :: Keys -> Keys -> Keys
 concatKeys (ResultDataPrepKeys xs) (ResultDataPrepKeys ys) = ResultDataPrepKeys (xs ++ ys)
@@ -207,7 +207,7 @@ phaseName EvaluationPhase  = "eval"
 
 type ReplNr = Int
 type RepetNr = Int
-data Avg = None RepetNr (Maybe ReplNr) | Repl RepetNr | Repet ReplNr | RepetRepl
+data Avg = None !RepetNr !(Maybe ReplNr) | Repl !RepetNr | Repet !ReplNr | RepetRepl
 
 avgName :: Avg -> T.Text
 avgName (None repet (Just repl)) = "repet" <> tshow repet <> "_repl" <> tshow repl

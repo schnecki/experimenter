@@ -11,8 +11,8 @@ import           GHC.Generics
 import           Experimenter.StepResult
 
 data Measure = Measure
-  { _measurePeriod  :: Int
-  , _measureResults :: [StepResult]
+  { _measurePeriod  :: !Int
+  , _measureResults :: ![StepResult]
   } deriving (Generic, NFData)
 makeLenses ''Measure
 

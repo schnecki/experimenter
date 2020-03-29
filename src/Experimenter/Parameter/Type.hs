@@ -23,23 +23,23 @@ data ExperimentDesign
 data ParameterSetup a =
   forall b . (Show b, Ord b, Serialize b) =>
   ParameterSetup
-  { parameterName         :: T.Text                        -- ^ Name of parameter.
-  , setParameter          :: b -> a -> a                   -- ^ Set the parameter.
-  , getParameter          :: a -> b                        -- ^ Get the parameter from the current state.
-  , modifyParameter       :: Maybe (b -> IO [b])           -- ^ Either no modification or function.
-  , bounds                :: Maybe (b, b)                  -- ^ Bounds (inclusive).
-  , skipPreparationPhase  :: Maybe (b -> Bool)             -- ^ Skip the preparation phase if True (e.g. to skip learning phase). Default: False.
-  , alterExperimentDesign :: Maybe (b -> ExperimentDesign) -- ^ Change the experiment design. Default: Full-Factory design.
+  { parameterName         :: !T.Text                          -- ^ Name of parameter.
+  , setParameter          :: !(b -> a -> a)                   -- ^ Set the parameter.
+  , getParameter          :: !(a -> b)                          -- ^ Get the parameter from the current state.
+  , modifyParameter       :: !(Maybe (b -> IO [b]))           -- ^ Either no modification or function.
+  , bounds                :: !(Maybe (b, b))                  -- ^ Bounds (inclusive).
+  , skipPreparationPhase  :: !(Maybe (b -> Bool))             -- ^ Skip the preparation phase if True (e.g. to skip learning phase). Default: False.
+  , alterExperimentDesign :: !(Maybe (b -> ExperimentDesign)) -- ^ Change the experiment design. Default: Full-Factory design.
   }
 -- makeLenses ''ParameterSetup  -- does not work with ExistentialQuantification
 
 
 data ParameterSetting a =
   ParameterSetting
-  { _parameterSettingName                 :: T.Text
-  , _parameterSettingValue                :: BS.ByteString
-  , _parameterSettingSkipPreparationPhase :: Bool
-  , _parameterSettingExperimentDesign     :: ExperimentDesign
+  { _parameterSettingName                 :: !T.Text
+  , _parameterSettingValue                :: !BS.ByteString
+  , _parameterSettingSkipPreparationPhase :: !Bool
+  , _parameterSettingExperimentDesign     :: !ExperimentDesign
   } deriving (Eq, Generic, NFData)
 makeLenses ''ParameterSetting
 

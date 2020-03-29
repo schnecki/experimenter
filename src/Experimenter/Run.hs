@@ -499,9 +499,9 @@ printParamSetting exps (ParameterSetting n bs skipPrep expDes) =
 
 
 data RepResultType
-  = Prep (Key ExpResult)
-  | WarmUp (Key RepResult)
-  | Rep (Key RepResult)
+  = Prep !(Key ExpResult)
+  | WarmUp !(Key RepResult)
+  | Rep !(Key RepResult)
 
 
 newResultData :: (ExperimentDef a) => Seed -> RepResultType -> a -> InputState a -> DB (ExpM a) (ResultData a)

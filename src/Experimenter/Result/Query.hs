@@ -75,15 +75,15 @@ import           Experimenter.Util
 
 
 data EndStateType
-  = EndStatePrep (Key PrepResultData)
-  | EndStateWarmUp (Key WarmUpResultData)
-  | EndStateRep (Key RepResultData)
+  = EndStatePrep !(Key PrepResultData)
+  | EndStateWarmUp !(Key WarmUpResultData)
+  | EndStateRep !(Key RepResultData)
 
 
 data StartStateType
-  = StartStatePrep (Key PrepResultData)
-  | StartStateWarmUp (Key WarmUpResultData)
-  | StartStateRep (Key RepResultData)
+  = StartStatePrep !(Key PrepResultData)
+  | StartStateWarmUp !(Key WarmUpResultData)
+  | StartStateRep !(Key RepResultData)
 
 
 loadExperimentsResults :: (ExperimentDef a) => ExperimentSetting -> InputState a -> a -> Key Exps -> DB (ExpM a) (Maybe (Experiments a))

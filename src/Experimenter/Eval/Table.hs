@@ -24,8 +24,8 @@ import           Experimenter.Util
 
 
 data Table =
-  Table Row
-        [Row]
+  Table !Row
+        ![Row]
   deriving (Show, Eq, Generic, NFData)
 
 newtype Row =
@@ -34,9 +34,9 @@ newtype Row =
 
 
 data Cell
-  = CellT Text
-  | CellD Double
-  | CellL LaTeX
+  = CellT !Text
+  | CellD !Double
+  | CellL !LaTeX
   | CellEmpty
   deriving (Show, Eq, Generic)
 

@@ -57,4 +57,4 @@ collectForkResult ref = do
     NotReady -> yield >> collectForkResult ref
     Ready a  -> return a
 
-data ThreadState a = NotReady | Ready a
+data ThreadState a = NotReady | Ready !a

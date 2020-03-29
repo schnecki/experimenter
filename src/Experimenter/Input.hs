@@ -14,8 +14,8 @@ import           GHC.Generics
 import           Experimenter.Experiment
 
 data Input a = Input
-  { _inputValuePeriod :: Int
-  , _inputValue       :: InputValue a
+  { _inputValuePeriod :: !Int
+  , _inputValue       :: !(InputValue a)
   }
 
 

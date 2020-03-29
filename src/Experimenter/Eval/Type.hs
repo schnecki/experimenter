@@ -99,7 +99,7 @@ data Of a
   | Mult !(Of a) !(Of a)
   | Last !(Of a)
   | First !(Of a)
-  | EveryXthElem Int !(Of a)
+  | EveryXthElem !Int !(Of a)
   | Length !(Of a)
   deriving (Generic, Serialize, Show, Eq, Ord, NFData)
 
@@ -202,8 +202,8 @@ instance Show (ExperimentEval a) where
   show x = show (x ^. evalExperimentResults)
 
 data Evals a = Evals
-  { _evalsExperiments :: R.Experiments a
-  , _evalsResults     :: [ExperimentEval a]
+  { _evalsExperiments :: !(R.Experiments a)
+  , _evalsResults     :: ![ExperimentEval a]
   } deriving (Generic, NFData)
 makeLenses ''Evals
 

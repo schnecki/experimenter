@@ -223,8 +223,8 @@ mkExperimentTable evals (lowestUnit, eval, res) =
 
 
 data TableResult = TableResult
-  { header :: Row
-  , rows   :: [Row]
+  { header :: !Row
+  , rows   :: ![Row]
   } deriving (Show)
 
 toTables :: [TableResult] -> Table

@@ -32,9 +32,9 @@ phaseFromResultDataKey ResultDataWarmUp{} = WarmUpPhase
 phaseFromResultDataKey ResultDataRep{}    = EvaluationPhase
 
 data ResultDataKey
-  = ResultDataPrep (Key PrepResultData)
-  | ResultDataWarmUp (Key WarmUpResultData)
-  | ResultDataRep (Key RepResultData)
+  = ResultDataPrep !(Key PrepResultData)
+  | ResultDataWarmUp !(Key WarmUpResultData)
+  | ResultDataRep !(Key RepResultData)
   deriving (Eq, Ord, Show)
 
 
@@ -103,7 +103,7 @@ data Experiments a = Experiments
   , _experimentsInfoParameters    :: ![ExperimentInfoParameter]
   , _experimentsInitialState      :: !a -- ^ state at period 0
   , _experimentsInitialInputState :: !(InputState a)
-  , _experiments                  :: [Experiment a]
+  , _experiments                  :: ![Experiment a]
   }
 makeLenses ''Experiments
 
