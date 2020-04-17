@@ -119,7 +119,7 @@ experimentsInfo exps = do
 
 experimentsEvals :: Evals a -> LaTeXT SimpleDB ()
 experimentsEvals evals = do
-  pagebreak "4"
+  pagebreak (pure "4")
   part "Experiment Evaluations"
   !(force -> tablesP) <- lift $! mkResultTablesFor UnitPeriods evals
   !(force -> tablesR) <- lift $! mkResultTablesFor UnitReplications evals
