@@ -49,8 +49,8 @@ instance Show AvailabilityListWhere where
 
 
 data AvailabilityList m b
-  = AvailableList !(Int, [b]) !(AvailabilityListWhere -> ConduitT () b (DB m) ())
-  | AvailableListOnDemand !(Int, AvailabilityListWhere -> ConduitT () b (DB m) ())
+  = AvailableList !(Int, [b]) (AvailabilityListWhere -> ConduitT () b (DB m) ())
+  | AvailableListOnDemand (Int, AvailabilityListWhere -> ConduitT () b (DB m) ())
 
 
 instance (Show b) => Show (AvailabilityList m b) where
