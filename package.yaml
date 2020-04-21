@@ -38,7 +38,7 @@ dependencies:
   - aeson
   - esqueleto
   - unliftio-core
-  - HaTeX
+  - HaTeX                          >= 3.22.0.0
   - directory
   - process
   - matrix
