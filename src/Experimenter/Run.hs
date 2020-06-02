@@ -808,8 +808,8 @@ runResultData expId len repResType resData = do
       let runTime = diffUTCTime (fromJust eTime) sTime
           saveTime = diffUTCTime eTime' sTime'
       when (nrOfPeriodsToRun == splitPeriods) $ liftIO $ do
-        when (runTime <= 15 * saveTime) increaseSplitSize
-        when (runTime > 30 * saveTime) decreaseSplitSize
+        when (runTime <= 15 * max 5 saveTime) increaseSplitSize
+        when (runTime > 30 * max 5 saveTime) decreaseSplitSize
       if len - curLen - length periodsToRun > 0
         then do
           $(logInfo) $ "Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow runTime <> ". Saving Time: " <> tshow saveTime
