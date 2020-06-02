@@ -24,10 +24,6 @@ flags:
     description: Disables optimizations
     manual: true
     default: false
-  debug:
-    description: Turn on debug settings.
-    manual: false
-    default: false
 
 
 dependencies:
