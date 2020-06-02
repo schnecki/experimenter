@@ -185,7 +185,7 @@ loadExperimentsResultsM filtFin runExpM dbSetup setup initInpSt mkInitSt key =
 checkUniqueParamNames :: (Monad m) => Experiments a -> m (Experiments a)
 checkUniqueParamNames exps = do
   let paramNames = map parameterName (view experimentsParameters exps)
-  when (any ((> 1) . length) (L.group $ L.sort paramNames)) $ error "Parameter names must be unique!"
+  when (any ((> 1) . length) (L.group $ L.sort paramNames)) $ error $ "Parameter names must be unique! " ++ show (filter ((>1) . length) (L.group $ L.sort paramNames))
   return exps
 
 
