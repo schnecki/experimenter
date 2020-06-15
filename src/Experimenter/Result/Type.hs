@@ -7,7 +7,6 @@
 {-# LANGUAGE GADTs                     #-}
 {-# LANGUAGE RankNTypes                #-}
 {-# LANGUAGE TemplateHaskell           #-}
-{-# LANGUAGE TypeSynonymInstances      #-}
 
 module Experimenter.Result.Type where
 
@@ -108,7 +107,8 @@ data Experiments a = Experiments
 makeLenses ''Experiments
 
 instance NFData a => NFData (Experiments a) where
-  rnf (Experiments !k name stT endT !set !param !infoParams !initSt !initInp exps) = rnf name `seq` rnf stT `seq` rnf endT `seq` rnf initSt `seq` rnf exps `seq` rnf infoParams
+  rnf (Experiments !k name stT endT !set !param !infoParams !initSt !initInp exps) =
+    rnf name `seq` rnf stT `seq` rnf endT `seq` map rwhnf param `seq` rnf1 infoParams `seq` rnf1 exps
 
 -- instance Serialize GenIO where
 --   put g = put (show g)
