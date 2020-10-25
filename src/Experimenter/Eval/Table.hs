@@ -51,16 +51,22 @@ instance IsString Cell where
   fromString = CellT . T.pack
 
 dereferLatex :: T.Text -> T.Text
-dereferLatex = T.replace "{" "\\{" . T.replace "}" "\\}" . T.replace "_" "\\_"
+dereferLatex = protectText . T.replace "{" "\\{" . T.replace "}" "\\}" . T.replace "_" "\\_"
 
 
 printTable :: (MonadLogger m) => Table -> LaTeXT m ()
-printTable tbl = forM_ (splitTable tbl) printTable'
+printTable tbl@(Table header _) = forM_ (splitTable tbl) printTable'
   where
     printTable' (Table headerInput rowsInput) =
       center $
-      tabular Nothing (VerticalLine : replicate colLen LeftColumn ++ [VerticalLine]) $ hline <> printRow textbf header <> hline <> mconcat (map (printRow id) rows) <> hline
+      tabular Nothing (replicate colLen LeftColumn) $ hline <> printRow textbf header <> hline <> mconcat (map (printRow id) rows) <> hline
       where
+        maxColLens = map (map cellLength . fromRow) (header : rows)
+        fromRow (Row []) = [CellT ""]
+        fromRow (Row xs) = xs
+        cellLength (CellT txt) = T.length txt
+        cellLength (CellD dbl) = T.length (printDouble dbl)
+        cellLength (CellL l)   = 0
         printRow :: (LaTeXC l) => (l -> l) -> Row -> l
         printRow _ (Row []) = mempty
         printRow f (Row (c:cs)) = foldl' (&) (f $ printCell c) (map (f . printCell) cs) <> lnbk
