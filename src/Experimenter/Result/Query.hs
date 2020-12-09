@@ -558,7 +558,9 @@ getOrCreateExps setup initInpSt initSt = do
   expsList <- selectList [ExpsName ==. name] []
   expsInfoParams <- map (map entityVal) <$> mapM (\(Entity e _) -> selectList [ExpsInfoParamExps ==. e] []) expsList
   let expsList' = map fst $ filter ((\xs -> length infoParams >= length xs && all matchesExpsInfoParam xs) . snd) (zip expsList expsInfoParams)
-  when (null expsList') $ $(logInfo) "No experiment with same Experiment Info Parameters found!"
+  when (null expsList') $ do
+    $(logInfo) "No experiment with same Experiment Info Parameters found!"
+    $(logInfo) $ "There were " <> tshow (length expsList) <> "experiments with the same name available"
   exps <-
     filterM
       (\(Entity _ (Exps _ _ _ s iS)) -> do
