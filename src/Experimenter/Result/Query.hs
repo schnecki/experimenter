@@ -47,6 +47,7 @@ import           Control.Monad.Trans.Maybe
 import           Data.ByteString             (ByteString)
 import qualified Data.ByteString             as B
 import qualified Data.Conduit.List           as CL
+import           Data.Either                 (isLeft)
 import           Data.Function               (on)
 import qualified Data.List                   as L
 import           Data.Maybe                  (fromMaybe)
@@ -558,17 +559,16 @@ getOrCreateExps setup initInpSt initSt = do
   expsList <- selectList [ExpsName ==. name] []
   expsInfoParams <- map (map entityVal) <$> mapM (\(Entity e _) -> selectList [ExpsInfoParamExps ==. e] []) expsList
   let expsList' = map fst $ filter ((\xs -> length infoParams >= length xs && all matchesExpsInfoParam xs) . snd) (zip expsList expsInfoParams)
-  when (null expsList') $ do
-    $(logInfo) "No experiment with same Experiment Info Parameters found!"
-    $(logInfo) $ "There were " <> tshow (length expsList) <> "experiments with the same name available"
+  when (null expsList') $ $(logInfo) "No experiment with same Experiment Info Parameters found!"
   exps <-
     filterM
       (\(Entity _ (Exps _ _ _ s iS)) -> do
          serSt <- lift $ lift $ lift $ sequence $ deserialisable <$> runGet S.get s
          let other = (,) <$> serSt <*> runGet S.get iS
+         when (isLeft other) $ $(logInfo) $ "Could not deserialise experiment with same name"
          return $ fromEither False (equalExperiments (initSt, initInpSt) <$> other))
       expsList'
-  when (not (null expsList') && null exps) $ $(logInfo) "No experiment with same Parameters found!"
+  when (not (null expsList') && null exps) $ $(logInfo) "Found experiments with same name, but the are different or not deserialisable!"
   params <- mapM (\e -> selectList [ParamExps ==. entityKey e] [Asc ParamName]) exps
   let mkParamTpl (Param _ n _ _) = n
   let ~myParams = L.sort $ map (mkParamTpl . convertParameterSetup (entityKey (head exps))) (parameters initSt)
@@ -597,7 +597,7 @@ getOrCreateExps setup initInpSt initSt = do
         (max 0 $ view evaluationWarmUpSteps setup)
         (max 0 $ view evaluationSteps setup)
         (max 1 $ view evaluationReplications setup)
-        (max 1 $ view maximumParallelEvaluations setup)
+        (max 1 <$> view evaluationMaxStepsBetweenSaves setup)
     insertInfoParam k (ExperimentInfoParameter n v) = insert $ ExpsInfoParam k n (S.runPut $ S.put v)
     insertParam :: Key Exps -> ParameterSetup a -> DB (ExpM a) (Key Param)
     insertParam eExp (ParameterSetup n _ _ _ (Just (minVal, maxVal)) _ _) = insert $ Param eExp n (Just $ runPut $ put minVal) (Just $ runPut $ put maxVal)

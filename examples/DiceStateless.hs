@@ -40,6 +40,9 @@ instance Serialize Seed where
     (vec :: V.Vector Word32) <- get
     return $ toSeed vec
 
+instance NFData Seed where -- We use a fake instance here.
+  rnf seed = seed `seq` ()
+
 instance ExperimentDef Dice where
   type ExpM Dice = IO
   type InputValue Dice = Seed
@@ -66,16 +69,17 @@ fakeParam = ParameterSetup "fake" (\mD (Dice _) -> Dice mD) (\(Dice mD) -> mD) (
 
 
 setup :: MkExperimentSetting a
-setup _ = ExperimentSetting
-  { _experimentBaseName         = "dice param"
-  , _experimentInfoParameters = []
-  , _experimentRepetitions      =  2
-  , _preparationSteps           =  0
-  , _evaluationWarmUpSteps      =  0
-  , _evaluationSteps            =  10
-  , _evaluationReplications     =  3
-  , _maximumParallelEvaluations =  1
-  }
+setup _ =
+  ExperimentSetting
+    { _experimentBaseName             = "dice param"
+    , _experimentInfoParameters       = []
+    , _experimentRepetitions          = 2
+    , _preparationSteps               = 0
+    , _evaluationWarmUpSteps          = 0
+    , _evaluationSteps                = 10
+    , _evaluationReplications         = 3
+    , _evaluationMaxStepsBetweenSaves = Nothing
+    }
 
 
 main :: IO ()

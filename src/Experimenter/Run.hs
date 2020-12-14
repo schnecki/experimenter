@@ -43,7 +43,7 @@ import           Control.Monad.Reader
 import           Data.Function                (on)
 import           Data.Int                     (Int64)
 import qualified Data.List                    as L
-import           Data.Maybe                   (fromJust, fromMaybe)
+import           Data.Maybe                   (fromJust, fromMaybe, isNothing)
 import           Data.Serialize               hiding (get)
 import qualified Data.Serialize               as S
 import qualified Data.Text                    as T
@@ -617,9 +617,10 @@ runPreparation seed exps expId expResId (expNr, repetNr) prepDelNeeded prepInitS
     delNeeded len = prepDelNeeded || maybe False (\_ -> prepSteps < len) mResData
     runNeeded len = maybe (prepSteps > 0) (\_ -> prepSteps > len || (delNeeded len && prepSteps > 0)) mResData
     prepSteps = exps ^. experimentsSetup . expsSetupPreparationSteps
+    maxSteps = exps ^. experimentsSetup . expsSetupEvaluationMaxStepsBetweenSaves
     initInpSt = exps ^. experimentsInitialInputState
     new initSt = newResultData seed (Prep expResId) initSt initInpSt
-    run len rD = ((delNeeded len ||) *** Just) <$> runResultData expId prepSteps (Prep expResId) rD
+    run len rD = ((delNeeded len ||) *** Just) <$> runResultData expId maxSteps prepSteps (Prep expResId) rD
 
 
 runReplicationResult ::
@@ -686,8 +687,9 @@ runWarmUp seed exps expId repResId (expNr, repetNr, repliNr) initSt initInpSt mR
     delNeeded len = maybe False (\_ -> wmUpSteps < len) mResData --  || maybe False ((>0) . lengthAvailabilityList) (mResData ^? traversed.results)
     runNeeded len = maybe (wmUpSteps > 0) (\_ -> wmUpSteps > len || (delNeeded len && wmUpSteps > 0)) mResData
     wmUpSteps = exps ^. experimentsSetup . expsSetupEvaluationWarmUpSteps
+    maxSteps = exps ^. experimentsSetup . expsSetupEvaluationMaxStepsBetweenSaves
     new initStWmUp = newResultData seed (WarmUp repResId) initStWmUp initInpSt
-    run len rD = ((delNeeded len ||) *** Just) <$> runResultData expId wmUpSteps (WarmUp repResId) rD
+    run len rD = ((delNeeded len ||) *** Just) <$> runResultData expId maxSteps wmUpSteps (WarmUp repResId) rD
 
 
 runEval ::
@@ -726,8 +728,9 @@ runEval seed exps expId warmUpUpdated repResId (expNr, repetNr, repliNr) initSt 
     delNeeded len = warmUpUpdated || maybe False (\_ -> evalSteps < len) mResData
     runNeeded len = maybe (evalSteps > 0) (\_ -> evalSteps > len  || (delNeeded len && evalSteps > 0)) mResData
     evalSteps = exps ^. experimentsSetup . expsSetupEvaluationSteps
+    maxSteps = exps ^. experimentsSetup . expsSetupEvaluationMaxStepsBetweenSaves
     new initStEval = newResultData seed (Rep repResId) initStEval initInpSt
-    run len rD = ((delNeeded len ||) *** Just) <$> runResultData expId evalSteps (Rep repResId) rD
+    run len rD = ((delNeeded len ||) *** Just) <$> runResultData expId maxSteps evalSteps (Rep repResId) rD
 
 
 deleteReplicationResult :: (MonadIO m) => ReplicationResult a -> DB m ()
@@ -757,7 +760,7 @@ foldM' :: (Monad m) => (a -> b -> m a) -> a -> [b] -> m a
 foldM' _ acc [] = return acc
 foldM' f acc (x:xs) = do
   !acc' <- f acc x
-  acc' `seq` foldM' f acc' xs
+  foldM' f acc' xs
 
 
 splitSizeMVar :: MVar Int
@@ -774,22 +777,23 @@ getSplitSize :: IO Int
 getSplitSize = liftIO $ fromMaybe 5000 <$> tryReadMVar splitSizeMVar
 
 
-runResultData :: (ExperimentDef a) => Key Exp -> Int -> RepResultType -> ResultData a -> DB (ExpM a) (Updated, ResultData a)
-runResultData expId len repResType resData = do
+runResultData :: (ExperimentDef a) => Key Exp -> Maybe Int -> Int -> RepResultType -> ResultData a -> DB (ExpM a) (Updated, ResultData a)
+runResultData expId maxSteps len repResType resData = do
   ~startStAvail <- mkAvailable (resData ^. startState)
   st <- mkTransientlyAvailable (resData ^. endState) >>= maybe (mkTransientlyAvailable startStAvail) return
   let stInp = fromMaybe (resData ^. startInputState) (resData ^. endInputState)
   let g = fromMaybe (resData ^. startRandGen) (resData ^. endRandGen)
-  $(logInfo) $ "Number of steps already run is " <> tshow curLen <> ", thus still need to run " <> tshow (len - curLen) <> " steps."
-  splitPeriods <- liftIO getSplitSize
+  splitPeriods <- maybe (liftIO getSplitSize) return maxSteps
   let nrOfPeriodsToRun = min splitPeriods (len - curLen)
       periodsToRun = map (+ curLen) [1 .. nrOfPeriodsToRun]
+      printInfo = splitPeriods > 100 || any (\p -> (p - 1) `mod` 100 == 0) periodsToRun
+  when printInfo $ $(logInfo) $ "Number of steps already run is " <> tshow curLen <> ", thus still need to run " <> tshow (len - curLen) <> " steps."
   let updated = not (null periodsToRun)
   sTime <- liftIO getCurrentTime
   let phase = phaseFromResultDataKey (resData ^. resultDataKey)
       phaseNr = fromEnum phase
   void $ upsertBy (UniqueExpProgress expId) (ExpProgress expId phaseNr curLen) [ExpProgressPhase =. phaseNr, ExpProgressStep =. curLen]
-  (g', force -> st', force -> stInp', inputs, force -> measures) <- foldM' (run phase) (g, st, stInp, [], []) periodsToRun
+  !(g', force -> st', force -> stInp', force -> inputs, force -> measures) <- foldM' (run phase) (g, st, stInp, [], []) periodsToRun
   when updated $ void $
     upsertBy (UniqueExpProgress expId) (ExpProgress expId phaseNr (curLen + nrOfPeriodsToRun)) [ExpProgressPhase =. phaseNr, ExpProgressStep =. curLen + nrOfPeriodsToRun]
   if updated
@@ -797,7 +801,7 @@ runResultData expId len repResType resData = do
       eTime <- pure <$> liftIO getCurrentTime
       sTime' <- liftIO getCurrentTime
       resData' <-
-        fmap force $ addInputValsAndMeasure (reverse inputs) (reverse measures) $ doIf isNew (set startTime sTime) $ set endInputState (Just stInp') $
+        addInputValsAndMeasure (reverse inputs) (reverse measures) $ doIf isNew (set startTime sTime) $ set endInputState (Just stInp') $
         set endState (Available $ Just st') $
         doIf isNew (set startState startStAvail) $ -- make available once for saving
         set endRandGen (Just g') $
@@ -807,15 +811,15 @@ runResultData expId len repResType resData = do
       eTime' <- liftIO getCurrentTime
       let runTime = diffUTCTime (fromJust eTime) sTime
           saveTime = diffUTCTime eTime' sTime'
-      when (nrOfPeriodsToRun == splitPeriods) $ liftIO $ do
+      when (isNothing maxSteps && nrOfPeriodsToRun == splitPeriods) $ liftIO $ do
         when (runTime <= 15 * max 5 saveTime) increaseSplitSize
         when (runTime > 30 * max 5 saveTime) decreaseSplitSize
       if len - curLen - length periodsToRun > 0
         then do
-          $(logInfo) $ "Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow runTime <> ". Saving Time: " <> tshow saveTime
-          runResultData expId len repResType resData'
+          when printInfo $ $(logInfo) $ "Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow runTime <> ". Saving Time: " <> tshow saveTime
+          runResultData expId maxSteps len repResType resData'
         else do
-          $(logInfo) $ "Done and saved. Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow runTime <> ". Saving Time: " <> tshow saveTime <>
+          when printInfo $ $(logInfo) $ "Done and saved. Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow runTime <> ". Saving Time: " <> tshow saveTime <>
             ". Releasing memory."
           return (True, set endState mkEndStateAvailableOnDemand $ set startState mkStartStateAvailableOnDemand resData')
     else return (False, resData)
@@ -846,7 +850,7 @@ runResultData expId len repResType resData = do
               insertMany_ $ zipWith (\k v -> PrepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
               measureKeys <- insertMany $ map (PrepMeasure key . view measurePeriod) measures
               insertMany_ $ concat $ zipWith (\k (Measure _ xs) -> map (\(StepResult n mX y) -> PrepResultStep k n mX y) xs) measureKeys measures
-              return $ results .~ AvailableListOnDemand (countResults', loadPreparationMeasuresWhere key) $ inputValues .~
+              return $! results .~ AvailableListOnDemand (countResults', loadPreparationMeasuresWhere key) $ inputValues .~
                 AvailableListOnDemand (countInputValues', loadPreparationInputWhere key) $
                 resData
             ResultDataWarmUp key -> do
@@ -855,7 +859,7 @@ runResultData expId len repResType resData = do
               insertMany_ $ zipWith (\k v -> WarmUpInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
               measureKeys <- insertMany $ map (WarmUpMeasure key . view measurePeriod) measures
               insertMany_ $ concat $ zipWith (\k (Measure _ xs) -> map (\(StepResult n mX y) -> WarmUpResultStep k n mX y) xs) measureKeys measures
-              return $ results .~ AvailableListOnDemand (countResults', loadReplicationWarmUpMeasuresWhere key) $ inputValues .~
+              return $! results .~ AvailableListOnDemand (countResults', loadReplicationWarmUpMeasuresWhere key) $ inputValues .~
                 AvailableListOnDemand (countInputValues', loadReplicationWarmUpInputWhere key) $
                 resData
             ResultDataRep key -> do
@@ -864,7 +868,7 @@ runResultData expId len repResType resData = do
               insertMany_ $ zipWith (\k v -> RepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
               measureKeys <- insertMany $ map (RepMeasure key . view measurePeriod) measures
               insertMany_ $ concat $ zipWith (\k (Measure _ xs) -> map (\(StepResult n mX y) -> RepResultStep k n mX y) xs) measureKeys measures
-              return $ results .~ AvailableListOnDemand (countResults', loadReplicationMeasuresWhere key) $ inputValues .~
+              return $! results .~ AvailableListOnDemand (countResults', loadReplicationMeasuresWhere key) $ inputValues .~
                 AvailableListOnDemand (countInputValues', loadReplicationInputWhere key) $
                 resData
     upd :: (ExperimentDef a) => RepResultType -> ResultData a -> DB (ExpM a) ()

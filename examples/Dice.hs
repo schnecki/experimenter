@@ -54,16 +54,17 @@ fakeParam = ParameterSetup "fake" (\mD (Dice g _) -> Dice g mD) (\(Dice _ mD) ->
 
 
 setup :: MkExperimentSetting a
-setup _ = ExperimentSetting
-  { _experimentBaseName         = "dice param"
-  , _experimentInfoParameters = []
-  , _experimentRepetitions      =  2
-  , _preparationSteps           =  0
-  , _evaluationWarmUpSteps      =  1000
-  , _evaluationSteps            =  10000
-  , _evaluationReplications     =  20
-  , _maximumParallelEvaluations =  1
-  }
+setup _ =
+  ExperimentSetting
+    { _experimentBaseName             = "dice param experiment"
+    , _experimentInfoParameters       = []
+    , _experimentRepetitions          = 2
+    , _preparationSteps               = 0
+    , _evaluationWarmUpSteps          = 1000
+    , _evaluationSteps                = 10000
+    , _evaluationReplications         = 1
+    , _evaluationMaxStepsBetweenSaves = Just 100
+    }
 
 
 main :: IO ()

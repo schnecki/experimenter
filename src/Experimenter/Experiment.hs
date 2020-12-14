@@ -30,13 +30,13 @@ data Phase
   deriving (Eq, Ord, Show, Enum)
 
 
-class (Monad (ExpM a), MonadUnliftIO (ExpM a), NFData a, NFData (InputState a), Serialize (InputValue a), Serialize (InputState a), Serialize (Serializable a)) => ExperimentDef a where
+class (Monad (ExpM a), MonadUnliftIO (ExpM a), NFData a, NFData (InputState a), NFData (InputValue a), Serialize (InputValue a), Serialize (InputState a), Serialize (Serializable a)) => ExperimentDef a where
 
   -- | Monad to run experiments in.
   type ExpM a :: (Type -> Type)
 
   -- | Type that is used to serialize the current state.
-  type Serializable a :: Type      
+  type Serializable a :: Type
 
   -- | Function to convert to a serializable object
   serialisable :: a -> ExpM a (Serializable a)
@@ -109,5 +109,3 @@ class (Monad (ExpM a), MonadUnliftIO (ExpM a), NFData a, NFData (InputState a), 
   afterEvaluationHook :: a -> ExperimentNumber -> RepetitionNumber -> ReplicationNumber -> IO ()
   default afterEvaluationHook :: a -> ExperimentNumber -> RepetitionNumber -> ReplicationNumber -> IO ()
   afterEvaluationHook _ _ _ _ = return ()
-
-
