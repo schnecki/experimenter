@@ -58,6 +58,7 @@ dependencies:
   - filepath
   - conduit
   - stm
+  - parallel
 
 library:
   source-dirs: src

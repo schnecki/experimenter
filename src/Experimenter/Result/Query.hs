@@ -60,6 +60,7 @@ import           Data.Word                   (Word32)
 import qualified Database.Esqueleto          as E
 import           Database.Persist            as P
 import           Database.Persist.Postgresql (SqlBackend)
+import           Database.Persist.Sql        (transactionSave)
 import           System.Random.MWC
 
 import           Experimenter.Availability
@@ -578,6 +579,7 @@ getOrCreateExps setup initInpSt initSt = do
       time <- liftIO getCurrentTime
       !serInitSt <- lift $ lift $ lift $ serialisable initSt
       eExp <- insertEntity $ Exps name time Nothing (runPut $ put serInitSt) (runPut $ put initInpSt)
+      void $ transactionSave
       void $ insert $ mkExpSetup eExp
       mapM_ (insertInfoParam (entityKey eExp)) infoParams
       mapM_ (insertParam (entityKey eExp)) (parameters initSt)

@@ -34,6 +34,7 @@ import           Control.Monad.Logger         (LogLevel (..), LoggingT, MonadLog
                                                filterLogger, logDebug, logError, logInfo,
                                                runFileLoggingT, runLoggingT, runNoLoggingT,
                                                runStderrLoggingT, runStdoutLoggingT)
+import           Control.Parallel.Strategies  (rparWith, rseq, using)
 import qualified Data.ByteString              as B
 import           Data.IORef
 import           Data.List                    (foldl')
@@ -778,7 +779,7 @@ getSplitSize = liftIO $ fromMaybe 5000 <$> tryReadMVar splitSizeMVar
 
 
 runResultData :: (ExperimentDef a) => Key Exp -> Maybe Int -> Int -> RepResultType -> ResultData a -> DB (ExpM a) (Updated, ResultData a)
-runResultData expId maxSteps len repResType resData = do
+runResultData !expId !maxSteps !len !repResType !resData = do
   ~startStAvail <- mkAvailable (resData ^. startState)
   st <- mkTransientlyAvailable (resData ^. endState) >>= maybe (mkTransientlyAvailable startStAvail) return
   let stInp = fromMaybe (resData ^. startInputState) (resData ^. endInputState)
@@ -801,8 +802,7 @@ runResultData expId maxSteps len repResType resData = do
       eTime <- pure <$> liftIO getCurrentTime
       sTime' <- liftIO getCurrentTime
       resData' <-
-        addInputValsAndMeasure (reverse inputs) (reverse measures) $ doIf isNew (set startTime sTime) $ set endInputState (Just stInp') $
-        set endState (Available $ Just st') $
+        addInputValsAndMeasure (reverse inputs) (reverse measures) $ doIf isNew (set startTime sTime) $ set endInputState (Just stInp') $ set endState (Available $ Just st') $
         doIf isNew (set startState startStAvail) $ -- make available once for saving
         set endRandGen (Just g') $
         set endTime eTime resData
@@ -814,15 +814,11 @@ runResultData expId maxSteps len repResType resData = do
       when (isNothing maxSteps && nrOfPeriodsToRun == splitPeriods) $ liftIO $ do
         when (runTime <= 15 * max 5 saveTime) increaseSplitSize
         when (runTime > 30 * max 5 saveTime) decreaseSplitSize
+      when printInfo $ $(logInfo) $ "Done and saved. Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow runTime <> ". Saving Time: " <> tshow saveTime
       if len - curLen - length periodsToRun > 0
-        then do
-          when printInfo $ $(logInfo) $ "Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow runTime <> ". Saving Time: " <> tshow saveTime
-          runResultData expId maxSteps len repResType resData'
-        else do
-          when printInfo $ $(logInfo) $ "Done and saved. Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow runTime <> ". Saving Time: " <> tshow saveTime <>
-            ". Releasing memory."
-          return (True, set endState mkEndStateAvailableOnDemand $ set startState mkStartStateAvailableOnDemand resData')
-    else return (False, resData)
+        then force resData' `seq` runResultData expId maxSteps len repResType resData'
+        else return $!! (True, set endState mkEndStateAvailableOnDemand $ set startState mkStartStateAvailableOnDemand resData')
+    else return (False, force resData)
   where
     doIf pred f
       | pred = f
@@ -840,7 +836,7 @@ runResultData expId maxSteps len repResType resData = do
         ResultDataPrep key -> AvailableOnDemand $ loadResDataEndState expId (EndStatePrep key)
         ResultDataWarmUp key -> AvailableOnDemand $ loadResDataEndState expId (EndStateWarmUp key)
         ResultDataRep key -> AvailableOnDemand $ loadResDataEndState expId (EndStateRep key)
-    addInputValsAndMeasure inputVals measures resData =
+    addInputValsAndMeasure !inputVals !measures !resData =
       let countResults' = lengthAvailabilityList (resData ^. results) + length measures
           countInputValues' = lengthAvailabilityList (resData ^. inputValues) + length inputVals
        in case resData ^. resultDataKey of
@@ -872,7 +868,7 @@ runResultData expId maxSteps len repResType resData = do
                 AvailableListOnDemand (countInputValues', loadReplicationInputWhere key) $
                 resData
     upd :: (ExperimentDef a) => RepResultType -> ResultData a -> DB (ExpM a) ()
-    upd (Prep expResId) (ResultData (ResultDataPrep k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do
+    upd (Prep expResId) (ResultData (ResultDataPrep k) sTime eTime sG eG !inpVals !ress sSt eSt sInpSt eInpSt) = do
       sGBS <- liftIO $ fromRandGen sG
       eGBS <- liftIO $ maybe (return Nothing) (fmap Just . fromRandGen) eG
       update
@@ -889,7 +885,7 @@ runResultData expId maxSteps len repResType resData = do
         setResDataStartState (StartStatePrep k) (runPut $ put serSt)
       serESt <- mkTransientlyAvailable eSt >>= lift . lift . lift . traverse serialisable
       setResDataEndState (EndStatePrep k) (runPut . put <$> serESt)
-    upd (WarmUp repResId) (ResultData (ResultDataWarmUp k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do
+    upd (WarmUp repResId) (ResultData (ResultDataWarmUp k) sTime eTime sG eG !inpVals !ress sSt eSt sInpSt eInpSt) = do
       sGBS <- liftIO $ fromRandGen sG
       eGBS <- liftIO $ maybe (return Nothing) (fmap Just . fromRandGen) eG
       update
@@ -906,7 +902,7 @@ runResultData expId maxSteps len repResType resData = do
         setResDataStartState (StartStateWarmUp k) (runPut $ put serSt)
       serESt <- mkTransientlyAvailable eSt >>= lift . lift . lift . traverse serialisable
       setResDataEndState (EndStateWarmUp k) (runPut . put <$> serESt)
-    upd (Rep repResId) (ResultData (ResultDataRep k) sTime eTime sG eG inpVals ress sSt eSt sInpSt eInpSt) = do
+    upd (Rep repResId) (ResultData (ResultDataRep k) sTime eTime sG eG !inpVals !ress sSt eSt sInpSt eInpSt) = do
       sGBS <- liftIO $ fromRandGen sG
       eGBS <- liftIO $ maybe (return Nothing) (fmap Just . fromRandGen) eG
       update
