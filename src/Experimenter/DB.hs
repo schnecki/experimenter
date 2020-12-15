@@ -87,4 +87,3 @@ indexCreation = mapM_ ((\x -> E.rawExecute ("CREATE INDEX IF NOT EXISTS " <> mkN
 
       -- , "\"user\"(ident)" -- user is a postgres keyword!
       ]
-

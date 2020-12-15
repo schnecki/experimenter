@@ -3,5 +3,5 @@ packages:
 - .
 extra-deps:
 - HaTeX-3.22.2.0@sha256:c491c38724d2c9beac25c5a11c1848e3e1e96bd08b3909bd9711870d3610a594,5407
-resolver: lts-14.8
+resolver: lts-16.20
 # resolver: lts-12.26

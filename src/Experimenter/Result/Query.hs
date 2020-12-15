@@ -247,7 +247,7 @@ splitState bs
     splitLength = 128000000     -- 128MB as ByteString is composed of Word8 (8-bit unsigned integer = 1 byte) elements
 
 
-setParams :: (MonadIO m, ExperimentDef a) => Key Exp -> a -> ReaderT SqlBackend (LoggingT m) a
+setParams :: (MonadIO m, MonadLogger m, ExperimentDef a) => Key Exp -> a -> ReaderT SqlBackend m a
 setParams expId st = do
   paramSettings <- loadParamSetup expId
   foldM setParams' st paramSettings

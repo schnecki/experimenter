@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns    #-}
 {-# LANGUAGE DeriveAnyClass  #-}
 {-# LANGUAGE DeriveGeneric   #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -13,6 +14,8 @@ import           Experimenter.StepResult
 data Measure = Measure
   { _measurePeriod  :: !Int
   , _measureResults :: ![StepResult]
-  } deriving (Generic, NFData)
+  } deriving (Generic)
 makeLenses ''Measure
 
+instance NFData Measure where
+  rnf (Measure !p !r) = rnf p `seq` rnf1 r

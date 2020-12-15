@@ -1,4 +1,5 @@
 {-# LANGUAGE BangPatterns         #-}
+{-# LANGUAGE DeriveGeneric        #-}
 {-# LANGUAGE FlexibleContexts     #-}
 {-# LANGUAGE FlexibleInstances    #-}
 {-# LANGUAGE GADTs                #-}
@@ -24,6 +25,7 @@ module Experimenter.Run
     ) where
 
 import           Control.Arrow                (first, (&&&), (***))
+import           Control.Arrow                (second)
 import           Control.Concurrent.MVar
 import           Control.DeepSeq
 import           Control.Lens
@@ -48,13 +50,13 @@ import qualified Data.Serialize               as S
 import qualified Data.Text                    as T
 import qualified Data.Text.IO                 as T
 import           Data.Time                    (addUTCTime, diffUTCTime, getCurrentTime)
-import           System.IO.Unsafe             (unsafePerformIO)
-
+import qualified Data.Vector                  as V
 import           Database.Persist.Postgresql
 import           Database.Persist.Sql         (fromSqlKey, toSqlKey)
+import           GHC.Generics
 import           Network.HostName             (getHostName)
 import           System.IO
-import           System.Mem                   (performGC)
+import           System.IO.Unsafe             (unsafePerformIO)
 import           System.Posix.Process
 import           System.Random.MWC
 
@@ -90,7 +92,7 @@ execExperiments runExpM dbSetup setup initInpSt initSt = force . snd <$> runExpe
 -- | Run an experiment with non-monadic initial state. In case the initial state requires monadic effect (e.g. building
 -- a Tensorflow model), use `runExperimentsM`!
 runExperiments :: (ExperimentDef a) => (ExpM a (Bool, Experiments a) -> IO (Bool, Experiments a)) -> DatabaseSetting -> MkExperimentSetting a -> InputState a -> a -> IO (Bool, Experiments a)
-runExperiments runExpM dbSetup setup initInpSt initSt = force <$> runner runExpM dbSetup setup initInpSt (return initSt)
+runExperiments runExpM dbSetup setup initInpSt initSt = second force <$> runner runExpM dbSetup setup initInpSt (return initSt)
 
 runExperimentsM :: (ExperimentDef a) => (ExpM a (Bool, Experiments a) -> IO (Bool, Experiments a)) -> DatabaseSetting -> MkExperimentSetting a -> InputState a -> ExpM a a -> IO (Bool, Experiments a)
 runExperimentsM = runner
@@ -100,7 +102,7 @@ runExperimentsIO dbSetup setup initInpSt initSt = runner id dbSetup setup initIn
 
 runner :: (ExperimentDef a) => (ExpM a (Bool, Experiments a) -> IO (Bool, Experiments a)) -> DatabaseSetting -> MkExperimentSetting a -> InputState a -> ExpM a a -> IO (Bool, Experiments a)
 runner runExpM dbSetup setup initInpSt mkInitSt =
-  fmap force $ do
+  fmap (second force) $ do
     runStdoutLoggingT $ withPostgresqlPool (connectionString dbSetup) (parallelConnections dbSetup) $ liftSqlPersistMPool $ runMigration migrateAll >> indexCreation
     runExpM $
       runDB dbSetup $ do
@@ -193,18 +195,18 @@ checkUniqueParamNames exps = do
 
 runExperimenter :: (ExperimentDef a) => DatabaseSetting -> ExperimentSetting -> InputState a -> a -> Experiments a -> DB (ExpM a) (Bool, Experiments a)
 runExperimenter dbSetup setup initInpSt initSt exps = do
-  pid <- liftIO getProcessID
-  hostName <- liftIO getHostName
-  time <- liftIO getCurrentTime
+  !pid <- liftIO getProcessID
+  !hostName <- liftIO getHostName
+  !time <- liftIO getCurrentTime
   deleteWhere [ExpsMasterLastAliveSign <=. addUTCTime (-2*keepAliveTimeout) time]
-  maybeMaster <- insertUnique $ ExpsMaster (exps ^. experimentsKey) (T.pack hostName) (fromIntegral pid) time
+  !maybeMaster <- insertUnique $ ExpsMaster (exps ^. experimentsKey) (T.pack hostName) (fromIntegral pid) time
   transactionSave
   case maybeMaster of
     Just masterId -> do
-      ref <- liftIO $ createKeepAliveFork dbSetup (\t -> update masterId [ExpsMasterLastAliveSign =. t]) (delete masterId)
+      !ref <- liftIO $ createKeepAliveFork dbSetup (\t -> update masterId [ExpsMasterLastAliveSign =. t]) (delete masterId)
       $(logInfo) "Running in MASTER mode!"
-      res <- runExperiment dbSetup Master exps
-      waitResult <- waitForSlaves exps
+      !res <- runExperiment dbSetup Master exps
+      !waitResult <- waitForSlaves exps
       if waitResult
         then do
           liftIO (writeIORef ref Finished)
@@ -651,8 +653,8 @@ runReplicationResult (_, wmUpRands, replRands) exps expId (expNr, repetNr) initS
   (evalChange, mEval') <- runEval repRand exps expId wmUpChange (repRes ^. replicationResultKey) (expNr, repetNr, repliNr) initStEval initInpStEval mEval
   return (wmUpChange || evalChange, set warmUpResults mWmUp $ set evalResults mEval' repRes)
   where
-    repResId = repRes ^. replicationResultKey
-    replicats = exps ^. experimentsSetup . expsSetupEvaluationReplications
+    !repResId = repRes ^. replicationResultKey
+    !replicats = exps ^. experimentsSetup . expsSetupEvaluationReplications
 
 
 runWarmUp ::
@@ -667,19 +669,19 @@ runWarmUp ::
   -> Maybe (ResultData a)
   -> DB (ExpM a) (Updated, Maybe (ResultData a))
 runWarmUp seed exps expId repResId (expNr, repetNr, repliNr) initSt initInpSt mResData = do
-  g <- liftIO $ restore seed
-  initStWmUp <- lift $ lift $ lift $ beforeWarmUpHook expNr repetNr repliNr g initSt
+  !g <- liftIO $ restore seed
+  !initStWmUp <- lift $ lift $ lift $ beforeWarmUpHook expNr repetNr repliNr g initSt
   let len = maybe 0 (lengthAvailabilityList . view results) mResData
   when (len > 0 && delNeeded len) $ $(logInfo) "Deletion of warm up data needed"
   when (runNeeded len) $ $(logInfo) "Warm up run is needed"
   when (not (delNeeded len) && not (runNeeded len) && wmUpSteps > 0) $ $(logInfo) "Warm up phase needs no change"
-  mResData' <-
+  !mResData' <-
     if delNeeded len
       then deleteResultData (WarmUp repResId) >> return Nothing
       else return mResData
   if runNeeded len
     then do
-      res <- maybe (new initStWmUp) return mResData' >>= run len
+      !res <- maybe (new initStWmUp) return mResData' >>= run len
       liftIO $ afterWarmUpHook initSt expNr repetNr repliNr
       return res
     else do
@@ -688,10 +690,10 @@ runWarmUp seed exps expId repResId (expNr, repetNr, repliNr) initSt initInpSt mR
   where
     delNeeded len = maybe False (\_ -> wmUpSteps < len) mResData --  || maybe False ((>0) . lengthAvailabilityList) (mResData ^? traversed.results)
     runNeeded len = maybe (wmUpSteps > 0) (\_ -> wmUpSteps > len || (delNeeded len && wmUpSteps > 0)) mResData
-    wmUpSteps = exps ^. experimentsSetup . expsSetupEvaluationWarmUpSteps
-    maxSteps = exps ^. experimentsSetup . expsSetupEvaluationMaxStepsBetweenSaves
-    new initStWmUp = newResultData seed (WarmUp repResId) initStWmUp initInpSt
-    run len rD = ((delNeeded len ||) *** Just) <$> runResultData expId maxSteps wmUpSteps (WarmUp repResId) rD
+    !wmUpSteps = exps ^. experimentsSetup . expsSetupEvaluationWarmUpSteps
+    !maxSteps = exps ^. experimentsSetup . expsSetupEvaluationMaxStepsBetweenSaves
+    new !initStWmUp = newResultData seed (WarmUp repResId) initStWmUp initInpSt
+    run !len !rD = ((delNeeded len ||) *** Just) <$> runResultData expId maxSteps wmUpSteps (WarmUp repResId) rD
 
 
 runEval ::
@@ -707,10 +709,10 @@ runEval ::
   -> Maybe (ResultData a)
   -> DB (ExpM a) (Updated, Maybe (ResultData a))
 runEval seed exps expId warmUpUpdated repResId (expNr, repetNr, repliNr) initSt initInpSt mResData = do
-  g <- liftIO $ restore seed
-  initStEval <- lift $ lift $ lift $ beforeEvaluationHook expNr repetNr repliNr g initSt
+  !g <- liftIO $ restore seed
+  !initStEval <- lift $ lift $ lift $ beforeEvaluationHook expNr repetNr repliNr g initSt
   let len = maybe 0 (lengthAvailabilityList . view results) mResData
-  mResData' <-
+  !mResData' <-
     if delNeeded len
       then deleteResultData (Rep repResId) >> return Nothing
       else return mResData
@@ -720,7 +722,7 @@ runEval seed exps expId warmUpUpdated repResId (expNr, repetNr, repliNr) initSt 
   if runNeeded len
     then do
       $(logInfo) $ "An evaluation run is needed for replication with ID " <> tshow (unSqlBackendKey $ unRepResultKey repResId)
-      res <- maybe (new initStEval) return mResData' >>= run len
+      !res <- maybe (new initStEval) return mResData' >>= run len
       liftIO $ afterEvaluationHook initSt expNr repetNr repliNr
       return res
     else do
@@ -729,10 +731,10 @@ runEval seed exps expId warmUpUpdated repResId (expNr, repetNr, repliNr) initSt 
   where
     delNeeded len = warmUpUpdated || maybe False (\_ -> evalSteps < len) mResData
     runNeeded len = maybe (evalSteps > 0) (\_ -> evalSteps > len  || (delNeeded len && evalSteps > 0)) mResData
-    evalSteps = exps ^. experimentsSetup . expsSetupEvaluationSteps
-    maxSteps = exps ^. experimentsSetup . expsSetupEvaluationMaxStepsBetweenSaves
+    !evalSteps = exps ^. experimentsSetup . expsSetupEvaluationSteps
+    !maxSteps = exps ^. experimentsSetup . expsSetupEvaluationMaxStepsBetweenSaves
     new initStEval = newResultData seed (Rep repResId) initStEval initInpSt
-    run len rD = ((delNeeded len ||) *** Just) <$> runResultData expId maxSteps evalSteps (Rep repResId) rD
+    run !len !rD = ((delNeeded len ||) *** Just) <$> runResultData expId maxSteps evalSteps (Rep repResId) rD
 
 
 deleteReplicationResult :: (MonadIO m) => ReplicationResult a -> DB m ()
@@ -758,10 +760,10 @@ deleteResultData repResType = do
       repRes <- get repResId
       sequence_ $ deleteCascade <$> (view repResultRepResultData =<< repRes)
 
-foldM' :: (Monad m) => (a -> b -> m a) -> a -> [b] -> m a
-foldM' _ acc [] = return acc
-foldM' f acc (x:xs) = do
-  !acc' <- f acc x
+foldM' :: (NFData a, Monad m) => (a -> b -> m a) -> a -> [b] -> m a
+foldM' _ !acc [] = return acc
+foldM' f !acc (x:xs) = do
+  (force -> acc') <- f acc x
   foldM' f acc' xs
 
 
@@ -779,8 +781,35 @@ getSplitSize :: IO Int
 getSplitSize = liftIO $ fromMaybe 5000 <$> tryReadMVar splitSizeMVar
 
 
+data RunData a =
+  RunData
+  -- GenIO, a, InputState a, [Input a], [Measure])
+    { dataRandG    :: !GenIO
+    , dataState    :: !a
+    , dataInpState :: !(InputState a)
+    , dataInputs   :: !(V.Vector (Input a))
+    , dataMeasures :: !(V.Vector Measure)
+    } deriving (Generic)
+
+instance (ExperimentDef a) => NFData (RunData a) where
+  rnf (RunData !_ st inpSt inps meas) = rnf st `seq` rnf inpSt `seq` rnf inps `seq` rnf meas
+
+-- | We need to sepearte @runResultData@ into two functions, as a simple recursive structure causes a space leak if it is not in IO. See
+-- https://stackoverflow.com/questions/41306593/memory-leak-in-recursive-io-function-pap
+-- https://ro-che.info/articles/2017-01-10-nested-loop-space-leak
+-- https://gitlab.haskell.org/ghc/ghc/-/issues/13080
 runResultData :: (ExperimentDef a) => Key Exp -> Maybe Int -> Int -> RepResultType -> ResultData a -> DB (ExpM a) (Updated, ResultData a)
 runResultData !expId !maxSteps !len !repResType !resData = do
+  (!done, !upd, !resData') <- runResultData' expId maxSteps len repResType resData
+  if done
+    then return (upd, resData')
+    else runResultData expId maxSteps len repResType resData'
+{-# NOINLINE runResultData #-}
+{-# NOINLINE runResultData' #-}
+
+-- | Wrapper due to GHC Bug. See @runResultData@.
+runResultData' :: (ExperimentDef a) => Key Exp -> Maybe Int -> Int -> RepResultType -> ResultData a -> DB (ExpM a) (Bool, Updated, ResultData a)
+runResultData' !expId !maxSteps !len !repResType !resData = do
   startStAvail <-
     (if isNew
        then mkAvailable
@@ -794,39 +823,47 @@ runResultData !expId !maxSteps !len !repResType !resData = do
       periodsToRun = map (+ curLen) [1 .. nrOfPeriodsToRun]
       printInfo = splitPeriods > 100 || any (\p -> (p - 1) `mod` 100 == 0) periodsToRun
   when printInfo $ liftIO $ T.putStrLn $ "[Info]" <> -- $(logInfo) $
-    "Number of steps already run is " <> tshow curLen <> ", thus still need to run " <> tshow (len - curLen) <> " steps."
+    "Number of steps already run is " <>
+    tshow curLen <>
+    ", thus still need to run " <>
+    tshow (len - curLen) <>
+    " steps."
   let updated = not (null periodsToRun)
   sTime <- liftIO getCurrentTime
   let phase = phaseFromResultDataKey (resData ^. resultDataKey)
       phaseNr = fromEnum phase
   void $ upsertBy (UniqueExpProgress expId) (ExpProgress expId phaseNr curLen) [ExpProgressPhase =. phaseNr, ExpProgressStep =. curLen]
-  !(g', force -> st', force -> stInp', force -> inputs, force -> measures) <- foldM' (run phase) (g, st, stInp, [], []) periodsToRun
+  !(RunData g' st' stInp' inputs measures) <- foldM' (run phase) (RunData g st stInp V.empty V.empty) periodsToRun
   when updated $ void $
     upsertBy (UniqueExpProgress expId) (ExpProgress expId phaseNr (curLen + nrOfPeriodsToRun)) [ExpProgressPhase =. phaseNr, ExpProgressStep =. curLen + nrOfPeriodsToRun]
   if updated
     then do
       eTime <- pure <$> liftIO getCurrentTime
       sTime' <- liftIO getCurrentTime
-      (force -> resData') <-
-        addInputValsAndMeasure (reverse inputs) (reverse measures) $ doIf isNew (set startTime sTime) $ set endInputState (Just stInp') $ set endState (Available $ Just st') $
+      !resData' <-
+        addInputValsAndMeasure (V.reverse inputs) (V.reverse measures) $ doIf isNew (set startTime sTime) $ set endInputState (Just stInp') $ set endState (Available $ Just st') $
         doIf isNew (set startState startStAvail) $ -- make available once for saving
         set endRandGen (Just g') $
         set endTime eTime resData
       upd repResType resData'
       transactionSave
       eTime' <- liftIO getCurrentTime
-      liftIO performGC `using` rparWith rseq
       let runTime = diffUTCTime (fromJust eTime) sTime
           saveTime = diffUTCTime eTime' sTime'
       when (isNothing maxSteps && nrOfPeriodsToRun == splitPeriods) $ liftIO $ do
         when (runTime <= 15 * max 5 saveTime) increaseSplitSize
         when (runTime > 30 * max 5 saveTime) decreaseSplitSize
-      when printInfo $ liftIO $ T.putStrLn $ "[Info] " <>  -- $(logInfo) $
-        " Done and saved. Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow runTime <> ". Saving Time: " <> tshow saveTime
+      when printInfo $ liftIO $ T.putStrLn $ "[Info] " <> -- $(logInfo) $
+        " Done and saved. Computation Time of " <>
+        tshow (length periodsToRun) <>
+        ": " <>
+        tshow runTime <>
+        ". Saving Time: " <>
+        tshow saveTime
       if len - curLen - length periodsToRun > 0
-        then runResultData expId maxSteps len repResType resData'
-        else return $!! (True, set endState mkEndStateAvailableOnDemand $ set startState mkStartStateAvailableOnDemand resData')
-    else return (False, force $ set endState mkEndStateAvailableOnDemand $ set startState mkStartStateAvailableOnDemand resData)
+        then return (False, True, force resData') -- runResultData expId maxSteps len repResType (force resData')
+        else return $! (True, True, set endState mkEndStateAvailableOnDemand $ set startState mkStartStateAvailableOnDemand resData')
+    else return (True, False, force $ set endState mkEndStateAvailableOnDemand $ set startState mkStartStateAvailableOnDemand resData)
   where
     doIf pred ~f
       | pred = f
@@ -845,33 +882,36 @@ runResultData !expId !maxSteps !len !repResType !resData = do
         ResultDataWarmUp key -> AvailableOnDemand $ loadResDataEndState expId (EndStateWarmUp key)
         ResultDataRep key -> AvailableOnDemand $ loadResDataEndState expId (EndStateRep key)
     addInputValsAndMeasure !inputVals !measures !resData =
-      let countResults' = lengthAvailabilityList (resData ^. results) + length measures
-          countInputValues' = lengthAvailabilityList (resData ^. inputValues) + length inputVals
+      let countResults' = lengthAvailabilityList (resData ^. results) + V.length measures
+          countInputValues' = lengthAvailabilityList (resData ^. inputValues) + V.length inputVals
+          measuresList = V.toList measures
+          inputValsList = V.toList inputVals
        in case resData ^. resultDataKey of
             ResultDataPrep key -> do
               when delInputs $ deleteCascadeWhere [PrepInputPrepResultData ==. key, PrepInputPeriod >=. curLen + 1]
-              inpKeys <- insertMany $ map (PrepInput key . view inputValuePeriod) inputVals
-              insertMany_ $ zipWith (\k v -> PrepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
-              measureKeys <- insertMany $ map (PrepMeasure key . view measurePeriod) measures
-              insertMany_ $ concat $ zipWith (\k (Measure _ xs) -> map (\(StepResult n mX y) -> PrepResultStep k n mX y) xs) measureKeys measures
+              inpKeys <- insertMany $ map (PrepInput key . view inputValuePeriod) inputValsList
+              insertMany_ $ zipWith (\k v -> PrepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputValsList
+
+              measureKeys <- insertMany . map (PrepMeasure key . view measurePeriod) $ measuresList
+              insertMany_ $ concat $ zipWith (\k (Measure _ xs) -> map (\(StepResult n mX y) -> PrepResultStep k n mX y) xs) measureKeys measuresList
               return $! results .~ AvailableListOnDemand (countResults', loadPreparationMeasuresWhere key) $ inputValues .~
                 AvailableListOnDemand (countInputValues', loadPreparationInputWhere key) $
                 resData
             ResultDataWarmUp key -> do
               when delInputs $ deleteCascadeWhere [WarmUpInputRepResult ==. key, WarmUpInputPeriod >=. curLen + 1]
-              inpKeys <- insertMany $ map (WarmUpInput key . view inputValuePeriod) inputVals
-              insertMany_ $ zipWith (\k v -> WarmUpInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
-              measureKeys <- insertMany $ map (WarmUpMeasure key . view measurePeriod) measures
-              insertMany_ $ concat $ zipWith (\k (Measure _ xs) -> map (\(StepResult n mX y) -> WarmUpResultStep k n mX y) xs) measureKeys measures
+              inpKeys <- insertMany $ map (WarmUpInput key . view inputValuePeriod) inputValsList
+              insertMany_ $ zipWith (\k v -> WarmUpInputValue k (runPut . put . view inputValue $ v)) inpKeys inputValsList
+              measureKeys <- insertMany $ map (WarmUpMeasure key . view measurePeriod) measuresList
+              insertMany_ $ concat $ zipWith (\k (Measure _ xs) -> map (\(StepResult n mX y) -> WarmUpResultStep k n mX y) xs) measureKeys measuresList
               return $! results .~ AvailableListOnDemand (countResults', loadReplicationWarmUpMeasuresWhere key) $ inputValues .~
                 AvailableListOnDemand (countInputValues', loadReplicationWarmUpInputWhere key) $
                 resData
             ResultDataRep key -> do
               when delInputs $ deleteCascadeWhere [RepInputRepResult ==. key, RepInputPeriod >=. curLen + 1]
-              inpKeys <- insertMany $ map (RepInput key . view inputValuePeriod) inputVals
-              insertMany_ $ zipWith (\k v -> RepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputVals
-              measureKeys <- insertMany $ map (RepMeasure key . view measurePeriod) measures
-              insertMany_ $ concat $ zipWith (\k (Measure _ xs) -> map (\(StepResult n mX y) -> RepResultStep k n mX y) xs) measureKeys measures
+              inpKeys <- insertMany $ map (RepInput key . view inputValuePeriod) inputValsList
+              insertMany_ $ zipWith (\k v -> RepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputValsList
+              measureKeys <- insertMany $ map (RepMeasure key . view measurePeriod) measuresList
+              insertMany_ $ concat $ zipWith (\k (Measure _ xs) -> map (\(StepResult n mX y) -> RepResultStep k n mX y) xs) measureKeys measuresList
               return $! results .~ AvailableListOnDemand (countResults', loadReplicationMeasuresWhere key) $ inputValues .~
                 AvailableListOnDemand (countInputValues', loadReplicationInputWhere key) $
                 resData
@@ -930,11 +970,9 @@ runResultData !expId !maxSteps !len !repResType !resData = do
     upd _ _ = error "Unexpected update combination. This is a bug, please report it!"
 
 
-run :: (ExperimentDef a) => Phase -> (GenIO, a, InputState a, [Input a], [Measure]) -> Int -> DB (ExpM a) (GenIO, a, InputState a, [Input a], [Measure])
-run ph (!g, !st, !stInp, !inpVals, !res) period = do
+run :: (ExperimentDef a) => Phase -> RunData a -> Int -> DB (ExpM a) (RunData a)
+run ph (RunData g st stInp inpVals res) period = do
   -- let (randGen, g') = split g
-  !(inpVal', inpSt') <- lift $! lift $! lift $! generateInput g st stInp period
-  !(res', st') <- lift $! lift $! lift $! runStep ph st inpVal' period
-  let inpVal'' = force inpVal' `using` rparWith rdeepseq
-      res'' = force res' `using` rparWith rdeepseq
-  inpVal'' `seq` res'' `seq` return (g, st', inpSt', Input period inpVal'' : inpVals, Measure period res'' : res)
+  (!inpVal', !inpSt') <- lift $! lift $! lift $! generateInput g st stInp period
+  (!res', !st') <- lift $! lift $! lift $! runStep ph st inpVal' period
+  return $! force $! RunData g st' inpSt' (Input period inpVal' `V.cons` inpVals) (Measure period res' `V.cons` res)

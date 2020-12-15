@@ -75,7 +75,7 @@ genEvalsConcurrent parallelWorkers runExpM dbSetup exps evals = do
   res <- mapConurrentIO parallelWorkers (runExpM . runDBWithM runResourceT dbSetup . mkEvals evals) (exps ^. experiments)
   return $ Evals (exps {_experiments = []}) res
 
-mkEvals :: (ExperimentDef a ) => [StatsDef a] -> Experiment a -> ReaderT SqlBackend (LoggingT (ResourceT (ExpM a))) (ExperimentEval a)
+mkEvals :: (ExperimentDef a ) => [StatsDef a] -> Experiment a -> DB (ExpM a) (ExperimentEval a)
 mkEvals evals e = do
   xs <- mkTime "All Experiment Evaluations" $ mapMRnf (fmap Available . genExperiment e) evals
   return $ force $ ExperimentEval (e ^. experimentNumber) xs (e {_experimentResults = []})
@@ -267,4 +267,3 @@ fromMeasure :: T.Text -> Measure -> EvalResults a
 fromMeasure name (Measure p res) = case find ((==name) . view resultName) res of
   Nothing -> error $ "Variable with name " <> T.unpack name <> " could not be found!"
   Just (StepResult n mX y) -> EvalValue (Id $ Of $ E.encodeUtf8 n) UnitPeriods (E.encodeUtf8 n) (maybe (Left p) Right mX) y
-

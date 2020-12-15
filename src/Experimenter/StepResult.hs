@@ -13,7 +13,9 @@ data StepResult = StepResult
   { _resultName   :: !T.Text
   , _resultXValue :: !(Maybe Double) -- ^ If not specified number of steps
   , _resultYValue :: !Double
-  } deriving (Generic, NFData)
+  } deriving (Generic)
 makeLenses ''StepResult
 
 
+instance NFData StepResult where
+  rnf (StepResult n x y) = rnf n `seq` rnf1 x `seq` rnf y
