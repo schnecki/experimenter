@@ -34,26 +34,27 @@ import           Control.Monad.Logger         (LogLevel (..), LoggingT, MonadLog
                                                filterLogger, logDebug, logError, logInfo,
                                                runFileLoggingT, runLoggingT, runNoLoggingT,
                                                runStderrLoggingT, runStdoutLoggingT)
-import           Control.Parallel.Strategies  (rparWith, rseq, using)
-import qualified Data.ByteString              as B
-import           Data.IORef
-import           Data.List                    (foldl')
-import           System.IO.Unsafe             (unsafePerformIO)
-
 import           Control.Monad.Reader
+import           Control.Parallel.Strategies  (rdeepseq, rparWith, rseq, using)
+import qualified Data.ByteString              as B
 import           Data.Function                (on)
 import           Data.Int                     (Int64)
+import           Data.IORef
+import           Data.List                    (foldl')
 import qualified Data.List                    as L
 import           Data.Maybe                   (fromJust, fromMaybe, isNothing)
 import           Data.Serialize               hiding (get)
 import qualified Data.Serialize               as S
 import qualified Data.Text                    as T
+import qualified Data.Text.IO                 as T
 import           Data.Time                    (addUTCTime, diffUTCTime, getCurrentTime)
+import           System.IO.Unsafe             (unsafePerformIO)
 
 import           Database.Persist.Postgresql
 import           Database.Persist.Sql         (fromSqlKey, toSqlKey)
 import           Network.HostName             (getHostName)
 import           System.IO
+import           System.Mem                   (performGC)
 import           System.Posix.Process
 import           System.Random.MWC
 
@@ -143,9 +144,9 @@ loadStateAfterPreparation dbSetup expsId expNr expRepNr =
           if null parts
             then return Nothing
             else do
-              mSer <- lift $ deserialise (T.pack "end state") (B.concat parts)
-              res <- lift $ lift $ maybe (return Nothing) (fmap Just . deserialisable) mSer
-              force <$> traverse (setParams expId) res
+              !mSer <- lift $! deserialise (T.pack "end state") (B.concat parts)
+              !res <- lift $! lift $ maybe (return Nothing) (fmap Just . deserialisable) mSer
+              force <$!> traverse (setParams expId) res
 
 type OnlyFinishedExperiments = Bool
 
@@ -359,8 +360,8 @@ mkParamModifications exps setup@(ParameterSetup n _ getter _ _ drp design) = mod
         bs = runPut $ put v
 
 modifyParam :: (MonadIO m) => Experiments a -> ParameterSetup a -> [ParameterSetting a] -> ParameterSetting a -> DB m [ParameterSetting a]
-modifyParam exps (ParameterSetup _ _ _ Nothing _ _ _) _ setting = return [setting]
-modifyParam exps setup@(ParameterSetup n _ _ (Just modifier) mBounds drp design) acc setting = do
+modifyParam exps (ParameterSetup _ _ _ Nothing _ _ _) !_ !setting = return [setting]
+modifyParam exps setup@(ParameterSetup n _ _ (Just modifier) mBounds drp design) !acc !setting = do
   case S.runGet S.get (view parameterSettingValue setting) of
     Left err -> error $ "Could not deserialize a value for parameter " <> T.unpack n <> ". Cannot proceed!"
     Right val -> do
@@ -376,7 +377,7 @@ modifyParam exps setup@(ParameterSetup n _ _ (Just modifier) mBounds drp design)
               _ -> xs
       bss <- liftIO $ filterExperimentDesign . fmap (id &&& runPut . put) . filter filterBounds <$> modifier val
       let params' = filter (`notElem` acc) $ map (\(v, bs) -> ParameterSetting n bs (maybe False (\x -> x v) drp) (maybe FullFactory (\x -> x v) design)) bss
-      foldM (modifyParam exps setup) (acc ++ params') params'
+      foldM' (modifyParam exps setup) (acc ++ params') params'
 
 
 existingParamSettings :: (ExperimentDef a, MonadIO m) => Experiments a -> DB m [[ParameterSetting a]]
@@ -400,7 +401,7 @@ deleteExperimentResult (ExperimentResult k _ _ repls) = mapM_ deleteReplicationR
 
 -- | Loads parameters of an experiment into all initial and end states of the given experiments variable.
 loadParameters  :: (ExperimentDef a) => Experiments a -> Experiment a  -> DB (ExpM a) (Experiments a)
-loadParameters exps exp = foldM setParam exps (exp ^. parameterSetup)
+loadParameters exps exp = foldM' setParam exps (exp ^. parameterSetup)
   where
     setParam e (ParameterSetting n bs drp _) =
       case L.find (\(ParameterSetup name _ _ _ _ _ _) -> name == n) parameterSetups of
@@ -780,7 +781,11 @@ getSplitSize = liftIO $ fromMaybe 5000 <$> tryReadMVar splitSizeMVar
 
 runResultData :: (ExperimentDef a) => Key Exp -> Maybe Int -> Int -> RepResultType -> ResultData a -> DB (ExpM a) (Updated, ResultData a)
 runResultData !expId !maxSteps !len !repResType !resData = do
-  ~startStAvail <- mkAvailable (resData ^. startState)
+  startStAvail <-
+    (if isNew
+       then mkAvailable
+       else return)
+      (resData ^. startState)
   st <- mkTransientlyAvailable (resData ^. endState) >>= maybe (mkTransientlyAvailable startStAvail) return
   let stInp = fromMaybe (resData ^. startInputState) (resData ^. endInputState)
   let g = fromMaybe (resData ^. startRandGen) (resData ^. endRandGen)
@@ -788,7 +793,8 @@ runResultData !expId !maxSteps !len !repResType !resData = do
   let nrOfPeriodsToRun = min splitPeriods (len - curLen)
       periodsToRun = map (+ curLen) [1 .. nrOfPeriodsToRun]
       printInfo = splitPeriods > 100 || any (\p -> (p - 1) `mod` 100 == 0) periodsToRun
-  when printInfo $ $(logInfo) $ "Number of steps already run is " <> tshow curLen <> ", thus still need to run " <> tshow (len - curLen) <> " steps."
+  when printInfo $ liftIO $ T.putStrLn $ "[Info]" <> -- $(logInfo) $
+    "Number of steps already run is " <> tshow curLen <> ", thus still need to run " <> tshow (len - curLen) <> " steps."
   let updated = not (null periodsToRun)
   sTime <- liftIO getCurrentTime
   let phase = phaseFromResultDataKey (resData ^. resultDataKey)
@@ -801,7 +807,7 @@ runResultData !expId !maxSteps !len !repResType !resData = do
     then do
       eTime <- pure <$> liftIO getCurrentTime
       sTime' <- liftIO getCurrentTime
-      resData' <-
+      (force -> resData') <-
         addInputValsAndMeasure (reverse inputs) (reverse measures) $ doIf isNew (set startTime sTime) $ set endInputState (Just stInp') $ set endState (Available $ Just st') $
         doIf isNew (set startState startStAvail) $ -- make available once for saving
         set endRandGen (Just g') $
@@ -809,18 +815,20 @@ runResultData !expId !maxSteps !len !repResType !resData = do
       upd repResType resData'
       transactionSave
       eTime' <- liftIO getCurrentTime
+      liftIO performGC `using` rparWith rseq
       let runTime = diffUTCTime (fromJust eTime) sTime
           saveTime = diffUTCTime eTime' sTime'
       when (isNothing maxSteps && nrOfPeriodsToRun == splitPeriods) $ liftIO $ do
         when (runTime <= 15 * max 5 saveTime) increaseSplitSize
         when (runTime > 30 * max 5 saveTime) decreaseSplitSize
-      when printInfo $ $(logInfo) $ "Done and saved. Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow runTime <> ". Saving Time: " <> tshow saveTime
+      when printInfo $ liftIO $ T.putStrLn $ "[Info] " <>  -- $(logInfo) $
+        " Done and saved. Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow runTime <> ". Saving Time: " <> tshow saveTime
       if len - curLen - length periodsToRun > 0
-        then force resData' `seq` runResultData expId maxSteps len repResType resData'
+        then runResultData expId maxSteps len repResType resData'
         else return $!! (True, set endState mkEndStateAvailableOnDemand $ set startState mkStartStateAvailableOnDemand resData')
-    else return (False, force resData)
+    else return (False, force $ set endState mkEndStateAvailableOnDemand $ set startState mkStartStateAvailableOnDemand resData)
   where
-    doIf pred f
+    doIf pred ~f
       | pred = f
       | otherwise = id
     curLen = lengthAvailabilityList (resData ^. results)
@@ -869,8 +877,8 @@ runResultData !expId !maxSteps !len !repResType !resData = do
                 resData
     upd :: (ExperimentDef a) => RepResultType -> ResultData a -> DB (ExpM a) ()
     upd (Prep expResId) (ResultData (ResultDataPrep k) sTime eTime sG eG !inpVals !ress sSt eSt sInpSt eInpSt) = do
-      sGBS <- liftIO $ fromRandGen sG
-      eGBS <- liftIO $ maybe (return Nothing) (fmap Just . fromRandGen) eG
+      !sGBS <- liftIO $ fromRandGen sG
+      !eGBS <- liftIO $ maybe (return Nothing) (fmap Just . fromRandGen) eG
       update
         k
         [ PrepResultDataStartTime =. sTime
@@ -883,11 +891,11 @@ runResultData !expId !maxSteps !len !repResType !resData = do
       when (curLen == 0) $ do
         ~serSt <- mkTransientlyAvailable sSt >>= lift . lift . lift . serialisable
         setResDataStartState (StartStatePrep k) (runPut $ put serSt)
-      serESt <- mkTransientlyAvailable eSt >>= lift . lift . lift . traverse serialisable
+      !serESt <- mkTransientlyAvailable eSt >>= lift . lift . lift . traverse serialisable
       setResDataEndState (EndStatePrep k) (runPut . put <$> serESt)
     upd (WarmUp repResId) (ResultData (ResultDataWarmUp k) sTime eTime sG eG !inpVals !ress sSt eSt sInpSt eInpSt) = do
-      sGBS <- liftIO $ fromRandGen sG
-      eGBS <- liftIO $ maybe (return Nothing) (fmap Just . fromRandGen) eG
+      !sGBS <- liftIO $ fromRandGen sG
+      !eGBS <- liftIO $ maybe (return Nothing) (fmap Just . fromRandGen) eG
       update
         k
         [ WarmUpResultDataStartTime =. sTime
@@ -900,11 +908,11 @@ runResultData !expId !maxSteps !len !repResType !resData = do
       when (curLen == 0) $ do
         ~serSt <- mkTransientlyAvailable sSt >>= lift . lift . lift . serialisable
         setResDataStartState (StartStateWarmUp k) (runPut $ put serSt)
-      serESt <- mkTransientlyAvailable eSt >>= lift . lift . lift . traverse serialisable
+      !serESt <- mkTransientlyAvailable eSt >>= lift . lift . lift . traverse serialisable
       setResDataEndState (EndStateWarmUp k) (runPut . put <$> serESt)
     upd (Rep repResId) (ResultData (ResultDataRep k) sTime eTime sG eG !inpVals !ress sSt eSt sInpSt eInpSt) = do
-      sGBS <- liftIO $ fromRandGen sG
-      eGBS <- liftIO $ maybe (return Nothing) (fmap Just . fromRandGen) eG
+      !sGBS <- liftIO $ fromRandGen sG
+      !eGBS <- liftIO $ maybe (return Nothing) (fmap Just . fromRandGen) eG
       update
         k
         [ RepResultDataStartTime =. sTime
@@ -917,14 +925,16 @@ runResultData !expId !maxSteps !len !repResType !resData = do
       when (curLen == 0) $ do
         ~serSt <- mkTransientlyAvailable sSt >>= lift . lift . lift . serialisable
         setResDataStartState (StartStateRep k) (runPut $ put serSt)
-      serESt <- mkTransientlyAvailable eSt >>= lift . lift . lift . traverse serialisable
+      !serESt <- mkTransientlyAvailable eSt >>= lift . lift . lift . traverse serialisable
       setResDataEndState (EndStateRep k) (runPut . put <$> serESt)
     upd _ _ = error "Unexpected update combination. This is a bug, please report it!"
 
 
 run :: (ExperimentDef a) => Phase -> (GenIO, a, InputState a, [Input a], [Measure]) -> Int -> DB (ExpM a) (GenIO, a, InputState a, [Input a], [Measure])
-run ph (g, st, stInp, inpVals, res) period = do
+run ph (!g, !st, !stInp, !inpVals, !res) period = do
   -- let (randGen, g') = split g
-  (inpVal', inpSt') <- lift $ lift $ lift $ generateInput g st stInp period
-  (res', st') <- lift $ lift $ lift $ runStep ph st inpVal' period
-  return (g, st', inpSt', Input period inpVal' : inpVals, Measure period res' : res)
+  !(inpVal', inpSt') <- lift $! lift $! lift $! generateInput g st stInp period
+  !(res', st') <- lift $! lift $! lift $! runStep ph st inpVal' period
+  let inpVal'' = force inpVal' `using` rparWith rdeepseq
+      res'' = force res' `using` rparWith rdeepseq
+  inpVal'' `seq` res'' `seq` return (g, st', inpSt', Input period inpVal'' : inpVals, Measure period res'' : res)

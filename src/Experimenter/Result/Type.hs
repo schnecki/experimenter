@@ -111,7 +111,7 @@ data Experiments a = Experiments
 makeLenses ''Experiments
 
 instance (ExperimentDef a) => NFData (Experiments a) where
-  rnf (Experiments !k name stT endT !set !param !infoParams !initSt !initInp exps) =
+  rnf (Experiments !k name ~stT !endT !set !param !infoParams !initSt !initInp exps) =
     rnf name `seq` rnf stT `seq` rnf endT `seq` map rwhnf param `seq` rnf1 infoParams `seq` rnf initSt `seq` rnf initInp `seq` rnf1 exps
 
 -- instance Serialize GenIO where
