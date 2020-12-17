@@ -77,8 +77,8 @@ The experiment can then be configured like this:
         , _evaluationMaxStepsBetweenSaves = Just 100000             -- ^ Specify after how many steps the data will be saved. `Nothing` adaptively chooses a sensible value.
         }
 
-See [Dice.hs](examples/Dice.hs) for a full implementation, where the sides of the dices are
-variable over the experiment.
+See [Dice.hs](examples/Dice.hs) for a full implementation, where the sides of the dices are variable
+over the experiment. An example report of this experiment can be found in the same folder.
 
 
 # Ideas and TODOs
