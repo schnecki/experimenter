@@ -768,11 +768,11 @@ foldM' f !acc (x:xs) = do
 
 
 splitSizeMVar :: MVar Int
-splitSizeMVar = unsafePerformIO $ newMVar 5000
+splitSizeMVar = unsafePerformIO $ newMVar 2000
 {-# NOINLINE splitSizeMVar #-}
 
 increaseSplitSize :: IO ()
-increaseSplitSize = liftIO $ modifyMVar_ splitSizeMVar (return . min 50000 . (*2))
+increaseSplitSize = liftIO $ modifyMVar_ splitSizeMVar (return . min 128000 . (*2))
 
 decreaseSplitSize :: IO ()
 decreaseSplitSize = liftIO $ modifyMVar_ splitSizeMVar (return . max 500 . (`div` 2))
@@ -822,12 +822,7 @@ runResultData' !expId !maxSteps !len !repResType !resData = do
   let nrOfPeriodsToRun = min splitPeriods (len - curLen)
       periodsToRun = map (+ curLen) [1 .. nrOfPeriodsToRun]
       printInfo = splitPeriods > 100 || any (\p -> (p - 1) `mod` 100 == 0) periodsToRun
-  when printInfo $ liftIO $ T.putStrLn $ "[Info]" <> -- $(logInfo) $
-    "Number of steps already run is " <>
-    tshow curLen <>
-    ", thus still need to run " <>
-    tshow (len - curLen) <>
-    " steps."
+  when printInfo $ $(logInfo) $ "Number of steps already run is " <> tshow curLen <> ", thus still need to run " <> tshow (len - curLen) <> " steps."
   let updated = not (null periodsToRun)
   sTime <- liftIO getCurrentTime
   let phase = phaseFromResultDataKey (resData ^. resultDataKey)
@@ -851,15 +846,9 @@ runResultData' !expId !maxSteps !len !repResType !resData = do
       let runTime = diffUTCTime (fromJust eTime) sTime
           saveTime = diffUTCTime eTime' sTime'
       when (isNothing maxSteps && nrOfPeriodsToRun == splitPeriods) $ liftIO $ do
-        when (runTime <= 15 * max 5 saveTime) increaseSplitSize
-        when (runTime > 30 * max 5 saveTime) decreaseSplitSize
-      when printInfo $ liftIO $ T.putStrLn $ "[Info] " <> -- $(logInfo) $
-        " Done and saved. Computation Time of " <>
-        tshow (length periodsToRun) <>
-        ": " <>
-        tshow runTime <>
-        ". Saving Time: " <>
-        tshow saveTime
+        when (runTime < 60 * max 5 saveTime) increaseSplitSize
+        when (runTime > 120 * max 5 saveTime) decreaseSplitSize
+      when printInfo $ $(logInfo) $ "Done and saved. Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow runTime <> ". Saving Time: " <> tshow saveTime
       if len - curLen - length periodsToRun > 0
         then return (False, True, force resData') -- runResultData expId maxSteps len repResType (force resData')
         else return $! (True, True, set endState mkEndStateAvailableOnDemand $ set startState mkStartStateAvailableOnDemand resData')
@@ -891,7 +880,6 @@ runResultData' !expId !maxSteps !len !repResType !resData = do
               when delInputs $ deleteCascadeWhere [PrepInputPrepResultData ==. key, PrepInputPeriod >=. curLen + 1]
               inpKeys <- insertMany $ map (PrepInput key . view inputValuePeriod) inputValsList
               insertMany_ $ zipWith (\k v -> PrepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputValsList
-
               measureKeys <- insertMany . map (PrepMeasure key . view measurePeriod) $ measuresList
               insertMany_ $ concat $ zipWith (\k (Measure _ xs) -> map (\(StepResult n mX y) -> PrepResultStep k n mX y) xs) measureKeys measuresList
               return $! results .~ AvailableListOnDemand (countResults', loadPreparationMeasuresWhere key) $ inputValues .~
