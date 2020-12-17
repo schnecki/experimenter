@@ -1,10 +1,10 @@
-# Experimenter
+# Experimenter: Scientific experiments made easy
 
 This package can be used to run experiments and repetitions of these that are then evaluated and a
 report generated. The user can specify parameters, which span a set of experiment instances that are
-automatically run and continuously saved to the database, s.t. they can be resumed on the same or
-other PCs. The design allows to run different experiment instances on different PCs at the same
-time. Thus it efficiently distributes work.
+automatically run and continuously saved to a PostgreSQL database, s.t. they can be resumed on the
+same or other PCs. The design allows to run different experiment instances on different PCs at the
+same time. Thus it efficiently distributes work.
 
 All random generators are repeated for the experiments. Thus, all (evaluation) replications use the
 same standard number generator, Even after a crash and restart of the experiment on a different
