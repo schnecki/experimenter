@@ -213,7 +213,7 @@ mkNamesUntil unit res
 
 
 mkExperimentTable :: Evals a -> (Unit, ExperimentEval a, [EvalResults a]) -> (Int, [(StatsDef a, Table)])
-mkExperimentTable evals (lowestUnit, eval, res) =
+mkExperimentTable _ (lowestUnit, eval, res) =
   let resUnit = map (\rs -> (mkNames rs, unpackUntil lowestUnit rs)) res
       tableRes = map (uncurry (zipWith (mkEvalResult lowestUnit))) resUnit
       tbls = map toTables tableRes
@@ -231,12 +231,11 @@ toTables :: [TableResult] -> Table
 toTables xs = Table (header $ head xs) (concatMap rows xs)
 
 mkEvalResult :: Unit -> [Cell] -> EvalResults a -> TableResult
-mkEvalResult leastUnit name (EvalVector _ unit []) = --TableResult (Row [CellT (unitName leastUnit)] [Row $ [CellT "empty table"]]
-  error "Empty evaluation. Check your eval setup."
-mkEvalResult leastUnit name eval@(EvalVector _ unit vals) =
-  TableResult (Row $ CellT (unitName leastUnit) : map (CellT . tshow) [1 .. length vals]) (map Row (foldl' mkRows [name] rowVals))
+mkEvalResult _ _ (EvalVector _ _ []) = error "Empty evaluation. Check your eval setup."
+mkEvalResult leastUnit' name (EvalVector _ _ vals) =
+  TableResult (Row $ CellT (unitName leastUnit') : map (CellT . tshow) [1 .. length vals]) (map Row (foldl' mkRows [name] rowVals))
   where
-    subVals = map (mkEvalResult leastUnit []) vals
+    subVals = map (mkEvalResult leastUnit' []) vals
     rowVals = map rows subVals
     mkRows :: [[Cell]] -> [Row] -> [[Cell]]
     mkRows accs vs = zipWith (++) accs (map fromRow vs)
@@ -246,23 +245,18 @@ mkEvalResult leastUnit name eval@(EvalVector _ unit vals) =
     unitName UnitExperimentRepetition = "Experiment Repetition:"
     -- unitName (UnitBestExperimentRepetitions bestNr) = "Best " <> tshow bestNr <> " Experiment Repetitions:"
     unitName UnitScalar               = "Value:"
-mkEvalResult leastUnit [] (EvalValue _ u n x y) = TableResult (Row [getXValue x]) [Row [CellD y]]
-  where getXValue (Left x)  = CellT $ tshow x
+mkEvalResult _ [] (EvalValue _ _ _ x y) = TableResult (Row [getXValue x]) [Row [CellD y]]
+  where getXValue (Left v)  = CellT $ tshow v
         getXValue (Right d) = CellD d
-mkEvalResult leastUnit names@(n1:_) (EvalValue _ u n x y) = TableResult (Row [CellEmpty, getXValue x]) [Row [n1, CellD y]]
-  where getXValue (Left x)  = CellT $ tshow x
+mkEvalResult _ (n1:_) (EvalValue _ _ _ x y) = TableResult (Row [CellEmpty, getXValue x]) [Row [n1, CellD y]]
+  where getXValue (Left v)  = CellT $ tshow v
         getXValue (Right d) = CellD d
-mkEvalResult leastUnit [] (EvalReducedValue statsDef u y) = TableResult (Row [CellT $ tshow statsDef]) [Row [CellD y]]
-mkEvalResult leastUnit names@(n:_) (EvalReducedValue statsDef u y) = TableResult (Row [CellEmpty , CellT $ prettyStatsDef statsDef]) [Row [n, CellD y]]
+mkEvalResult _ [] (EvalReducedValue statsDef _ y) = TableResult (Row [CellT $ tshow statsDef]) [Row [CellD y]]
+mkEvalResult _ (n:_) (EvalReducedValue statsDef _ y) = TableResult (Row [CellEmpty , CellT $ prettyStatsDef statsDef]) [Row [n, CellD y]]
 
-
--- paramSetting :: (MonadLogger m) => Evals a -> ExperimentEval a -> LaTeXT m ()
--- paramSetting evals expEval@(ExperimentEval nr _ exp) = do
---   subsection $ "Parameter Setting of Experiment No. " <> raw (tshow nr)
---   maybe "There are no configured parameters!" printTable (paramSettingTable evals expEval)
 
 paramSettingTable :: Evals a -> ExperimentEval a -> Maybe Table
-paramSettingTable evals (ExperimentEval nr _ exp)
+paramSettingTable evals (ExperimentEval _ _ exp)
   | null (exp ^. parameterSetup) = Nothing
   | otherwise = Just $ Table (Row ["Parameter", "Value"]) (concatMap mkRow (exp ^. parameterSetup))
   where

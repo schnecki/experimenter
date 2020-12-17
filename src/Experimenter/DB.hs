@@ -3,7 +3,6 @@ module Experimenter.DB where
 
 
 import           Conduit                      as C
-import           Control.Monad.IO.Unlift      (MonadUnliftIO)
 import           Control.Monad.Logger
 import           Control.Monad.Trans.Reader   (ReaderT)
 import           Data.Char
@@ -39,7 +38,7 @@ runDBWithM runM dbSetting action = runM $ logFun $ withPostgresqlPool (connectio
 -- withPostgresqlPool :: (MonadLogger m, MonadUnliftIO m) => ConnectionString -> Int -> (Pool SqlBackend -> m a) -> m a
 -- runSqlPool :: (MonadUnliftIO m, BackendCompatible SqlBackend backend) => ReaderT backend m a -> Pool backend -> m a
 
-
+-- | Create indices for fast lookups in the DB.
 indexCreation :: (MonadIO m) => ReaderT SqlBackend (NoLoggingT (ResourceT m)) ()
 indexCreation = mapM_ ((\x -> E.rawExecute ("CREATE INDEX IF NOT EXISTS " <> mkName x <> " ON " <> x) []) . mkLowerCase) indices
   where

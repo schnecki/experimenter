@@ -7,15 +7,13 @@ module Experimenter.ConcurrentIO
     , mapConurrentIO
     ) where
 
-import           Control.Concurrent      (forkIO, threadDelay, yield)
-import           Control.Concurrent.MVar
+import           Control.Concurrent     (forkIO, yield)
 import           Control.Concurrent.STM
 import           Control.DeepSeq
-import           Control.Monad           (void)
-import           Control.Monad.IO.Class
+import           Control.Monad          (void)
 import           Data.IORef
-import           Data.Maybe              (fromJust)
-import           System.IO
+import           Data.Maybe             (fromJust)
+
 
 mapConurrentIO :: (NFData b) => Int -> (a -> IO b) -> [a] -> IO [b]
 mapConurrentIO maxNr f xs = do

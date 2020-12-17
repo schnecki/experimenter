@@ -1,5 +1,8 @@
 # Experimenter: Scientific experiments made easy
 
+[![Build Status](https://travis-ci.com/schnecki/experimenter.svg?branch=master)](https://travis-ci.com/schnecki/experimenter)
+
+
 This package can be used to run experiments and repetitions of these that are then evaluated and a
 report generated. The user can specify parameters, which span a set of experiment instances that are
 automatically run and continuously saved to a PostgreSQL database, s.t. they can be resumed on the
@@ -77,6 +80,11 @@ The experiment can then be configured like this:
         , _evaluationMaxStepsBetweenSaves = Just 100000             -- ^ Specify after how many steps the data will be saved. `Nothing` adaptively chooses a sensible value.
         }
 
+If these settings are changed the library only deletes data when it is necessary. For instance
+increasing the replications or repetitions of the experiment will not delete any data. When however,
+the preparation steps are changed, all consequitive data, including warm-up and all evaluations, are
+deleted and rerun.
+
 See [Dice.hs](examples/Dice.hs) for a full implementation, where the sides of the dices are variable
 over the experiment. An example report of this experiment can be found in the same folder.
 
@@ -88,6 +96,7 @@ over the experiment. An example report of this experiment can be found in the sa
 - Html Results?
 - Statistical measures for reports
 - More test for the test suite
+- CSV output: average over experiments not implemented
 
 # Help
 

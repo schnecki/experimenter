@@ -7,7 +7,6 @@ module Experimenter.Availability.Type where
 import           Control.DeepSeq
 import           Data.Conduit
 import           Database.Esqueleto  as E
-import           Database.Persist
 import           Experimenter.Models
 
 import           Experimenter.DB
@@ -60,4 +59,3 @@ instance (Show b) => Show (AvailabilityList m b) where
 instance (NFData b) => NFData (AvailabilityList m b) where
   rnf (AvailableList b _)            = rnf b
   rnf (AvailableListOnDemand (nr,_)) = rnf nr
-

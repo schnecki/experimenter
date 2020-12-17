@@ -7,21 +7,15 @@
 module Experimenter.Eval.Table where
 
 import           Control.DeepSeq
-import           Control.Monad                (forM_)
+import           Control.Monad         (forM_)
 import           Control.Monad.Logger
-import           Data.ByteString              (ByteString)
-import           Data.List                    (foldl')
-import qualified Data.Text                    as T
+import           Data.List             (foldl')
+import qualified Data.Text             as T
 import           GHC.Generics
 
 import           Text.LaTeX
 import           Text.LaTeX.Base.Class
-import           Text.LaTeX.Packages.AMSMath
-import           Text.LaTeX.Packages.Inputenc
 import           Text.Printf
-
-import           Experimenter.Util
-
 
 data Table =
   Table !Row
@@ -55,18 +49,12 @@ dereferLatex = protectText . T.replace "{" "\\{" . T.replace "}" "\\}" . T.repla
 
 
 printTable :: (MonadLogger m) => Table -> LaTeXT m ()
-printTable tbl@(Table header _) = forM_ (splitTable tbl) printTable'
+printTable tbl@Table{} = forM_ (splitTable tbl) printTable'
   where
     printTable' (Table headerInput rowsInput) =
       center $
       tabular Nothing (replicate colLen LeftColumn) $ hline <> printRow textbf header <> hline <> mconcat (map (printRow id) rows) <> hline
       where
-        maxColLens = map (map cellLength . fromRow) (header : rows)
-        fromRow (Row []) = [CellT ""]
-        fromRow (Row xs) = xs
-        cellLength (CellT txt) = T.length txt
-        cellLength (CellD dbl) = T.length (printDouble dbl)
-        cellLength (CellL l)   = 0
         printRow :: (LaTeXC l) => (l -> l) -> Row -> l
         printRow _ (Row []) = mempty
         printRow f (Row (c:cs)) = foldl' (&) (f $ printCell c) (map (f . printCell) cs) <> lnbk
@@ -88,8 +76,8 @@ splitTable tbl@(Table headerInput rowsInput)
   where
     colLen = maximum $ map cellCount (headerInput : rowsInput)
     cellCount (Row xs) = length xs
-    takeCols n (Table (Row hs) rs) = Table (Row $ take n hs) (map (\(Row rs) -> Row (take n rs)) rs)
-    dropCols n (Table (Row hs) rs) = Table (Row $ take 1 hs ++ drop n hs) (map (\(Row rs) -> Row (take 1 rs ++ drop n rs)) rs)
+    takeCols n (Table (Row hs) rs) = Table (Row $ take n hs) (map (\(Row r) -> Row (take n r)) rs)
+    dropCols n (Table (Row hs) rs) = Table (Row $ take 1 hs ++ drop n hs) (map (\(Row r) -> Row (take 1 r ++ drop n r)) rs)
 
 maxColLen :: Int
 maxColLen = 11
@@ -99,4 +87,3 @@ commas = 3
 
 printDouble :: Double -> T.Text
 printDouble x = T.pack $ printf ("%." ++ show commas ++ "f") x
-

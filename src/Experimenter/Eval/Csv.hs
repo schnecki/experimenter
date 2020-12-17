@@ -13,13 +13,10 @@ import           Conduit                      as C
 import           Control.Lens                 hiding (Cons, Over)
 import           Control.Monad.Logger
 import           Control.Monad.Reader
-import           Data.List                    (foldl')
 import           Data.Maybe                   (fromMaybe)
 import qualified Data.Text                    as T
-import           Data.Text.Encoding
 import           Data.Time.Clock              (diffUTCTime, getCurrentTime)
 import qualified Database.Esqueleto           as E
-import           Database.Persist.Postgresql  (SqlBackend)
 import           System.Directory
 import           System.FilePath.Posix
 import           System.IO
@@ -28,10 +25,8 @@ import           Experimenter.DatabaseSetting
 import           Experimenter.DB
 import           Experimenter.Eval.Util
 import           Experimenter.Experiment      (Phase (..))
-import           Experimenter.Measure
 import           Experimenter.Models
 import           Experimenter.Result.Type
-import           Experimenter.StepResult
 import           Experimenter.Util
 
 
@@ -54,27 +49,37 @@ smoothAndWriteFileExp exps smoothing measureName exp = do
        mapM_
          (smoothAndWriteFileResultData exps (namePrefix expNr PreparationPhase (None (expRes ^. repetitionNumber) Nothing)) smoothing measureName . return)
          (expRes ^.. preparationResults . traversed)
-       -- mapM_
-       --   (\replRes -> do
-       --      mapM_
-       --        (\repRes ->
-       --           smoothAndWriteFileResultData exps (namePrefix expNr WarmUpPhase (None (expRes ^. repetitionNumber) (Just $ replRes ^. replicationNumber))) smoothing measureName repRes)
-       --        (replRes ^.. warmUpResults . traversed)
-       --      mapM_
-       --        (\repRes ->
-       --           smoothAndWriteFileResultData exps (namePrefix expNr EvaluationPhase (None (expRes ^. repetitionNumber) (Just $ replRes ^. replicationNumber))) smoothing measureName repRes)
-       --        (replRes ^.. evalResults . traversed))
-         -- (expRes ^. evaluationResults)
-    )
+       -- All experiment evaluations runs
+       mapM_
+         (\(replRes :: ReplicationResult a) -> do
+            mapM_
+              (\(repRes :: ResultData a) ->
+                 smoothAndWriteFileResultData
+                   exps
+                   (namePrefix expNr WarmUpPhase (None (expRes ^. repetitionNumber) (Just $ replRes ^. replicationNumber)))
+                   smoothing
+                   measureName
+                   [repRes])
+              (replRes ^.. warmUpResults . traversed)
+            mapM_
+              (\(repRes :: ResultData a) ->
+                 smoothAndWriteFileResultData
+                   exps
+                   (namePrefix expNr EvaluationPhase (None (expRes ^. repetitionNumber) (Just $ replRes ^. replicationNumber)))
+                   smoothing
+                   measureName
+                   [repRes])
+              (replRes ^.. evalResults . traversed))
+         (expRes ^. evaluationResults))
     (exp ^.. experimentResults . traversed)
   -- avg over experiments
-  when (length (exp ^. experimentResults) > 1) $ do
-    $(logDebug) $ "Processing aggregated CSV for experiment  number " <> tshow (exp ^. experimentNumber)
-    mapM_
-      (\expRes -> do
-          undefined
-          ) (exp ^. experimentResults)
-
+  -- when (length (exp ^. experimentResults) > 1) $ do
+  --   $(logDebug) $ "Processing aggregated CSV for experiment  number " <> tshow (exp ^. experimentNumber)
+  --   mapM_
+  --     (\expRes -> do
+  --         error "Averages over experiment results are currently not supported. Please feel free to submit a merge request."
+  --         print expRes
+  --         ) (exp ^. experimentResults)
   where
     expNr = exp ^. experimentNumber
 
@@ -137,8 +142,26 @@ smoothAndWriteFileResultData exps prefix smoothing measureName resData = do
               E.orderBy [E.asc (measure E.^. PrepMeasurePeriod)]
               E.groupBy (measure E.^. PrepMeasurePeriod)
               return (measure E.^. PrepMeasurePeriod, E.avg_ $ result E.^. PrepResultStepYValue)
-          ResultDataWarmUpKeys key -> undefined
-          ResultDataRepKeys key -> undefined
+          ResultDataWarmUpKeys xs ->
+            E.from $ \(measure `E.InnerJoin` result) -> do
+              E.on (measure E.^. WarmUpMeasureId E.==. result E.^. WarmUpResultStepMeasure)
+              case xs of
+                [x] -> E.where_ (measure E.^. WarmUpMeasureRepResult E.==. E.val x)
+                _ -> E.where_ (measure E.^. WarmUpMeasureRepResult `E.in_` E.valList xs)
+              E.where_ (result E.^. WarmUpResultStepName E.==. E.val measureName)
+              E.orderBy [E.asc (measure E.^. WarmUpMeasurePeriod)]
+              E.groupBy (measure E.^. WarmUpMeasurePeriod)
+              return (measure E.^. WarmUpMeasurePeriod, E.avg_ $ result E.^. WarmUpResultStepYValue)
+          ResultDataRepKeys xs ->
+            E.from $ \(measure `E.InnerJoin` result) -> do
+              E.on (measure E.^. RepMeasureId E.==. result E.^. RepResultStepMeasure)
+              case xs of
+                [x] -> E.where_ (measure E.^. RepMeasureRepResult E.==. E.val x)
+                _   -> E.where_ (measure E.^. RepMeasureRepResult `E.in_` E.valList xs)
+              E.where_ (result E.^. RepResultStepName E.==. E.val measureName)
+              E.orderBy [E.asc (measure E.^. RepMeasurePeriod)]
+              E.groupBy (measure E.^. RepMeasurePeriod)
+              return (measure E.^. RepMeasurePeriod, E.avg_ $ result E.^. RepResultStepYValue)
       keys = map (toKeys . view resultDataKey) resData
       toKeys (ResultDataRep key)    = ResultDataRepKeys [key]
       toKeys (ResultDataWarmUp key) = ResultDataWarmUpKeys [key]

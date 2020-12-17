@@ -16,31 +16,16 @@ module Experimenter.Eval.Ops
     ) where
 
 import           Conduit                      as C
-import           Control.Concurrent.MVar
 import           Control.DeepSeq
 import           Control.Lens                 hiding (Cons, Over)
-import           Control.Monad.IO.Class       (liftIO)
-import           Control.Monad.Logger
 import           Control.Monad.Reader
-import           Control.Monad.Trans.Resource
-import           Data.Conduit
 import qualified Data.Conduit.List            as CL
-import           Data.Function                (on)
-import           Data.List                    (find, sortBy)
-import qualified Data.Map.Strict              as M
+import           Data.List                    (find)
 import           Data.Maybe                   (fromMaybe, isJust)
-import           Data.Serialize               as S
 import qualified Data.Text                    as T
 import qualified Data.Text.Encoding           as E
-import           Data.Time                    (addUTCTime, getCurrentTime)
 import qualified Database.Esqueleto           as E
-import           Database.Persist.Postgresql  as DB (SqlBackend, delete, get, insert,
-                                                     runSqlConn, selectKeysList,
-                                                     withPostgresqlConn, (<=.))
-import           Database.Persist.Sql         (fromSqlKey, toSqlKey)
 import           Prelude                      hiding (exp)
-import           System.IO
-import           System.IO.Unsafe             (unsafePerformIO)
 
 
 import           Experimenter.Availability
@@ -56,8 +41,6 @@ import           Experimenter.Models
 import           Experimenter.Result.Query
 import           Experimenter.Result.Type
 import           Experimenter.StepResult
-
-import           Debug.Trace
 
 
 genEvalsIO :: (ExperimentDef a, IO ~ ExpM a) => DatabaseSetting -> Experiments a -> [StatsDef a] -> IO (Evals a)
@@ -81,13 +64,13 @@ mkEvals evals e = do
   return $ force $ ExperimentEval (e ^. experimentNumber) xs (e {_experimentResults = []})
 
 
--- mapMRnf :: (NFData b, Monad m) => (a -> m b) -> [a] -> m [b]
--- mapMRnf _ [] = return []
--- mapMRnf f (x:xs) = do
---   !(force -> x') <- f x
---   (x' :) <$!> mapMRnf f xs
 mapMRnf :: (NFData b, Monad m) => (a -> m b) -> [a] -> m [b]
-mapMRnf = mapM
+mapMRnf _ [] = return []
+mapMRnf f (x:xs) = do
+  !(force -> x') <- f x
+  (x' :) <$!> mapMRnf f xs
+-- mapMRnf :: (NFData b, Monad m) => (a -> m b) -> [a] -> m [b]
+-- mapMRnf = mapM
 
 
 genExperiment :: (ExperimentDef a) => Experiment a -> StatsDef a -> DB (ExpM a) (EvalResults a)
@@ -177,9 +160,9 @@ genResultData exp eval resData =
         ResultDataRep k    -> loadReparationAggregateWhere k agg (whereName name)
     whereName name =
       case resData ^. resultDataKey of
-        ResultDataPrep k -> PrepMeasureWhere $ \meas resStep -> E.where_ (resStep E.^. PrepResultStepName E.==. E.val (E.decodeUtf8 name))
-        ResultDataWarmUp k -> WarmUpMeasureWhere $ \meas resStep -> E.where_ (resStep E.^. WarmUpResultStepName E.==. E.val (E.decodeUtf8 name))
-        ResultDataRep k -> RepMeasureWhere $ \meas resStep -> E.where_ (resStep E.^. RepResultStepName E.==. E.val (E.decodeUtf8 name))
+        ResultDataPrep{} -> PrepMeasureWhere $ \_ resStep -> E.where_ (resStep E.^. PrepResultStepName E.==. E.val (E.decodeUtf8 name))
+        ResultDataWarmUp{} -> WarmUpMeasureWhere $ \_ resStep -> E.where_ (resStep E.^. WarmUpResultStepName E.==. E.val (E.decodeUtf8 name))
+        ResultDataRep{} -> RepMeasureWhere $ \_ resStep -> E.where_ (resStep E.^. RepResultStepName E.==. E.val (E.decodeUtf8 name))
 
 
 -- cacheMVar :: MVar (M.Map (Of a, ResultDataKey) (EvalResults a))
@@ -216,18 +199,18 @@ evalOf exp eval resData =
     Stats def -- alter experiment and restart evaluation
       | maybe False (> OverPeriods) (getOver def) -> do
         error "OverExperimentRepetitions and OverReplications have to be the two outermost evaluations or not present"
-        let k = resData ^. resultDataKey
-            isK = (== k)
-            check Nothing = Nothing
-            check (Just rD)
-              | isK (rD ^. resultDataKey) = Just rD
-              | otherwise = Nothing
-            fil lns = over lns check
-        let exp' = over (experimentResults . traversed) (over (evaluationResults . traversed) (fil warmUpResults . fil evalResults) . over preparationResults check) exp
-            allResData x = x ^.. evaluationResults . traversed . evalResults . traversed ++ x ^.. evaluationResults . traversed . warmUpResults . traversed ++ x ^.. preparationResults . traversed
-            expFiltered = over experimentResults (filter (not . null . allResData)) exp'
-        liftIO $ putStrLn $ "Filtered: " ++ show (length $ concatMap allResData (expFiltered ^. experimentResults))
-        genExperiment expFiltered def
+        -- let k = resData ^. resultDataKey
+        --     isK = (== k)
+        --     check Nothing = Nothing
+        --     check (Just rD)
+        --       | isK (rD ^. resultDataKey) = Just rD
+        --       | otherwise = Nothing
+        --     fil lns = over lns check
+        -- let exp' = over (experimentResults . traversed) (over (evaluationResults . traversed) (fil warmUpResults . fil evalResults) . over preparationResults check) exp
+        --     allResData x = x ^.. evaluationResults . traversed . evalResults . traversed ++ x ^.. evaluationResults . traversed . warmUpResults . traversed ++ x ^.. preparationResults . traversed
+        --     expFiltered = over experimentResults (filter (not . null . allResData)) exp'
+        -- liftIO $ putStrLn $ "Filtered: " ++ show (length $ concatMap allResData (expFiltered ^. experimentResults))
+        -- genExperiment expFiltered def
     Stats def -> genResultData exp def resData
     Div eval1 eval2 -> reduceBinaryOf eval <$!> evalOf exp eval1 resData <*> evalOf exp eval2 resData
     Add eval1 eval2 -> reduceBinaryOf eval <$!> evalOf exp eval1 resData <*> evalOf exp eval2 resData
@@ -254,9 +237,9 @@ evalOf exp eval resData =
     whereName = whereName' (return ())
     whereName' add name =
       case resData ^. resultDataKey of
-        ResultDataPrep k -> PrepMeasureWhere $ \meas resStep -> E.where_ (resStep E.^. PrepResultStepName E.==. E.val (E.decodeUtf8 name)) >> add -- meas resStep
-        ResultDataWarmUp k -> WarmUpMeasureWhere $ \meas resStep -> E.where_ (resStep E.^. WarmUpResultStepName E.==. E.val (E.decodeUtf8 name)) >> add -- meas resStep
-        ResultDataRep k -> RepMeasureWhere $ \meas resStep -> E.where_ (resStep E.^. RepResultStepName E.==. E.val (E.decodeUtf8 name)) >> add -- meas resStep
+        ResultDataPrep _ -> PrepMeasureWhere $ \_ resStep -> E.where_ (resStep E.^. PrepResultStepName E.==. E.val (E.decodeUtf8 name)) >> add
+        ResultDataWarmUp _ -> WarmUpMeasureWhere $ \_ resStep -> E.where_ (resStep E.^. WarmUpResultStepName E.==. E.val (E.decodeUtf8 name)) >> add
+        ResultDataRep _ -> RepMeasureWhere $ \_ resStep -> E.where_ (resStep E.^. RepResultStepName E.==. E.val (E.decodeUtf8 name)) >> add
     -- aggregate add name agg =
     --     case resData ^. resultDataKey of
     --       ResultDataPrep k   -> loadPreparationAggregateWhere k agg (whereName' add name)

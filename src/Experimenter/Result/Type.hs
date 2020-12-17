@@ -58,7 +58,7 @@ data ResultData a = ResultData
 makeLenses ''ResultData
 
 instance (ExperimentDef a) => NFData (ResultData a) where
-  rnf (ResultData !k st end !g !endG !inpVal !res stSt endSt !stInpSt !endInpSt) = rnf k `seq` rnf st `seq` rnf end `seq` rnf inpVal `seq` rnf res `seq` rnf endSt -- `seq` rnf stSt
+  rnf (ResultData !k st end !_ !_ !inpVal !res _ endSt !_ !_) = rnf k `seq` rnf st `seq` rnf end `seq` rnf inpVal `seq` rnf res `seq` rnf endSt -- `seq` rnf stSt
 
 data ReplicationResult a = ReplicationResult
   { _replicationResultKey :: !(Key RepResult)
@@ -69,7 +69,7 @@ data ReplicationResult a = ReplicationResult
 makeLenses ''ReplicationResult
 
 instance (ExperimentDef a) => NFData (ReplicationResult a) where
-  rnf (ReplicationResult !k nr wm ev) = rnf nr `seq` rnf1 wm `seq` rnf1 ev
+  rnf (ReplicationResult !_ nr wm ev) = rnf nr `seq` rnf1 wm `seq` rnf1 ev
 
 data ExperimentResult a = ExperimentResult
   { _experimentResultKey :: !(Key ExpResult)
@@ -93,7 +93,7 @@ data Experiment a = Experiment
 makeLenses ''Experiment
 
 instance (ExperimentDef a) => NFData (Experiment a) where
-  rnf (Experiment !k nr stT endT set res) = rnf nr `seq` rnf stT `seq` rnf1 endT `seq` rnf1 set `seq` rnf1 res
+  rnf (Experiment !_ nr stT endT setup res) = rnf nr `seq` rnf stT `seq` rnf1 endT `seq` rnf1 setup `seq` rnf1 res
 
 
 data Experiments a = Experiments
@@ -111,7 +111,7 @@ data Experiments a = Experiments
 makeLenses ''Experiments
 
 instance (ExperimentDef a) => NFData (Experiments a) where
-  rnf (Experiments !k name ~stT !endT !set !param !infoParams !initSt !initInp exps) =
+  rnf (Experiments !_ name ~stT !endT !_ !param !infoParams !initSt !initInp exps) =
     rnf name `seq` rnf stT `seq` rnf endT `seq` map rwhnf param `seq` rnf1 infoParams `seq` rnf initSt `seq` rnf initInp `seq` rnf1 exps
 
 -- instance Serialize GenIO where

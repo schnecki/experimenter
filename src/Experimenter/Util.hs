@@ -1,9 +1,6 @@
 module Experimenter.Util where
 
-import           Control.Monad
-import qualified Data.Text         as T
-import qualified Data.Vector       as V
-import           System.Random.MWC
+import qualified Data.Text as T
 
 
 tshow :: (Show a) => a -> T.Text
@@ -17,5 +14,3 @@ tread = read . T.unpack
 fromEither :: b -> Either a b -> b
 fromEither def Left{}  = def
 fromEither _ (Right b) = b
-
-

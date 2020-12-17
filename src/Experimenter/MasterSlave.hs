@@ -17,11 +17,7 @@ module Experimenter.MasterSlave
 
 import           Control.Lens
 import           Control.Monad.IO.Class
-import           Control.Monad.Logger         (LoggingT, MonadLogger, NoLoggingT,
-                                               WriterLoggingT, defaultLoc, filterLogger,
-                                               logDebug, logError, logInfo,
-                                               runFileLoggingT, runLoggingT, runNoLoggingT,
-                                               runStderrLoggingT, runStdoutLoggingT)
+import           Control.Monad.Logger         (NoLoggingT, logInfo, runNoLoggingT)
 import           Data.IORef
 
 import           Control.Concurrent           (forkIO, threadDelay)
@@ -32,12 +28,10 @@ import           Data.Time                    (UTCTime, diffUTCTime, getCurrentT
 import           Database.Persist.Postgresql
 import           Network.HostName
 import           System.Posix.Process
-import           System.Process
 
 
 import           Experimenter.DatabaseSetting
 import           Experimenter.DB
-import           Experimenter.Experiment
 import           Experimenter.Models
 import           Experimenter.Result
 import           Experimenter.Util
@@ -93,4 +87,3 @@ waitForSlaves exps = do
               liftIO $ threadDelay (1000000 * keepAliveTimeout)
               waitForSlaves' notSelf expIds
     printInfoSlave (ExpExecutionLock _ host pid _) = $(logInfo) $ "Slave from host " <> tshow host <> " with process ID " <> tshow pid
-

@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 {-# LANGUAGE BangPatterns        #-}
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE GADTs               #-}
@@ -37,9 +36,7 @@ module Experimenter.Result.Query
     , setResDataEndState
     ) where
 
-
 import           Conduit                     as C
-import           Control.DeepSeq             (force)
 import           Control.DeepSeq
 import           Control.Lens                (view)
 import           Control.Monad.Logger
@@ -62,6 +59,7 @@ import qualified Database.Esqueleto          as E
 import           Database.Persist            as P
 import           Database.Persist.Postgresql (SqlBackend)
 import           Database.Persist.Sql        (transactionSave)
+import           Prelude                     hiding (exp)
 import           System.Random.MWC
 
 import           Experimenter.Availability
@@ -96,7 +94,7 @@ loadExperimentsResults setup initInpSt initSt key =
     exps <- lift (L.sortBy (compare `on` view experimentNumber) <$> loadExperimentList key)
     expInfoParams <- lift (map entityVal <$> selectList [ExpsInfoParamExps ==. key] [])
     eSetup <- lift (fromMaybe (error "Setup not found. Your DB is corrupted!") <$> getBy (UniqueExpsSetup key))
-    infoParams <- lift (mapM fromInfoParam expInfoParams)
+    infoParms <- lift (mapM fromInfoParam expInfoParams)
     return $
       Experiments
         key
@@ -105,7 +103,7 @@ loadExperimentsResults setup initInpSt initSt key =
         (view expsEndTime e)
         (entityVal eSetup)
         (parameters initSt)
-        (concat infoParams)
+        (concat infoParms)
         initSt
         initInpSt
         exps
@@ -116,9 +114,9 @@ loadExperimentsResults setup initInpSt initSt key =
         Nothing -> do
           $(logDebug) $ "Could not find parameter " <> n <> " in settings while loading values from the DB. It will not be reported therefore!"
           return []
-        Just (ExperimentInfoParameter _ v) -> return [ExperimentInfoParameter n (fromEither v $ S.runGet S.get bs)]
-    fromEither _ (Right x) = x
-    fromEither d (Left _)  = d
+        Just (ExperimentInfoParameter _ v) -> return [ExperimentInfoParameter n (fromEitherDef v $ S.runGet S.get bs)]
+    fromEitherDef _ (Right x) = x
+    fromEitherDef d (Left _)  = d
 
 
 loadExperiments :: (ExperimentDef a) => ExperimentSetting -> InputState a -> a -> DB (ExpM a) (Experiments a)
@@ -157,7 +155,7 @@ deserialise n bs =
   let !res = runGet S.get bs
    in case res of
         Left err -> do
-          -- $(logError) $ "Could not deserialise " <> n <> "! Discarding saved experiment result. Data length: " <> tshow (B.length bs) <> ". Error Message: " <> tshow err
+          $(logError) $ "Could not deserialise " <> n <> "! Discarding saved experiment result. Data length: " <> tshow (B.length bs) <> ". Error Message: " <> tshow err
           return Nothing
         Right r -> return $! Just r
 
@@ -173,10 +171,10 @@ loadResDataEndState ::
   => Key Exp
   -> EndStateType
   -> DB (ExpM a) (Maybe a)
-loadResDataEndState expId endState = do
+loadResDataEndState expId endSt = do
   !parts <-
     fmap force $!
-    case endState of
+    case endSt of
       EndStatePrep k -> fmap (view prepEndStatePartData . entityVal) <$> selectList [PrepEndStatePartResultData ==. k] [Asc PrepEndStatePartNumber]
       EndStateWarmUp k -> fmap (view warmUpEndStatePartData . entityVal) <$> selectList [WarmUpEndStatePartResultData ==. k] [Asc WarmUpEndStatePartNumber]
       EndStateRep k -> fmap (view repEndStatePartData . entityVal) <$> selectList [RepEndStatePartResultData ==. k] [Asc RepEndStatePartNumber]
@@ -189,10 +187,10 @@ loadResDataEndState expId endState = do
   force <$!> traverse (setParams expId) res
 
 loadResDataStartState :: (ExperimentDef a) => Key Exp -> StartStateType -> DB (ExpM a) a
-loadResDataStartState expId startState = do
+loadResDataStartState expId startSt = do
   !parts <-
     fmap force $!
-    case startState of
+    case startSt of
       StartStatePrep k -> fmap (view prepStartStatePartData . entityVal) <$> selectList [PrepStartStatePartResultData ==. k] [Asc PrepStartStatePartNumber]
       StartStateWarmUp k -> fmap (view warmUpStartStatePartData . entityVal) <$> selectList [WarmUpStartStatePartResultData ==. k] [Asc WarmUpStartStatePartNumber]
       StartStateRep k -> fmap (view repStartStatePartData . entityVal) <$> selectList [RepStartStatePartResultData ==. k] [Asc RepStartStatePartNumber]
@@ -251,18 +249,18 @@ setParams :: (MonadIO m, MonadLogger m, ExperimentDef a) => Key Exp -> a -> Read
 setParams expId st = do
   paramSettings <- loadParamSetup expId
   foldM setParams' st paramSettings
-  where setParams' !st !(ParameterSetting n bs drp _) =
-           case L.find (\(ParameterSetup name _ _ _ _ _ _) -> name == n) parameterSetup of
+  where setParams' !state !(ParameterSetting n bs _ _) =
+           case L.find (\(ParameterSetup name _ _ _ _ _ _) -> name == n) paramSetup of
              Nothing -> do
                $(logError) $ "Could not find parameter with name " <> n <> " in the current parameter setting. Thus it cannot be modified!"
-               return st
-             Just (ParameterSetup _ setter _ _ _ drp _) ->
+               return state
+             Just (ParameterSetup _ setter _ _ _ _ _) ->
                case runGet S.get bs of
                  Left err -> error $ "Could not read value of parameter " <> T.unpack n <> ". Aborting! Serializtion error was: " ++ err
                  Right val -> do
                    $(logInfo) $ "Loaded parameter '" <> n <> "' value: " <> tshow val
-                   return $ setter val st
-        parameterSetup = parameters st
+                   return $ setter val state
+        paramSetup = parameters st
 
 loadExperimentResult :: forall a . (ExperimentDef a) => Entity ExpResult -> DB (ExpM a) (ExperimentResult a)
 loadExperimentResult (Entity k (ExpResult expId rep mPrepResDataId)) = do
@@ -277,13 +275,13 @@ loadExperimentResult (Entity k (ExpResult expId rep mPrepResDataId)) = do
         !mEndInpSt <- mDeserialise "prep end input state" endInpStBS
         !inpCount <- loadPreparationInputCount resDataKey
         !resultCount <- loadPrepartionMeasuresCount resDataKey
-        !startRandGen <- toRandGen startRandGenBS
-        !endRandGen <- maybe (return Nothing) (fmap Just . toRandGen) endRandGenBS
+        !startRandG <- toRandGen startRandGenBS
+        !endRandG <- maybe (return Nothing) (fmap Just . toRandGen) endRandGenBS
         let !inputVals = AvailableListOnDemand (inpCount, loadPreparationInputWhere resDataKey)
-        let !results = AvailableListOnDemand (resultCount, loadPreparationMeasuresWhere resDataKey)
-        return $!! ResultData (ResultDataPrep resDataKey) startT endT startRandGen endRandGen inputVals results startSt endSt <$> mStartInpSt <*> mEndInpSt
-  !evalResults <- loadReplicationResults expId k
-  return $!! ExperimentResult k rep prepRes evalResults
+        let !res = AvailableListOnDemand (resultCount, loadPreparationMeasuresWhere resDataKey)
+        return $!! ResultData (ResultDataPrep resDataKey) startT endT startRandG endRandG inputVals res startSt endSt <$> mStartInpSt <*> mEndInpSt
+  !evalRes <- loadReplicationResults expId k
+  return $!! ExperimentResult k rep prepRes evalRes
 
 
 serialiseSeed :: Seed -> ByteString
@@ -567,7 +565,7 @@ getOrCreateExps setup initInpSt initSt = do
       (\(Entity _ (Exps _ _ _ s iS)) -> do
          serSt <- lift $ lift $ lift $ sequence $ deserialisable <$> runGet S.get s
          let other = (,) <$> serSt <*> runGet S.get iS
-         when (isLeft other) $ $(logInfo) $ "Could not deserialise experiment with same name"
+         when (isLeft other) $ $(logInfo) "Could not deserialise experiment with same name"
          return $ fromEither False (equalExperiments (initSt, initInpSt) <$> other))
       expsList'
   when (not (null expsList') && null exps) $ $(logInfo) "Found experiments with same name, but the are different or not deserialisable!"
@@ -580,7 +578,7 @@ getOrCreateExps setup initInpSt initSt = do
       time <- liftIO getCurrentTime
       !serInitSt <- lift $ lift $ lift $ serialisable initSt
       eExp <- insertEntity $ Exps name time Nothing (runPut $ put serInitSt) (runPut $ put initInpSt)
-      void $ transactionSave
+      void transactionSave
       void $ insert $ mkExpSetup eExp
       mapM_ (insertInfoParam (entityKey eExp)) infoParams
       mapM_ (insertParam (entityKey eExp)) (parameters initSt)

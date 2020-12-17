@@ -4,9 +4,9 @@ module Experimenter.Parameter.Query
     ( queryParamSettings
     ) where
 
-
 import           Control.Monad.Reader
 import           Database.Esqueleto
+import           Prelude              hiding (exp)
 
 import           Experimenter.Models
 
@@ -19,5 +19,3 @@ queryParamSettings kExp =
     where_ (exp ^. ExpId ==. val kExp)
     orderBy [asc (exp ^. ExpNumber)]
     return (exp, paramSet)
-
-

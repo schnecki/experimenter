@@ -64,6 +64,8 @@ library:
   source-dirs: src
   ghc-options:
     -Wall
+    -Werror
+    -Wno-name-shadowing
     -Wcompat
     -Wincomplete-record-updates
     -Wincomplete-uni-patterns

@@ -8,21 +8,18 @@
 module Experimenter.Eval.Type where
 
 import           Control.DeepSeq
-import           Control.Lens                hiding (Over)
-import           Data.ByteString             (ByteString)
+import           Control.Lens              hiding (Over)
+import           Data.ByteString           (ByteString)
 import           Data.Serialize
-import qualified Data.Text                   as T
-import qualified Data.Text.Encoding          as E
-import           Database.Persist.Postgresql hiding (Add)
+import qualified Data.Text                 as T
+import qualified Data.Text.Encoding        as E
 import           GHC.Generics
-import           Prelude                     hiding (sum)
+import           Prelude                   hiding (sum)
 
 
 import           Experimenter.Availability
-import           Experimenter.DB
-import           Experimenter.Models
-import           Experimenter.Result.Type    hiding (Experiments)
-import qualified Experimenter.Result.Type    as R
+import           Experimenter.Result.Type  hiding (Experiments)
+import qualified Experimenter.Result.Type  as R
 
 -- | Over datatype to reduce data vectors.
 

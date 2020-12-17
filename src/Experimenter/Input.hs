@@ -9,7 +9,6 @@ module Experimenter.Input where
 
 import           Control.DeepSeq
 import           Control.Lens
-import           GHC.Generics
 
 import           Experimenter.Experiment
 
