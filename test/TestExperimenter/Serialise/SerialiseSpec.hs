@@ -62,6 +62,5 @@ instance ExperimentDef St where
   type InputValue St = ()
   type InputState St = ()
   generateInput _ _ _ _ = return ((),())
-  runStep (St x y) _ _ = return ([], St x y)
+  runStep _ (St x y) _ _ = return ([], St x y)
   parameters _ = []
-
