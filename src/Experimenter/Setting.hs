@@ -30,7 +30,8 @@ type MkExperimentSetting a = a -> ExperimentSetting
 
 data ExperimentSetting = ExperimentSetting
   { _experimentBaseName             :: !T.Text                    -- ^ Base name of experiment.
-  , _experimentInfoParameters       :: ![ExperimentInfoParameter] -- ^ List of Parameters defining the experiment. Adding more information does not effect equality.
+  , _experimentInfoParameters       :: ![ExperimentInfoParameter] -- ^ List of information parameters defining the experiment. Adding more information does not effect equality. Thus, this is only used
+                                                                  -- as information on the report.
   , _experimentRepetitions          :: !Int                       -- ^ Repetitions of each experiment (>=1).
   , _preparationSteps               :: !Int                       -- ^ Preparation phase length (e.g. learning phase) (>=0).
   , _evaluationWarmUpSteps          :: !Int                       -- ^ Warm up phase length before each evaluation of each experiment (>=0).

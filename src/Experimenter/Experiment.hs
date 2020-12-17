@@ -29,36 +29,33 @@ data Phase
   | EvaluationPhase
   deriving (Eq, Ord, Show, Enum)
 
-
+-- | Definition of the Experiment.
 class (Monad (ExpM a), MonadUnliftIO (ExpM a), NFData a, NFData (InputState a), NFData (InputValue a), Serialize (InputValue a), Serialize (InputState a), Serialize (Serializable a)) => ExperimentDef a where
 
-  -- | Monad to run experiments in.
+  -- | Monad to run experiments in. In most cases you want this to be `IO`.
   type ExpM a :: (Type -> Type)
 
   -- | Type that is used to serialize the current state.
   type Serializable a :: Type
 
-  -- | Function to convert to a serializable object
-  serialisable :: a -> ExpM a (Serializable a)
-
-  -- | Function to convert from a serializable object
-  deserialisable :: Serializable a -> ExpM a a
-
-
   -- | Type of input values to the experiment.
-  type InputValue a :: Type        -- ^ The input to the system for running a step.
-  type InputState a :: Type        -- ^ Can be used to save a information from one call to `generateInput` to the next.
+  type InputValue a :: Type        -- ^ The input to the system for running a step. Set to () if unused.
+  type InputState a :: Type        -- ^ Can be used to save a information from one call to `generateInput` to the next. Set to () if unused.
 
 
   -- | Generate some input values and possibly modify state. This function can be used to change the state. It is called
   -- before `runStep` and its output is used to call `runStep`.
   generateInput :: GenIO -> a -> InputState a -> Period -> (ExpM a) (InputValue a, InputState a)
+  default generateInput :: (InputValue a ~ (), InputState a ~ ()) => GenIO -> a -> InputState a -> Period -> (ExpM a) (InputValue a, InputState a)
+  generateInput _ _ _ _ = return ((), ())
 
   -- | Run a step of the environment and return new state and result.
   runStep :: Phase -> a -> InputValue a -> Period -> (ExpM a) ([StepResult], a)
 
-  -- | Provides the parameter setting.
+  -- | Provides the parameter setting. Parameters are used to design the experiment instances, e.g. the variants that will be run.
   parameters :: a -> [ParameterSetup a]
+  default parameters :: a -> [ParameterSetup a]
+  parameters _ = []
 
   -- | This function defines how to find experiments that can be resumed. Note that the experiments name and experiment
   -- info parameters are always comparison factors, that is, experiments with different names or info parameters are
@@ -67,6 +64,16 @@ class (Monad (ExpM a), MonadUnliftIO (ExpM a), NFData a, NFData (InputState a), 
   default equalExperiments :: (a, InputState a) -> (a, InputState a) -> Bool
   equalExperiments _ _ = True
 
+
+  -- | Function to convert to a serializable object. Can be used to convert the state to serialisable representation.
+  serialisable :: a -> ExpM a (Serializable a)
+  default serialisable :: (a ~ Serializable a) => a -> ExpM a (Serializable a)
+  serialisable = return
+
+  -- | Function to convert from a serializable object. Can be used to convert the state from its serialisable representation.
+  deserialisable :: Serializable a -> ExpM a a
+  default deserialisable :: (a ~ Serializable a) => Serializable a -> ExpM a a
+  deserialisable = return
 
   -- HOOKS
 

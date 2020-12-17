@@ -25,7 +25,7 @@ data ParameterSetup a =
   ParameterSetup
   { parameterName         :: !T.Text                          -- ^ Name of parameter.
   , setParameter          :: !(b -> a -> a)                   -- ^ Set the parameter.
-  , getParameter          :: !(a -> b)                          -- ^ Get the parameter from the current state.
+  , getParameter          :: !(a -> b)                        -- ^ Get the parameter from the current state.
   , modifyParameter       :: !(Maybe (b -> IO [b]))           -- ^ Either no modification or function.
   , bounds                :: !(Maybe (b, b))                  -- ^ Bounds (inclusive).
   , skipPreparationPhase  :: !(Maybe (b -> Bool))             -- ^ Skip the preparation phase if True (e.g. to skip learning phase). Default: False.
@@ -51,4 +51,3 @@ getParameterData (ParameterSetup _ _ getter _ _ _ _) a = runPut $ put $ getter a
 mkParameterSetting :: ParameterSetup a -> a -> ParameterSetting a
 mkParameterSetting (ParameterSetup n _ getter _ _ drp design) a = ParameterSetting n (runPut $ put aVal) (maybe False (\x -> x aVal) drp) (maybe FullFactory (\x -> x aVal) design)
   where aVal = getter a
-
