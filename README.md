@@ -25,8 +25,8 @@ The part left of the `Named` tag specifies the metric and right of it is the nam
 in the report.
 
 Each experiment can have a preparation phase, e.g. a learning phase for machine learning algorithms,
-a warm-up phase, e.g. a queuing system that needs to be filled and get into the steady with the same
-properties of the evaluation phase. The later is the one used for generating report of user defined
+a warm-up phase, e.g. a queuing system that needs to converge to the steady state, to evaluate the
+properties in the evaluation phase. The later is the one used for generating report of user defined
 metrics. For instance, the user can define the dice draw like this:
 
     let result = StepResult "draw" Nothing (fromIntegral $ 1 + nr `mod` 6)
@@ -82,11 +82,12 @@ The experiment can then be configured like this:
 
 If these settings are changed the library only deletes data when it is necessary. For instance
 increasing the replications or repetitions of the experiment will not delete any data. When however,
-the preparation steps are changed, all consequitive data, including warm-up and all evaluations, are
+the preparation steps are changed, all consecutive data, including warm-up and all evaluations, are
 deleted and rerun.
 
-See [Dice.hs](examples/Dice.hs) for a full implementation, where the sides of the dices are variable
-over the experiment. An example report of this experiment can be found in the same folder.
+See [Dice.hs](https://github.com/schnecki/experimenter/examples/Dice.hs) for a full implementation,
+where the sides of the dices are variable over the experiment. An example report of this experiment
+can be found in the same folder.
 
 
 # Ideas and TODOs
