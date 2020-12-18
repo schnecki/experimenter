@@ -23,10 +23,11 @@ type ExperimentNumber = Int
 type RepetitionNumber = Int
 type ReplicationNumber = Int
 
+-- | Phase of experiment. Each experiment runs through all phases, where however a phase may have 0 steps.
 data Phase
-  = PreparationPhase
-  | WarmUpPhase
-  | EvaluationPhase
+  = PreparationPhase -- ^ For preparing the evaluation. For instance to let a machine learning algorithm learn its function, before it is evaluated.
+  | WarmUpPhase      -- ^ The warm up phase is equal to the evaluation phase, but does not count as evaluation. Used to get the system in a steady state.
+  | EvaluationPhase  -- ^ Evaluation phase.
   deriving (Eq, Ord, Show, Enum)
 
 -- | Definition of the Experiment.
@@ -38,9 +39,13 @@ class (Monad (ExpM a), MonadUnliftIO (ExpM a), NFData a, NFData (InputState a), 
   -- | Type that is used to serialize the current state.
   type Serializable a :: Type
 
-  -- | Type of input values to the experiment.
-  type InputValue a :: Type        -- ^ The input to the system for running a step. Set to () if unused.
-  type InputState a :: Type        -- ^ Can be used to save a information from one call to `generateInput` to the next. Set to () if unused.
+  -- Types for input values to the experiment:
+
+  -- | The input to the system for running a step. Set to `()` if unused.
+  type InputValue a :: Type
+
+  -- | Can be used to save a information from one call to `generateInput` to the next. Set to `()` if unused.
+  type InputState a :: Type
 
 
   -- | Generate some input values and possibly modify state. This function can be used to change the state. It is called

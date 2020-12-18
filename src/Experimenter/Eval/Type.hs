@@ -22,13 +22,12 @@ import           Experimenter.Result.Type  hiding (Experiments)
 import qualified Experimenter.Result.Type  as R
 
 -- | Over datatype to reduce data vectors.
-
 data Over a
   = OverPeriods
   | OverReplications
   | OverExperimentRepetitions
   -- implement this by sorting and taking/dropping results
-  -- | OverBestXExperimentRepetitions Int (ExperimentResult a -> ExperimentResult a -> Ordering)
+  --  | OverBestXExperimentRepetitions Int (ExperimentResult a -> ExperimentResult a -> Ordering)
   deriving (Generic, Serialize, NFData)
 
 instance Eq (Over a) where
@@ -163,14 +162,13 @@ example3 = Mean OverReplications (Of "X")
 
 
 -- | Datatypes for the evaluation result.
-
 data Unit
   = UnitPeriods
   | UnitReplications
   | UnitExperimentRepetition
-  --  | UnitBestExperimentRepetitions Int
   | UnitScalar
   deriving (Generic, Serialize, Read, Eq, Ord, Show, NFData)
+  --  UnitBestExperimentRepetitions Int
 
 data EvalResults a
   = EvalVector { _evalType   :: !(StatsDef a)

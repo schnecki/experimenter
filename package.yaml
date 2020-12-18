@@ -1,5 +1,5 @@
 name:                experimenter
-version:             0.1.0.0
+version:             0.1.0.1
 github:              "schnecki/experimenter"
 license:             BSD3
 author:              "Manuel Schneckenreither"
@@ -9,6 +9,7 @@ copyright:           "2020 Manuel Schneckenreither"
 extra-source-files:
 - README.md
 - ChangeLog.md
+- config/models
 
 # Metadata used when publishing your package
 synopsis:            Perform scientific experiments stored in a DB, and generate reports.
@@ -64,7 +65,6 @@ library:
   source-dirs: src
   ghc-options:
     -Wall
-    -Werror
     -Wno-name-shadowing
     -Wcompat
     -Wincomplete-record-updates

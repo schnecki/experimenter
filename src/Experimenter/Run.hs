@@ -312,7 +312,7 @@ mkNewExps exp expsDone = do
       startT <- liftIO getCurrentTime
       let sortParamSettings = map (L.sortBy (compare `on` view parameterSettingName))
       existParamSettings <- sortParamSettings <$> existingParamSettings exp
-      -- $(logInfo) $ "Existing Parameter settings: " <> tshow (map (map showVal) $ map (\xs -> zip (L.sortBy (compare `on` parameterName) params) xs) existParamSettings)
+      --  $(logInfo) $ "Existing Parameter settings: " <> tshow (map (map showVal) $ map (\xs -> zip (L.sortBy (compare `on` parameterName) params) xs) existParamSettings)
       paramSettings <- mapM (mkParamModifications exp) params
       let paramCombs = combinations paramSettings
       let paramSingleInstances = map (filter ((== SingleInstance) . view parameterSettingExperimentDesign)) paramSettings
