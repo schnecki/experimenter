@@ -85,7 +85,7 @@ increasing the replications or repetitions of the experiment will not delete any
 the preparation steps are changed, all consecutive data, including warm-up and all evaluations, are
 deleted and rerun.
 
-See [Dice.hs](https://github.com/schnecki/experimenter/examples/Dice.hs) for a full implementation,
+See [Dice.hs](https://github.com/schnecki/experimenter/blob/master/examples/Dice.hs) for a full implementation,
 where the sides of the dices are variable over the experiment. An example report of this experiment
 can be found in the same folder.
 
