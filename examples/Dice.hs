@@ -62,7 +62,7 @@ setup :: MkExperimentSetting a
 setup _ =
   ExperimentSetting
     { _experimentBaseName             = "dice param experiment" -- ^ Gives the experiment a name.
-    , _experimentInfoParameters       = []                      -- ^ For storing information which only effects the report.
+    , _experimentInfoParameters       = [info]                  -- ^ For storing information which only effects the report.
     , _experimentRepetitions          = 2                       -- ^ How often to repeat the whole experiment (including the preperation phase).
     , _preparationSteps               = 0                       -- ^ How many steps to execute for the preperation phase.
     , _evaluationWarmUpSteps          = 1000                    -- ^ How many steps to execute for the warm-up phase.
@@ -70,6 +70,11 @@ setup _ =
     , _evaluationReplications         = 1                       -- ^ How often to execute the evaluation for each experiment repetition.
     , _evaluationMaxStepsBetweenSaves = Just 100000             -- ^ Specify after how many steps the data will be saved. `Nothing` adaptively chooses a sensible value.
     }
+  where
+    info =
+      ExperimentInfoParameter
+        "This is an example info parameter"
+        ("It is used to check if the cell is correctly split into multiple lines. Here you might want to store more useful information" :: String)
 
 
 main :: IO ()

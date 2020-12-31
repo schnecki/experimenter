@@ -7,14 +7,15 @@
 module Experimenter.Eval.Table where
 
 import           Control.DeepSeq
-import           Control.Monad         (forM_)
+import           Control.Monad                (forM_)
 import           Control.Monad.Logger
-import           Data.List             (foldl')
-import qualified Data.Text             as T
+import           Data.List                    (foldl')
+import qualified Data.Text                    as T
 import           GHC.Generics
 
 import           Text.LaTeX
 import           Text.LaTeX.Base.Class
+import           Text.LaTeX.Packages.TabularX
 import           Text.Printf
 
 data Table =
@@ -47,14 +48,21 @@ instance IsString Cell where
 dereferLatex :: T.Text -> T.Text
 dereferLatex = protectText . T.replace "{" "\\{" . T.replace "}" "\\}" . T.replace "_" "\\_"
 
+printTextwidthTable :: (MonadLogger m) => Table -> LaTeXT m ()
+printTextwidthTable = printTableTabularX True
 
 printTable :: (MonadLogger m) => Table -> LaTeXT m ()
-printTable tbl@Table{} = forM_ (splitTable tbl) printTable'
+printTable = printTableTabularX False
+
+
+printTableTabularX :: (MonadLogger m) => Bool -> Table -> LaTeXT m ()
+printTableTabularX tabX tbl@Table {} = forM_ (splitTable tbl) printTable'
   where
-    printTable' (Table headerInput rowsInput) =
-      center $
-      tabular Nothing (replicate colLen LeftColumn) $ hline <> printRow textbf header <> hline <> mconcat (map (printRow id) rows) <> hline
+    printTable' (Table headerInput rowsInput)
+      | tabX = center $ tabularx (CustomMeasure textwidth) Nothing (LeftColumn : replicate (cols - 1) (NameColumn "X")) content
+      | otherwise = center $ tabular Nothing (replicate cols LeftColumn) content
       where
+        content = hline <> printRow textbf header <> hline <> mconcat (map (printRow id) rows) <> hline
         printRow :: (LaTeXC l) => (l -> l) -> Row -> l
         printRow _ (Row []) = mempty
         printRow f (Row (c:cs)) = foldl' (&) (f $ printCell c) (map (f . printCell) cs) <> lnbk
@@ -63,9 +71,9 @@ printTable tbl@Table{} = forM_ (splitTable tbl) printTable'
         printCell (CellD nr)  = raw $ printDouble nr
         printCell (CellL l)   = fromLaTeX l
         printCell CellEmpty   = mempty
-        colLen = maximum $ map cellCount (headerInput : rowsInput)
+        cols = maximum $ map cellCount (headerInput : rowsInput)
         cellCount (Row xs) = length xs
-        extendRow (Row xs) = Row $ xs ++ replicate (colLen - length xs) CellEmpty
+        extendRow (Row xs) = Row $ xs ++ replicate (cols - length xs) CellEmpty
         header = extendRow headerInput
         rows = map extendRow rowsInput
 

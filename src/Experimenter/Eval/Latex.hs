@@ -16,6 +16,7 @@ import           Control.Arrow                ((&&&))
 import           Control.DeepSeq
 import           Control.Lens                 hiding ((&))
 import           Control.Monad                (forM, unless, void)
+import           Control.Monad.IO.Class
 import           Control.Monad.Logger
 import           Data.List                    as L (find, foldl')
 import qualified Data.Map.Strict              as M
@@ -24,11 +25,13 @@ import qualified Data.Text                    as T
 import           GHC.Generics
 import           System.Directory
 import           System.FilePath.Posix
+import           System.Posix.User
 import           System.Process
 import           Text.LaTeX
 import           Text.LaTeX.Packages.AMSMath
 import           Text.LaTeX.Packages.Hyperref
 import           Text.LaTeX.Packages.Inputenc
+import           Text.LaTeX.Packages.TabularX
 
 import           Experimenter.Availability
 import           Experimenter.DatabaseSetting
@@ -42,6 +45,8 @@ import           Experimenter.Result.Type
 import           Experimenter.Setting         (ExperimentInfoParameter (..))
 import           Experimenter.Util
 
+
+import           Debug.Trace
 
 writeAndCompileLatex :: DatabaseSetting -> Evals a -> IO ()
 writeAndCompileLatex dbSetup evals = writeLatex dbSetup evals >> compileLatex evals
@@ -73,17 +78,19 @@ root evals = do
 
 
 -- Preamble with some basic info.
-thePreamble :: (MonadLogger m) => Evals a -> LaTeXT m ()
+thePreamble :: (MonadIO m) => Evals a -> LaTeXT m ()
 thePreamble evals = do
   let n = evals ^. evalsExperiments . experimentsName
   documentclass [] article
-  author "Manuel Schneckenreither"
+  user <- liftIO getLoginName
+  author ("Username: " <> fromString user)
   title $ "Evaluation for ``" <> raw n <> "''"
   usepackage [utf8] inputenc
   usepackage [] "fullpage"
   usepackage [] "array"
   usepackage [] amsmath
   usepackage [pdftex] hyperref
+  usepackage [] tabularxp
 
 -- Body with a section.
 theBody :: Evals a -> LaTeXT SimpleDB ()
@@ -108,11 +115,13 @@ experimentsInfo exps = do
     , Row ["Experiment Evaluation Replications:",         CellT (tshow $ exps ^. experimentsSetup . expsSetupEvaluationReplications)]
     ]
 
-  let infoParams = exps ^. experimentsInfoParameters
-  unless (null infoParams) $ do
-    part "Experiment Information Parameters"
-    printTable $ Table (Row ["Parameter", "Value"])
-      (map mkInfoParam infoParams)
+  let infoParams = trace( "Info Params: " ++ show (length $ exps ^. experimentsInfoParameters)) $ exps ^. experimentsInfoParameters
+
+
+  part "Experiment Information Parameters"
+  if null infoParams
+    then center $ text "No Information Parameters were defined in the experiment setup"
+    else printTextwidthTable $ Table (Row ["Parameter", "Value"]) (map mkInfoParam infoParams)
 
   where mkInfoParam (ExperimentInfoParameter n v) = Row [CellT n, CellT (tshow v)]
 
@@ -174,7 +183,7 @@ writeTables params !(force -> tables) = do
         let tblsFiltered = filter  (( == k) . fst) tbls
         unless (null tblsFiltered) $ do
           subsection $ "Experiment No. " <> raw (tshow k)
-          maybe "There are no configured parameters!" printTable (M.findWithDefault Nothing k params)
+          maybe "There are no configured parameters!" printTextwidthTable (M.findWithDefault Nothing k params)
           mapM_ (\(_, tbls') -> forM tbls' $ \statsDefTbl -> printTableWithName statsDefTbl) tblsFiltered
 
 

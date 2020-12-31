@@ -60,7 +60,7 @@ executables:
   dice:
     main:                Dice.hs
     other-modules:       []
-    source-dirs:         examples
+    source-dirs:         .
     ghc-options:
     - -threaded
     - -O2
@@ -73,7 +73,7 @@ executables:
   dice-stateless:
     main:                DiceStateless.hs
     other-modules:       []
-    source-dirs:         examples
+    source-dirs:         .
     ghc-options:
     - -threaded
     - -rtsopts

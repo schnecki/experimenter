@@ -60,9 +60,13 @@ genEvalsConcurrent parallelWorkers runExpM dbSetup exps evals = do
 
 mkEvals :: (ExperimentDef a ) => [StatsDef a] -> Experiment a -> DB (ExpM a) (ExperimentEval a)
 mkEvals evals e = do
-  xs <- mkTime "All Experiment Evaluations" $ mapMRnf (fmap Available . genExperiment e) evals
+  liftIO $ putStrLn $ "Evaluating Experiment " ++ show (e ^. experimentNumber)
+  xs <- mkTime "All Experiment Evaluations" $ mapMRnf evalStatsDef evals
   return $ force $ ExperimentEval (e ^. experimentNumber) xs (e {_experimentResults = []})
-
+  where
+    evalStatsDef statsDef = do
+      -- liftIO $ putStrLn $ "Evaluating " ++ show statsDef
+      Available <$> genExperiment e statsDef
 
 mapMRnf :: (NFData b, Monad m) => (a -> m b) -> [a] -> m [b]
 mapMRnf _ [] = return []
@@ -80,12 +84,12 @@ genExperiment exp (Name name eval) = addName <$!> genExperiment exp eval
   where addName res = res { _evalType = Named (res ^. evalType) name }
 genExperiment exp eval =
   case eval of
-    Mean OverExperimentRepetitions (Stats eval') -> reduce (Stats eval') <$!> genExpRes id eval'
-    Mean OverExperimentRepetitions eval' -> reduce eval' <$!> genExpRes id (Id eval')
-    Sum OverExperimentRepetitions (Stats eval') -> reduce (Stats eval') <$!> genExpRes id eval'
-    Sum OverExperimentRepetitions eval' -> reduce eval' <$!> genExpRes id (Id eval')
+    Mean OverExperimentRepetitions (Stats eval')   -> reduce (Stats eval') <$!> genExpRes id eval'
+    Mean OverExperimentRepetitions eval'           -> reduce eval' <$!> genExpRes id (Id eval')
+    Sum OverExperimentRepetitions (Stats eval')    -> reduce (Stats eval') <$!> genExpRes id eval'
+    Sum OverExperimentRepetitions eval'            -> reduce eval' <$!> genExpRes id (Id eval')
     StdDev OverExperimentRepetitions (Stats eval') -> reduce (Stats eval') <$!> genExpRes id eval'
-    StdDev OverExperimentRepetitions eval' -> reduce eval' <$!> genExpRes id (Id eval')
+    StdDev OverExperimentRepetitions eval'         -> reduce eval' <$!> genExpRes id (Id eval')
     -- Mean (OverBestXExperimentRepetitions nr cmp) eval' -> reduce eval' <$> genExpRes (take nr . sortBy (cmp `on` id)) (Id eval')
     -- Sum (OverBestXExperimentRepetitions nr cmp) eval' -> reduce eval' <$> genExpRes (take nr . sortBy (cmp `on` id)) (Id eval')
     -- StdDev (OverBestXExperimentRepetitions nr cmp) eval' -> reduce eval' <$> genExpRes (take nr . sortBy (cmp `on` id)) (Id eval')
@@ -101,14 +105,14 @@ genExperimentResult :: (ExperimentDef a) => Experiment a -> StatsDef a -> Experi
 genExperimentResult _ (Named _ n) _ = error $ "An evaluation may only be named on the outermost function in evaluation " <> T.unpack (E.decodeUtf8 n)
 genExperimentResult _ (Name n _) _ = error $ "An evaluation may only be named on the outermost function in evaluation " <> T.unpack (E.decodeUtf8 n)
 genExperimentResult exp eval expRes =
-    case eval of
-      Mean OverReplications (Stats eval')   -> reduce <$!> genRepl eval'
-      Mean OverReplications eval'           -> reduce <$!> genRepl (Id eval')
-      StdDev OverReplications (Stats eval') -> reduce <$!> genRepl eval'
-      StdDev OverReplications eval'         -> reduce <$!> genRepl (Id eval')
-      Sum OverReplications (Stats eval')    -> reduce <$!> genRepl eval'
-      Sum OverReplications eval'            -> reduce <$!> genRepl (Id eval')
-      _                                     -> packGenRes <$!> genRepl eval
+  case eval of
+    Mean OverReplications (Stats eval')   -> reduce <$!> genRepl eval'
+    Mean OverReplications eval'           -> reduce <$!> genRepl (Id eval')
+    StdDev OverReplications (Stats eval') -> reduce <$!> genRepl eval'
+    StdDev OverReplications eval'         -> reduce <$!> genRepl (Id eval')
+    Sum OverReplications (Stats eval')    -> reduce <$!> genRepl eval'
+    Sum OverReplications eval'            -> reduce <$!> genRepl (Id eval')
+    _                                     -> packGenRes <$!> genRepl eval
   where
     packGenRes = EvalVector eval UnitReplications
     -- genRepl e = mapMRnf (fmap force . genReplication exp e) (expRes ^. evaluationResults)
@@ -122,7 +126,7 @@ genExperimentResult exp eval expRes =
 
 genReplication :: (ExperimentDef a) => Experiment a -> StatsDef a -> Int -> ReplicationResult a -> DB (ExpM a) (EvalResults a)
 genReplication exp eval repNr repl =
-  mkTime ("Experiment " <> show (exp ^. experimentNumber) <> " Repetition " <> show repNr <> " Replication" <> show (repl ^. replicationNumber)) $
+  mkTime ("\tExperiment " <> show (exp ^. experimentNumber) <> " Repetition " <> show repNr <> " Replication" <> show (repl ^. replicationNumber)) $
   fromMaybe (error "Evaluation data is incomplete!") <$!> sequence (genResultData exp eval <$!> (repl ^. evalResults))
 
 
