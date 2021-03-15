@@ -26,7 +26,6 @@ module Experimenter.Run
 
 import           Control.Arrow                (first, (&&&), (***))
 import           Control.Arrow                (second)
-import           Control.Concurrent.MVar
 import           Control.DeepSeq
 import           Control.Lens
 import           Control.Monad.IO.Class
@@ -749,18 +748,21 @@ foldM' f !acc (x:xs) = do
   foldM' f acc' xs
 
 
-splitSizeMVar :: MVar Int
-splitSizeMVar = unsafePerformIO $ newMVar 2000
-{-# NOINLINE splitSizeMVar #-}
+splitSizeRef :: IORef Int
+splitSizeRef = unsafePerformIO $ newIORef 2000
+{-# NOINLINE splitSizeRef #-}
 
 increaseSplitSize :: IO ()
-increaseSplitSize = liftIO $ modifyMVar_ splitSizeMVar (return . min 128000 . (*2))
+increaseSplitSize = liftIO $ void $ atomicModifyIORef' splitSizeRef ((\x -> (x, x)) . min 128000 . (*2))
+{-# NOINLINE increaseSplitSize #-}
 
 decreaseSplitSize :: IO ()
-decreaseSplitSize = liftIO $ modifyMVar_ splitSizeMVar (return . max 500 . (`div` 2))
+decreaseSplitSize = liftIO $ void $ atomicModifyIORef' splitSizeRef ((\x -> (x, x)) . max 500 . (`div` 2))
+{-# NOINLINE decreaseSplitSize #-}
 
 getSplitSize :: IO Int
-getSplitSize = liftIO $ fromMaybe 5000 <$> tryReadMVar splitSizeMVar
+getSplitSize = liftIO $ atomicModifyIORef' splitSizeRef (\x -> (x, x))
+{-# NOINLINE getSplitSize #-}
 
 
 data RunData a =
@@ -827,10 +829,10 @@ runResultData' !expId !maxSteps !len !repResType !resData = do
       eTime' <- liftIO getCurrentTime
       let runTime = diffUTCTime (fromJust eTime) sTime
           saveTime = diffUTCTime eTime' sTime'
+      when printInfo $ $(logInfo) $ "Done and saved. Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow runTime <> ". Saving Time: " <> tshow saveTime
       when (isNothing maxSteps && nrOfPeriodsToRun == splitPeriods) $ liftIO $ do
         when (runTime < 60 * max 5 saveTime) increaseSplitSize
         when (runTime > 120 * max 5 saveTime) decreaseSplitSize
-      when printInfo $ $(logInfo) $ "Done and saved. Computation Time of " <> tshow (length periodsToRun) <> ": " <> tshow runTime <> ". Saving Time: " <> tshow saveTime
       if len - curLen - length periodsToRun > 0
         then return (False, True, force resData') -- runResultData expId maxSteps len repResType (force resData')
         else return $! (True, True, set endState mkEndStateAvailableOnDemand $ set startState mkStartStateAvailableOnDemand resData')

@@ -1,10 +1,10 @@
 name:                experimenter
-version:             0.1.0.4
+version:             0.1.0.6
 github:              "schnecki/experimenter"
 license:             BSD3
 author:              "Manuel Schneckenreither"
 maintainer:          "manuel.schneckenreither@uibk.ac.at"
-copyright:           "2020 Manuel Schneckenreither"
+copyright:           "2021 Manuel Schneckenreither"
 
 extra-source-files:
 - README.md
