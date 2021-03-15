@@ -1,7 +1,7 @@
 # Changelog for experimenter
 
-Release 0.1.0.8 on 15.03.2021:
-    - Using IORef instead of MVar due to deadlocks
+Release 0.1.0.10 on 15.03.2021:
+    - Tried IORef instead of MVar due to deadlocks. Using MVar.
 
 Release 0.1.0.3 on 31.12.2020:
     - Using username for LaTeX output

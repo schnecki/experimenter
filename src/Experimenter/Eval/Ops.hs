@@ -169,20 +169,6 @@ genResultData exp eval resData =
         ResultDataRep{} -> RepMeasureWhere $ \_ resStep -> E.where_ (resStep E.^. RepResultStepName E.==. E.val (E.decodeUtf8 name))
 
 
--- cacheMVar :: MVar (M.Map (Of a, ResultDataKey) (EvalResults a))
--- cacheMVar = unsafePerformIO $ newMVar mempty
--- {-# NOINLINE cacheMVar #-}
-
--- emptyCache :: IO ()
--- emptyCache = liftIO $ modifyMVar_ cacheMVar (const mempty)
-
--- addCache :: (Of a, ResultDataKey) -> EvalResults a -> IO ()
--- addCache k v = liftIO $ modifyMVar_ cacheMVar (return . M.insert k v)
-
--- lookupCache :: (Of a, ResultDataKey) -> IO (Maybe (EvalResults a))
--- lookupCache k = liftIO $ (M.lookup k =<<) <$> tryReadMVar cacheMVar
-
-
 evalOf :: (ExperimentDef a) => Experiment a -> Of a -> ResultData a -> DB (ExpM a) (EvalResults a)
 evalOf exp eval resData =
   case eval of
