@@ -552,13 +552,21 @@ runExperimentResult skipPrep rands@(prepRands, _, _) exps expId expNr expRes = d
         res <- runReplicationResult rands e expId (expNr, repetNr) initSt initInpSt repRess
         transactionSave
         return res
-  repRes <- getRepRes exps repsDone >>= mapM (runRepl exps)
+  repRes <- getRepRes exps repsDone >>= deleteTruncatedRepRes exps >>= mapM (runRepl exps)
   let updated = any fst repRes
       res = map snd repRes
   return (prepUpdated || updated, set preparationResults prepRes $ set evaluationResults res expRes)
   where
     expInitSt = exps ^. experimentsInitialState
     expResId = expRes ^. experimentResultKey
+    deleteTruncatedRepRes :: (MonadIO m) => Experiments a -> [ReplicationResult a] -> DB m [ReplicationResult a]
+    deleteTruncatedRepRes exps' xs
+      | length xs > len = do
+        mapM_ deleteReplicationResult (drop len xs)
+        return (take len xs)
+      | otherwise = return xs
+      where
+        len = exps' ^. experimentsSetup . expsSetupEvaluationReplications
     getRepRes :: (MonadIO m) => Experiments a -> [ReplicationResult a] -> DB m [ReplicationResult a]
     getRepRes exps' repsDone = do
       $(logInfo) $ "Number of loaded replications: " <> tshow (length repsDone)
