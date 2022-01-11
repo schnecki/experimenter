@@ -46,7 +46,10 @@ instance IsString Cell where
   fromString = CellT . T.pack
 
 dereferLatex :: T.Text -> T.Text
-dereferLatex = protectText . T.replace "{" "\\{" . T.replace "}" "\\}" . T.replace "_" "\\_"
+dereferLatex x = protectText $ foldl' (\x' (f, t) -> T.replace f t x') x list
+  where
+    list :: [(T.Text, T.Text)]
+    list = [("{", "\\{"), ("}", "\\}"), ("_", "\\_"), ("_", "\\_"), ("%", "\\%"), ("^", "\\^"), ("~", "\\~"), ("$", "\\$")]
 
 printTextwidthTable :: (MonadLogger m) => Table -> LaTeXT m ()
 printTextwidthTable = printTableTabularX True
@@ -64,7 +67,7 @@ printTableTabularX tabX tbl@Table {} = forM_ (splitTable tbl) printTable'
       where
         content = hline <> printRow textbf header <> hline <> mconcat (map (printRow id) rows) <> hline
         printRow :: (LaTeXC l) => (l -> l) -> Row -> l
-        printRow _ (Row []) = mempty
+        printRow _ (Row [])     = mempty
         printRow f (Row (c:cs)) = foldl' (&) (f $ printCell c) (map (f . printCell) cs) <> lnbk
         printCell :: (LaTeXC l) => Cell -> l
         printCell (CellT txt) = raw (dereferLatex txt)

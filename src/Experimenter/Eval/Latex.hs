@@ -34,8 +34,8 @@ import           Text.LaTeX.Packages.Inputenc
 import           Text.LaTeX.Packages.TabularX
 
 import           Experimenter.Availability
-import           Experimenter.DatabaseSetting
 import           Experimenter.DB
+import           Experimenter.DatabaseSetting
 import           Experimenter.Eval.Table
 import           Experimenter.Eval.Type
 import           Experimenter.Eval.Util
@@ -84,7 +84,7 @@ thePreamble evals = do
   documentclass [] article
   user <- liftIO getLoginName
   author ("Username: " <> fromString user)
-  title $ "Evaluation for ``" <> raw n <> "''"
+  title $ "Evaluation for ``" <> raw (dereferLatex n) <> "''"
   usepackage [utf8] inputenc
   usepackage [] "fullpage"
   usepackage [] "array"
@@ -189,7 +189,7 @@ writeTables params !(force -> tables) = do
 
 printTableWithName :: (MonadLogger m) => (StatsDef a, Table) -> LaTeXT m ()
 printTableWithName (nm, tbl) = do
-  paragraph (raw $ prettyStatsDef nm)
+  paragraph (raw $ dereferLatex $ prettyStatsDef nm)
   printTable tbl
 
 
@@ -298,7 +298,7 @@ paramSettingTable evals (ExperimentEval _ _ exp)
                     [ CellT n
                     , CellL $ raw (dereferLatex $ tshow val) <>
                       (case mBounds of
-                         Nothing -> ""
+                         Nothing               -> ""
                          Just (minVal, maxVal) -> math (text " " `in_` autoParens (text (raw (dereferLatex $ tshow minVal)) <> ", " <> text (raw (dereferLatex $ tshow maxVal))))) <>
                       (if drp
                          then " [SkipPrepPhase]"
