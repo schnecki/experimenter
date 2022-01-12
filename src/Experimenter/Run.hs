@@ -19,24 +19,21 @@ module Experimenter.Run
     , runExperiments
     , runExperimentsM
     , runExperimentsIO
-    , loadExperimentsResultsM
     , loadStateAfterPreparation
     , loadStateAfterPreparation2
     ) where
 
-import           Control.Arrow                (first, (&&&), (***))
-import           Control.Arrow                (second)
+import           Control.Arrow                (first, second, (&&&), (***))
 import           Control.Concurrent.MVar
 import           Control.DeepSeq
 import           Control.Lens
 import           Control.Monad.IO.Class
-import           Control.Monad.Logger         (filterLogger, logDebug, logError, logInfo,
-                                               runStdoutLoggingT)
+import           Control.Monad.Logger         (filterLogger, logDebug, logError, logInfo, runStdoutLoggingT)
 import           Control.Monad.Reader
 import qualified Data.ByteString              as B
 import           Data.Function                (on)
-import           Data.Int                     (Int64)
 import           Data.IORef
+import           Data.Int                     (Int64)
 import           Data.List                    (foldl')
 import qualified Data.List                    as L
 import           Data.Maybe                   (fromJust, fromMaybe, isNothing)
@@ -56,8 +53,8 @@ import           System.Random.MWC
 
 
 import           Experimenter.Availability
-import           Experimenter.DatabaseSetting
 import           Experimenter.DB
+import           Experimenter.DatabaseSetting
 import           Experimenter.Experiment
 import           Experimenter.Input
 import           Experimenter.MasterSlave
@@ -118,7 +115,7 @@ loadStateAfterPreparation2 runExpM dbSetup setup initInpSt mkInitSt expNr repNr 
         isExp x = x ^. experimentNumber == expNr
         isExpRep x = x ^. repetitionNumber == repNr
         fromAvailable (Available x) = x
-        fromAvailable _ = error "unexpected AvailableOnDemand in loadStateAfterPreparation"
+        fromAvailable _             = error "unexpected AvailableOnDemand in loadStateAfterPreparation"
     borl <- fromAvailable <$> mkAvailable (head xs)
     $(logInfo) "Made BORL available"
     lift $ lift $ lift $ runOnExperiments (fromJust borl)
@@ -142,41 +139,6 @@ loadStateAfterPreparation dbSetup expsId expNr _ =
               !mSer <- lift $! deserialise (T.pack "end state") (B.concat parts')
               !res <- lift $! lift $ maybe (return Nothing) (fmap Just . deserialisable) mSer
               force <$!> traverse (setParams expId) res
-
-type OnlyFinishedExperiments = Bool
-
-loadExperimentsResultsM ::
-     (ExperimentDef a)
-  => OnlyFinishedExperiments
-  -> (ExpM a (Maybe (Experiments a)) -> IO (Maybe (Experiments a)))
-  -> DatabaseSetting
-  -> MkExperimentSetting a
-  -> InputState a
-  -> ExpM a a
-  -> Int64
-  -> IO (Maybe (Experiments a))
-loadExperimentsResultsM filtFin runExpM dbSetup setup initInpSt mkInitSt key =
-  runExpM $ runDB dbSetup $ do
-    initSt <- lift $ lift $ lift mkInitSt
-    let sett = setup initSt
-        skipPrep exp' = any (^. parameterSettingSkipPreparationPhase) (exp' ^. parameterSetup)
-        isFinished exp' =
-          length (exp' ^. experimentResults) == sett ^. experimentRepetitions && -- repetitions
-          (skipPrep exp' || all (\expRes -> maybe 0 (lengthAvailabilityList . view results) (expRes ^. preparationResults) == sett ^. preparationSteps) (exp' ^. experimentResults)) && -- preparation length
-          all (\expRes -> length (expRes ^. evaluationResults) == sett ^. evaluationReplications) (exp' ^. experimentResults) && -- replications
-          all
-            (\expRes -> maybe 0 (lengthAvailabilityList . view results) (expRes ^. warmUpResults) == sett ^. evaluationWarmUpSteps)
-            (exp' ^. experimentResults . traversed . evaluationResults) && -- warm up length
-          all
-            (\expRes -> maybe 0 (lengthAvailabilityList . view results) (expRes ^. evalResults) == sett ^. evaluationSteps)
-            (exp' ^. experimentResults . traversed . evaluationResults) -- eval length
-        filterFinished =
-          over
-            experiments
-            (if filtFin
-               then filter isFinished
-               else id)
-    fmap filterFinished <$> loadExperimentsResults sett initInpSt initSt (toSqlKey key)
 
 
 checkUniqueParamNames :: (Monad m) => Experiments a -> m (Experiments a)
@@ -852,14 +814,14 @@ runResultData' !expId !maxSteps !len !repResType !resData = do
     isNew = curLen == 0
     mkStartStateAvailableOnDemand =
       case resData ^. resultDataKey of
-        ResultDataPrep key -> AvailableOnDemand $ loadResDataStartState expId (StartStatePrep key)
+        ResultDataPrep key   -> AvailableOnDemand $ loadResDataStartState expId (StartStatePrep key)
         ResultDataWarmUp key -> AvailableOnDemand $ loadResDataStartState expId (StartStateWarmUp key)
-        ResultDataRep key -> AvailableOnDemand $ loadResDataStartState expId (StartStateRep key)
+        ResultDataRep key    -> AvailableOnDemand $ loadResDataStartState expId (StartStateRep key)
     mkEndStateAvailableOnDemand =
       case resData ^. resultDataKey of
-        ResultDataPrep key -> AvailableOnDemand $ loadResDataEndState expId (EndStatePrep key)
+        ResultDataPrep key   -> AvailableOnDemand $ loadResDataEndState expId (EndStatePrep key)
         ResultDataWarmUp key -> AvailableOnDemand $ loadResDataEndState expId (EndStateWarmUp key)
-        ResultDataRep key -> AvailableOnDemand $ loadResDataEndState expId (EndStateRep key)
+        ResultDataRep key    -> AvailableOnDemand $ loadResDataEndState expId (EndStateRep key)
     addInputValsAndMeasure !inputVals !measures !resData' =
       let countResults' = lengthAvailabilityList (resData' ^. results) + V.length measures
           countInputValues' = lengthAvailabilityList (resData' ^. inputValues) + V.length inputVals

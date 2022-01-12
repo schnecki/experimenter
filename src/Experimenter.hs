@@ -6,6 +6,7 @@ import           Experimenter.Availability as E
 import           Experimenter.Eval         as E
 import           Experimenter.Experiment   as E
 import           Experimenter.Input        as E
+import           Experimenter.Load         as E
 import           Experimenter.Measure      as E
 import           Experimenter.Models       as E
 import           Experimenter.Parameter    as E
