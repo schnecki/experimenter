@@ -10,8 +10,8 @@ module Experimenter.Experiment where
 
 import           Control.DeepSeq
 import           Control.Monad.IO.Unlift
-import           Data.Serialize          (Serialize)
 import           Data.Kind
+import           Data.Serialize          (Serialize)
 import           System.Random.MWC
 
 import           Experimenter.Parameter
@@ -81,6 +81,10 @@ class (Monad (ExpM a), MonadUnliftIO (ExpM a), NFData a, NFData (InputState a), 
   deserialisable = return
 
   -- HOOKS
+
+  -- | Function to call before starting the experiment, but after setting the parameters. E.g. one could recereate an ANN, if the structure may have changed with a parameter.
+  beforeExperimentStartHook :: ExperimentNumber -> a -> ExpM a a
+  beforeExperimentStartHook _ = return
 
   -- | Function to call on the state before the preparation. This function is only executed if the preparation phase
   -- exists (that is >0 preparation steps) and is started from period 0!

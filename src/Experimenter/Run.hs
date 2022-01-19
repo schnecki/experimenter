@@ -19,8 +19,8 @@ module Experimenter.Run
     , runExperiments
     , runExperimentsM
     , runExperimentsIO
-    , loadStateAfterPreparation
-    , loadStateAfterPreparation2
+    -- , loadStateAfterPreparation
+    -- , loadStateAfterPreparation2
     ) where
 
 import           Control.Arrow                (first, second, (&&&), (***))
@@ -28,7 +28,8 @@ import           Control.Concurrent.MVar
 import           Control.DeepSeq
 import           Control.Lens
 import           Control.Monad.IO.Class
-import           Control.Monad.Logger         (filterLogger, logDebug, logError, logInfo, runStdoutLoggingT)
+import           Control.Monad.Logger         (filterLogger, logDebug, logError, logInfo,
+                                               runStdoutLoggingT)
 import           Control.Monad.Reader
 import qualified Data.ByteString              as B
 import           Data.Function                (on)
@@ -102,43 +103,43 @@ runner runExpM dbSetup setup initInpSt mkInitSt =
         loadExperiments expSetting initInpSt initSt >>= checkUniqueParamNames >>= runExperimenter dbSetup expSetting initInpSt initSt
 
 
-loadStateAfterPreparation2 ::
-     ExperimentDef a => (ExpM a b -> IO b) -> DatabaseSetting -> (a -> ExperimentSetting) -> InputState a -> ExpM a a -> Int -> Int -> (a -> ExpM a b) -> IO b
-loadStateAfterPreparation2 runExpM dbSetup setup initInpSt mkInitSt expNr repNr runOnExperiments = do
-  runStdoutLoggingT $ withPostgresqlPool (connectionString dbSetup) (parallelConnections dbSetup) $ liftSqlPersistMPool $ runMigration migrateAll
-  runExpM $ runDB dbSetup $ do
-    initSt <- lift $ lift $ lift mkInitSt
-    $(logInfo) "Created initial state and will now check the DB for loading or creating experiments"
-    let expSetting = setup initSt
-    exps <- loadExperiments expSetting initInpSt initSt
-    let xs = exps ^.. experiments . traversed . filtered isExp . experimentResults . traversed . filtered isExpRep . preparationResults . traversed . endState
-        isExp x = x ^. experimentNumber == expNr
-        isExpRep x = x ^. repetitionNumber == repNr
-        fromAvailable (Available x) = x
-        fromAvailable _             = error "unexpected AvailableOnDemand in loadStateAfterPreparation"
-    borl <- fromAvailable <$> mkAvailable (head xs)
-    $(logInfo) "Made BORL available"
-    lift $ lift $ lift $ runOnExperiments (fromJust borl)
+-- loadStateAfterPreparation2 ::
+--      ExperimentDef a => (ExpM a b -> IO b) -> DatabaseSetting -> (a -> ExperimentSetting) -> InputState a -> ExpM a a -> Int -> Int -> (a -> ExpM a b) -> IO b
+-- loadStateAfterPreparation2 runExpM dbSetup setup initInpSt mkInitSt expNr repNr runOnExperiments = do
+--   runStdoutLoggingT $ withPostgresqlPool (connectionString dbSetup) (parallelConnections dbSetup) $ liftSqlPersistMPool $ runMigration migrateAll
+--   runExpM $ runDB dbSetup $ do
+--     initSt <- lift $ lift $ lift mkInitSt
+--     $(logInfo) "Created initial state and will now check the DB for loading or creating experiments"
+--     let expSetting = setup initSt
+--     exps <- loadExperiments expSetting initInpSt initSt
+--     let xs = exps ^.. experiments . traversed . filtered isExp . experimentResults . traversed . filtered isExpRep . preparationResults . traversed . endState
+--         isExp x = x ^. experimentNumber == expNr
+--         isExpRep x = x ^. repetitionNumber == repNr
+--         fromAvailable (Available x) = x
+--         fromAvailable _             = error "unexpected AvailableOnDemand in loadStateAfterPreparation"
+--     borl <- fromAvailable <$> mkAvailable (head xs)
+--     $(logInfo) "Made BORL available"
+--     lift $ lift $ lift $ runOnExperiments (fromJust borl)
 
 
-loadStateAfterPreparation :: (ExperimentDef a) => DatabaseSetting -> Int64 -> Int -> Int -> ExpM a (Maybe a)
-loadStateAfterPreparation dbSetup expsId expNr _ =
-  runStdoutLoggingT $
-  filterLogger (\s _ -> s /= "SQL") $
-  withPostgresqlConn (connectionString dbSetup) $ \(backend :: SqlBackend) ->
-    flip runSqlConn backend $ do
-      (Entity expId _) <- fromMaybe (error "experiments not found") <$> selectFirst [ExpExps ==. toSqlKey expsId, ExpNumber ==. expNr] []
-      (Entity _ expRes) <- fromMaybe (error "experiment not found") <$> selectFirst [ExpResultExp ==. expId] []
-      case expRes ^. expResultPrepResultData of
-        Nothing -> return Nothing
-        Just prepResDataId -> do
-          parts' <- fmap (view prepEndStatePartData . entityVal) <$> selectList [PrepEndStatePartResultData ==. prepResDataId] [Asc PrepEndStatePartNumber]
-          if null parts'
-            then return Nothing
-            else do
-              !mSer <- lift $! deserialise (T.pack "end state") (B.concat parts')
-              !res <- lift $! lift $ maybe (return Nothing) (fmap Just . deserialisable) mSer
-              force <$!> traverse (setParams expId) res
+-- loadStateAfterPreparation :: (ExperimentDef a) => DatabaseSetting -> Int64 -> Int -> Int -> ExpM a (Maybe a)
+-- loadStateAfterPreparation dbSetup expsId expNr _ =
+--   runStdoutLoggingT $
+--   filterLogger (\s _ -> s /= "SQL") $
+--   withPostgresqlConn (connectionString dbSetup) $ \(backend :: SqlBackend) ->
+--     flip runSqlConn backend $ do
+--       (Entity expId _) <- fromMaybe (error "experiments not found") <$> selectFirst [ExpExps ==. toSqlKey expsId, ExpNumber ==. expNr] []
+--       (Entity _ expRes) <- fromMaybe (error "experiment not found") <$> selectFirst [ExpResultExp ==. expId] []
+--       case expRes ^. expResultPrepResultData of
+--         Nothing -> return Nothing
+--         Just prepResDataId -> do
+--           parts' <- fmap (view prepEndStatePartData . entityVal) <$> selectList [PrepEndStatePartResultData ==. prepResDataId] [Asc PrepEndStatePartNumber]
+--           if null parts'
+--             then return Nothing
+--             else do
+--               !mSer <- lift $! deserialise (T.pack "end state") (B.concat parts')
+--               !res <- lift $! lift $ maybe (return Nothing) (fmap Just . deserialisable) mSer
+--               force <$!> traverse (setParams expId) res
 
 
 checkUniqueParamNames :: (Monad m) => Experiments a -> m (Experiments a)
@@ -490,6 +491,7 @@ runExperimentResult ::
   -> ExperimentResult a
   -> DB (ExpM a) (Updated, ExperimentResult a)
 runExperimentResult skipPrep rands@(prepRands, _, _) exps expId expNr expRes = do
+  expInitSt <- lift $ lift $ lift $ beforeExperimentStartHook expNr (exps ^. experimentsInitialState)
   let repetNr = expRes ^. repetitionNumber
   let prepSeed = prepRands !! (repetNr - 1)
   (prepInitSt, delPrep) <-
@@ -519,7 +521,6 @@ runExperimentResult skipPrep rands@(prepRands, _, _) exps expId expNr expRes = d
       res = map snd repRes
   return (prepUpdated || updated, set preparationResults prepRes $ set evaluationResults res expRes)
   where
-    expInitSt = exps ^. experimentsInitialState
     expResId = expRes ^. experimentResultKey
     deleteTruncatedRepRes :: (MonadIO m) => Experiments a -> [ReplicationResult a] -> DB m [ReplicationResult a]
     deleteTruncatedRepRes exps' xs
