@@ -69,9 +69,10 @@ executables:
     dependencies:
       - experimenter
       - random
+      - splitmix
 
-  dice-stateless:
-    main:                DiceStateless.hs
+  dice-monadic:
+    main:                DiceMonadic.hs
     other-modules:       []
     source-dirs:         .
     ghc-options:

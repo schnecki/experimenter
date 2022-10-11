@@ -1,6 +1,10 @@
+
 # Changelog for experimenter
 
-Release 0.1.0.12 n 22.03.2021:
+Release 0.1.0.14:
+    - Vacuuming
+
+Release 0.1.0.12 on 22.03.2021:
     - Bug fix when decreasing number of evaluations
 
 Release 0.1.0.10 on 15.03.2021:

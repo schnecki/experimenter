@@ -9,25 +9,34 @@ module Main where
 
 import           Control.DeepSeq
 import           Data.Serialize
+import           Data.Vector.Unboxed    (Vector)
+import           Data.Word
 import           GHC.Generics
-import           System.Random
+import           System.IO.Unsafe
+import           System.Random.SplitMix as SM
+import           System.Random.Stateful
 
 import           Experimenter
 
 
 data Dice =
   Dice
-    StdGen -- ^ Random number generator
+    SM.SMGen -- ^ Random number generator
     Int    -- ^ Nr of sides of the dice. E.g. 6 sided dice.
-  deriving (Show, Generic)
+  deriving (Generic)
+
+instance Show Dice where
+  show (Dice _ nr) = show nr
 
 instance NFData Dice where
   rnf (Dice !_ nr) = rnf nr
 
+-- TODO
+
 instance Serialize Dice where
-  put (Dice g sides) = put (show g) >> put sides
+  put (Dice g sides) = put (SM.unseedSMGen g) >> put sides
   get = do
-    g <- read <$> get
+    g <- SM.seedSMGen' <$> get
     sides <- get
     return $ Dice g sides
 
@@ -39,8 +48,8 @@ instance ExperimentDef Dice where
 
   -- ^ One step, that is one dice draw.
   runStep _ (Dice g sides) _ _ =
-    let (nr, g') = next g
-        result = StepResult "draw" Nothing (fromIntegral $ 1 + nr `mod` sides)
+    let (nr, g') = uniformR (1, sides) g
+        result = StepResult "draw" Nothing (fromIntegral nr)
     in return ([result], Dice g' sides)
 
   -- ^ Parameters that are changed to get multiple experiment instances.
@@ -79,8 +88,8 @@ setup _ =
 
 main :: IO ()
 main = do
-  g <- newStdGen
-  let databaseSetup = DatabaseSetting "host=localhost dbname=experimenter2 user=experimenter password= port=5432" 10
+  g <- SM.newSMGen
+  let databaseSetup = DatabaseSetting "host=localhost dbname=experimenter user=experimenter password= port=5432" 10
   let initState = Dice g 6
   (changed, res) <- runExperimentsIO databaseSetup setup () initState
   putStrLn $ "Any change: " ++ show changed

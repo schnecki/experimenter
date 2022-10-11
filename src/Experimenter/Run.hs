@@ -28,8 +28,7 @@ import           Control.Concurrent.MVar
 import           Control.DeepSeq
 import           Control.Lens
 import           Control.Monad.IO.Class
-import           Control.Monad.Logger         (filterLogger, logDebug, logError, logInfo,
-                                               runStdoutLoggingT)
+import           Control.Monad.Logger         (filterLogger, logDebug, logError, logInfo, runStdoutLoggingT)
 import           Control.Monad.Reader
 import qualified Data.ByteString              as B
 import           Data.Function                (on)
@@ -41,6 +40,7 @@ import           Data.Maybe                   (fromJust, fromMaybe, isNothing)
 import           Data.Serialize               hiding (get)
 import qualified Data.Serialize               as S
 import qualified Data.Text                    as T
+import qualified Data.Text.Encoding           as E
 import           Data.Time                    (addUTCTime, diffUTCTime, getCurrentTime)
 import qualified Data.Vector                  as V
 import           Database.Persist.Postgresql
@@ -50,6 +50,7 @@ import           Prelude                      hiding (exp)
 import           System.IO
 import           System.IO.Unsafe             (unsafePerformIO)
 import           System.Posix.Process
+import           System.Process               (callProcess, spawnProcess)
 import           System.Random.MWC
 
 
@@ -97,10 +98,26 @@ runner runExpM dbSetup setup initInpSt mkInitSt =
     runStdoutLoggingT $ withPostgresqlPool (connectionString dbSetup) (parallelConnections dbSetup) $ liftSqlPersistMPool $ runMigration migrateAll >> indexCreation
     runExpM $
       runDB dbSetup $ do
+        -- liftIO $ putStrLn "Running maintainance command: VACUUM"
+        -- rawExecute "VACUUM" []
+        liftIO $ vacuum dbSetup
         initSt <- lift $ lift $ lift mkInitSt
         $(logInfo) "Created initial state and will now check the DB for loading or creating experiments"
         let expSetting = setup initSt
         loadExperiments expSetting initInpSt initSt >>= checkUniqueParamNames >>= runExperimenter dbSetup expSetting initInpSt initSt
+
+-- | Vacuum the database. Usually you should not use 'full'! As it takes much longer and the table is locked for the duration of the process..
+vacuum :: DatabaseSetting -> IO ()
+vacuum (DatabaseSetting bs _) = do
+  let baseTxt = foldl' (\ts (from, to) -> map (T.strip . T.replace from to) ts) (T.splitOn " " $ E.decodeUtf8 bs) [("dbname=", "--dbname="), ("host=", "--host="), ("port=", "--port="), ("user=", "--username=")]
+      txts = filter (not . T.isInfixOf "password=") baseTxt ++ ["-w"] -- Do *not* use full! ["-f" | full]
+  runStdoutLoggingT $ $(logInfo) $ "Running: vacuumdb " <> T.intercalate " " txts
+  callProcess "vacuumdb" (map T.unpack txts)
+
+  -- vacuumdb --host=localhost --port=5432 --username=experimenter -w experimenter
+
+  -- [-d experimenter - f - h HOST - p PORT - u USER - q]
+  -- "host=localhost dbname=experimenter user=experimenter password= port=5432"
 
 
 -- loadStateAfterPreparation2 ::
@@ -339,11 +356,11 @@ existingParamSettings exp = do
         _       -> [ParameterSetting n vBs drp (toEnum dsgn)]
 
 -- deleteExperiment :: (MonadIO m) => Experiment a -> DB m ()
--- deleteExperiment (Experiment k _ _ _ _ expRes) = mapM_ deleteExperimentResult expRes >> deleteCascade k
+-- deleteExperiment (Experiment k _ _ _ _ expRes) = mapM_ deleteExperimentResult expRes >> delete k
 
 
 deleteExperimentResult :: (MonadIO m) => ExperimentResult a -> DB m ()
-deleteExperimentResult (ExperimentResult k _ _ repls) = mapM_ deleteReplicationResult repls >> deleteCascade k
+deleteExperimentResult (ExperimentResult k _ _ repls) = mapM_ deleteReplicationResult repls >> delete k
 
 
 -- | Loads parameters of an experiment into all initial and end states of the given experiments variable.
@@ -397,6 +414,7 @@ continueExperiment dbSetup rands exps expIn = do
           eTime <- return <$> liftIO getCurrentTime
           update (exp ^. experimentKey) [ExpEndTime =. eTime]
           delete lock
+          liftIO $ vacuum dbSetup
           return (updated, set experimentResults res $ set experimentEndTime eTime exp)
         else delete lock >> return (updated, set experimentResults res exp)
   where
@@ -694,7 +712,7 @@ deleteReplicationResult :: (MonadIO m) => ReplicationResult a -> DB m ()
 deleteReplicationResult (ReplicationResult repResId _ _ _) =
   deleteResultData (WarmUp repResId) >>
   deleteResultData (Rep repResId) >>
-  deleteCascade repResId
+  delete repResId
 
 
 deleteResultData :: (MonadIO m) => RepResultType -> DB m ()
@@ -703,15 +721,15 @@ deleteResultData repResType = do
     Prep expResId -> do
       update expResId [ExpResultPrepResultData =. Nothing]
       exp <- get expResId
-      sequence_ $ deleteCascade <$> (view expResultPrepResultData =<< exp)
+      sequence_ $ delete <$> (view expResultPrepResultData =<< exp)
     WarmUp repResId -> do
       update repResId [RepResultWarmUpResultData =. Nothing]
       repRes <- get repResId
-      sequence_ $ deleteCascade <$> (view repResultWarmUpResultData =<< repRes)
+      sequence_ $ delete <$> (view repResultWarmUpResultData =<< repRes)
     Rep repResId -> do
       update repResId [RepResultRepResultData =. Nothing]
       repRes <- get repResId
-      sequence_ $ deleteCascade <$> (view repResultRepResultData =<< repRes)
+      sequence_ $ delete <$> (view repResultRepResultData =<< repRes)
 
 foldM' :: (NFData a, Monad m) => (a -> b -> m a) -> a -> [b] -> m a
 foldM' _ !acc [] = return acc
@@ -830,7 +848,7 @@ runResultData' !expId !maxSteps !len !repResType !resData = do
           inputValsList = V.toList inputVals
        in case resData' ^. resultDataKey of
             ResultDataPrep key -> do
-              when delInputs $ deleteCascadeWhere [PrepInputPrepResultData ==. key, PrepInputPeriod >=. curLen + 1]
+              when delInputs $ deleteWhere [PrepInputPrepResultData ==. key, PrepInputPeriod >=. curLen + 1]
               inpKeys <- insertMany $ map (PrepInput key . view inputValuePeriod) inputValsList
               insertMany_ $ zipWith (\k v -> PrepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputValsList
               measureKeys <- insertMany . map (PrepMeasure key . view measurePeriod) $ measuresList
@@ -839,7 +857,7 @@ runResultData' !expId !maxSteps !len !repResType !resData = do
                 AvailableListOnDemand (countInputValues', loadPreparationInputWhere key) $
                 resData'
             ResultDataWarmUp key -> do
-              when delInputs $ deleteCascadeWhere [WarmUpInputRepResult ==. key, WarmUpInputPeriod >=. curLen + 1]
+              when delInputs $ deleteWhere [WarmUpInputRepResult ==. key, WarmUpInputPeriod >=. curLen + 1]
               inpKeys <- insertMany $ map (WarmUpInput key . view inputValuePeriod) inputValsList
               insertMany_ $ zipWith (\k v -> WarmUpInputValue k (runPut . put . view inputValue $ v)) inpKeys inputValsList
               measureKeys <- insertMany $ map (WarmUpMeasure key . view measurePeriod) measuresList
@@ -848,7 +866,7 @@ runResultData' !expId !maxSteps !len !repResType !resData = do
                 AvailableListOnDemand (countInputValues', loadReplicationWarmUpInputWhere key) $
                 resData'
             ResultDataRep key -> do
-              when delInputs $ deleteCascadeWhere [RepInputRepResult ==. key, RepInputPeriod >=. curLen + 1]
+              when delInputs $ deleteWhere [RepInputRepResult ==. key, RepInputPeriod >=. curLen + 1]
               inpKeys <- insertMany $ map (RepInput key . view inputValuePeriod) inputValsList
               insertMany_ $ zipWith (\k v -> RepInputValue k (runPut . put . view inputValue $ v)) inpKeys inputValsList
               measureKeys <- insertMany $ map (RepMeasure key . view measurePeriod) measuresList

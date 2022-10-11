@@ -6,20 +6,20 @@ Exps
     initialInputState ByteString
 
 ExpsInfoParam
-    exps ExpsId
+    exps ExpsId OnDeleteCascade
     name Text
     value ByteString
     UniqueExpsInfoParam exps name
 
 ExpsMaster
-    exps ExpsId
+    exps ExpsId OnDeleteCascade
     hostname Text
     pid Int
     lastAliveSign UTCTime
     UniqueExpsMaster exps
 
 ExpsSetup
-    exps ExpsId
+    exps ExpsId OnDeleteCascade
     repetitions Int
     preparationSteps Int
     evaluationWarmUpSteps Int
@@ -29,34 +29,34 @@ ExpsSetup
     UniqueExpsSetup exps
 
 Param
-    exps ExpsId
+    exps ExpsId OnDeleteCascade
     name Text
     minBound ByteString Maybe
     maxBound ByteString Maybe
     deriving Show Eq Ord
 
 Exp         -- Adding "json" causes ToJSON and FromJSON instances to be derived.
-    exps  ExpsId
+    exps  ExpsId OnDeleteCascade
     number Int
     startTime UTCTime
     endTime UTCTime Maybe
     deriving Eq Ord
 
 ExpExecutionLock
-    exp ExpId
+    exp ExpId OnDeleteCascade
     hostname Text
     pid Int
     lastAliveSign UTCTime
     UniqueExpExecutionLock exp
 
 ExpProgress
-    exp ExpId
+    exp ExpId OnDeleteCascade
     phase Int
     step Int
     UniqueExpProgress exp
 
 ParamSetting
-    exp ExpId
+    exp ExpId OnDeleteCascade
     name Text
     value ByteString
     skipPreparationPhase Bool
@@ -64,7 +64,7 @@ ParamSetting
 
 
 ExpResult
-    exp ExpId
+    exp ExpId OnDeleteCascade
     repetition Int
     prepResultData                  PrepResultDataId Maybe
 
@@ -79,39 +79,39 @@ PrepResultData
     endInputState                   ByteString Maybe
 
 PrepStartStatePart             -- need to split big states into pieces
-    resultData PrepResultDataId
+    resultData PrepResultDataId OnDeleteCascade
     number     Int
     data       ByteString
     UniquePrepStartStatePart resultData number
 
 PrepEndStatePart
-    resultData PrepResultDataId
+    resultData PrepResultDataId OnDeleteCascade
     number     Int
     data       ByteString
     UniquePrepEndStatePart resultData number
 
 PrepInput
-    prepResultData PrepResultDataId
+    prepResultData PrepResultDataId OnDeleteCascade
     period Int
     UniquePrepInput prepResultData period
 
 PrepInputValue
-    prepInput PrepInputId
+    prepInput PrepInputId OnDeleteCascade
     value ByteString
 
 PrepMeasure
-    prepResultData PrepResultDataId
+    prepResultData PrepResultDataId OnDeleteCascade
     period Int
     UniquePrepMeasure prepResultData period
 
 PrepResultStep
-    measure PrepMeasureId
+    measure PrepMeasureId OnDeleteCascade
     name Text
     xValue  Double Maybe
     yValue  Double
 
 RepResult
-    expResult ExpResultId
+    expResult ExpResultId OnDeleteCascade
     repNr Int
     warmUpResultData WarmUpResultDataId Maybe
     repResultData RepResultDataId Maybe
@@ -128,13 +128,13 @@ WarmUpResultData
     endInputState                   ByteString Maybe
 
 WarmUpStartStatePart             -- need to split big states into pieces
-    resultData WarmUpResultDataId
+    resultData WarmUpResultDataId OnDeleteCascade
     number     Int
     data       ByteString
     UniqueWarmUpStartStatePart resultData number
 
 WarmUpEndStatePart
-    resultData WarmUpResultDataId
+    resultData WarmUpResultDataId OnDeleteCascade
     number     Int
     data       ByteString
     UniqueWarmUpEndStatePart resultData number
@@ -151,54 +151,54 @@ RepResultData
 
 
 RepStartStatePart             -- need to split big states into pieces
-    resultData RepResultDataId
+    resultData RepResultDataId OnDeleteCascade
     number     Int
     data       ByteString
     UniqueRepStartStatePart resultData number
 
 RepEndStatePart
-    resultData RepResultDataId
+    resultData RepResultDataId OnDeleteCascade
     number     Int
     data       ByteString
     UniqueRepEndStatePart resultData number
 
 
 WarmUpInput
-    repResult WarmUpResultDataId
+    repResult WarmUpResultDataId OnDeleteCascade
     period Int
     UniqueWarmUpInput repResult period
 
 WarmUpInputValue
-    warmUpInput WarmUpInputId
+    warmUpInput WarmUpInputId OnDeleteCascade
     value ByteString
 
 WarmUpMeasure
-    repResult WarmUpResultDataId
+    repResult WarmUpResultDataId OnDeleteCascade
     period Int
     UniqueWarmUpMeasure repResult period
 
 WarmUpResultStep
-    measure WarmUpMeasureId
+    measure WarmUpMeasureId OnDeleteCascade
     name Text
     xValue  Double Maybe
     yValue  Double
 
 RepInput
-    repResult RepResultDataId
+    repResult RepResultDataId OnDeleteCascade
     period Int
     UniqueRepInput repResult period
 
 RepInputValue
-    repInput RepInputId
+    repInput RepInputId OnDeleteCascade
     value ByteString
 
 RepMeasure
-    repResult RepResultDataId
+    repResult RepResultDataId OnDeleteCascade
     period Int
     UniqueRepMeasure repResult period
 
 RepResultStep
-    measure RepMeasureId
+    measure RepMeasureId OnDeleteCascade
     name Text
     xValue  Double Maybe
     yValue  Double

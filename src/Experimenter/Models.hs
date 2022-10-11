@@ -24,5 +24,6 @@ import           Database.Persist.Quasi
 import           Database.Persist.TH
 
 
-share [mkPersist sqlSettings {mpsGenerateLenses = True}, mkDeleteCascade sqlSettings, mkMigrate "migrateAll"]
+share [mkPersist sqlSettings {mpsGenerateLenses = True}, -- mkDeleteCascade sqlSettings,
+       mkMigrate "migrateAll"]
   $(persistFileWith lowerCaseSettings "config/models")
