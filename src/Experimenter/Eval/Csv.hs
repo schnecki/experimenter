@@ -11,6 +11,7 @@ module Experimenter.Eval.Csv
 
 import           Conduit                      as C
 import           Control.Lens                 hiding (Cons, Over)
+import           Control.Monad
 import           Control.Monad.Logger
 import           Control.Monad.Reader
 import           Data.Maybe                   (fromMaybe)

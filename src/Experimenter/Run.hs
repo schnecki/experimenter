@@ -27,13 +27,15 @@ import           Control.Arrow                (first, second, (&&&), (***))
 import           Control.Concurrent.MVar
 import           Control.DeepSeq
 import           Control.Lens
+import           Control.Monad
 import           Control.Monad.IO.Class
-import           Control.Monad.Logger         (filterLogger, logDebug, logError, logInfo, runStdoutLoggingT)
+import           Control.Monad.Logger         (filterLogger, logDebug, logError,
+                                               logInfo, runStdoutLoggingT)
 import           Control.Monad.Reader
 import qualified Data.ByteString              as B
 import           Data.Function                (on)
-import           Data.IORef
 import           Data.Int                     (Int64)
+import           Data.IORef
 import           Data.List                    (foldl')
 import qualified Data.List                    as L
 import           Data.Maybe                   (fromJust, fromMaybe, isNothing)
@@ -41,7 +43,8 @@ import           Data.Serialize               hiding (get)
 import qualified Data.Serialize               as S
 import qualified Data.Text                    as T
 import qualified Data.Text.Encoding           as E
-import           Data.Time                    (addUTCTime, diffUTCTime, getCurrentTime)
+import           Data.Time                    (addUTCTime, diffUTCTime,
+                                               getCurrentTime)
 import qualified Data.Vector                  as V
 import           Database.Persist.Postgresql
 import           GHC.Generics
@@ -55,8 +58,8 @@ import           System.Random.MWC
 
 
 import           Experimenter.Availability
-import           Experimenter.DB
 import           Experimenter.DatabaseSetting
+import           Experimenter.DB
 import           Experimenter.Experiment
 import           Experimenter.Input
 import           Experimenter.MasterSlave

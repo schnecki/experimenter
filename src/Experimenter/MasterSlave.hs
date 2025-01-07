@@ -17,14 +17,17 @@ module Experimenter.MasterSlave
 
 import           Control.Lens
 import           Control.Monad.IO.Class
-import           Control.Monad.Logger         (NoLoggingT, logInfo, runNoLoggingT)
+import           Control.Monad.Logger         (NoLoggingT, logInfo,
+                                               runNoLoggingT)
 import           Data.IORef
 
 import           Control.Concurrent           (forkIO, threadDelay)
+import           Control.Monad
 import           Control.Monad.Reader
 import           Control.Monad.Trans.Resource
 import qualified Data.Text                    as T
-import           Data.Time                    (UTCTime, diffUTCTime, getCurrentTime)
+import           Data.Time                    (UTCTime, diffUTCTime,
+                                               getCurrentTime)
 import           Database.Persist.Postgresql
 import           Network.HostName
 import           System.Posix.Process

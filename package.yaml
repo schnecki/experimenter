@@ -1,5 +1,5 @@
 name:                experimenter
-version:             0.1.0.14
+version:             0.1.0.16
 github:              "schnecki/experimenter"
 license:             BSD3
 author:              "Manuel Schneckenreither"
@@ -28,7 +28,7 @@ flags:
 
 
 dependencies:
-  - base >= 4.7 && < 5
+  - base >= 4.9 && < 5
   - persistent                    >= 2.0
   - persistent-postgresql         >= 2.1.1
   - persistent-template           >= 2.0

@@ -39,6 +39,7 @@ module Experimenter.Result.Query
 import           Conduit                     as C
 import           Control.DeepSeq
 import           Control.Lens                (view)
+import           Control.Monad
 import           Control.Monad.Logger
 import           Control.Monad.Reader
 import           Control.Monad.Trans.Maybe
@@ -49,7 +50,8 @@ import           Data.Either                 (isLeft)
 import           Data.Function               (on)
 import qualified Data.List                   as L
 import           Data.Maybe                  (fromMaybe)
-import           Data.Serialize              as S (Serialize, get, put, runGet, runPut)
+import           Data.Serialize              as S (Serialize, get, put, runGet,
+                                                   runPut)
 import qualified Data.Text                   as T
 import           Data.Time                   (getCurrentTime)
 import           Data.Vector.Serialize       ()

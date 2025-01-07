@@ -18,6 +18,7 @@ module Experimenter.Eval.Ops
 import           Conduit                      as C
 import           Control.DeepSeq
 import           Control.Lens                 hiding (Cons, Over)
+import           Control.Monad
 import           Control.Monad.Reader
 import qualified Data.Conduit.List            as CL
 import           Data.List                    (find)
