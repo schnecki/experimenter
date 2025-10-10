@@ -9,7 +9,7 @@ copyright:           "2022 Manuel Schneckenreither"
 extra-source-files:
 - README.md
 - ChangeLog.md
-- config/models
+- config/dbsetup
 
 # Metadata used when publishing your package
 synopsis:            Perform scientific experiments stored in a DB, and generate reports.
