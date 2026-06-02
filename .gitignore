@@ -11,3 +11,4 @@ experimenter.cabal
 /dice.ps
 examples/TAGS
 /examples/experimenter-examples.cabal
+.stack-work*
