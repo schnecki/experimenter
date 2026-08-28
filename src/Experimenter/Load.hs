@@ -20,7 +20,9 @@ module Experimenter.Load
 
 
 import           Control.Arrow                (first, second, (&&&), (***))
+import           Control.Concurrent           (threadDelay)
 import           Control.Concurrent.MVar
+import           Control.Exception            (IOException, throwIO, try)
 import           Control.DeepSeq
 import           Control.Lens
 import           Control.Monad
@@ -48,6 +50,7 @@ import           GHC.Generics
 import           Network.HostName             (getHostName)
 import           Prelude                      hiding (exp)
 import           System.IO
+import           System.IO.Error              (isEOFError)
 import           System.IO.Unsafe             (unsafePerformIO)
 import           System.Posix.Process
 import           System.Random.MWC
@@ -106,10 +109,29 @@ loadExperimentsResultsM filtFin runExpM dbSetup setup initInpSt mkInitSt key =
     fmap filterFinished <$> loadExperimentsResults sett initInpSt initSt (toSqlKey key)
 
 
-readValueSafe :: (Read a) => IO (Maybe a)
+-- | Prompt for and parse a value from stdin.
+--
+-- A closed stdin (EOF) — a process detached from an interactive terminal, e.g.
+-- a live trader run under a service manager or after a session disconnect —
+-- makes 'getLine' throw an end-of-file 'IOException'.  Left unhandled that
+-- exception unwinds the prompting thread and, when it is the main thread,
+-- terminates the whole process, silently killing any concurrently-running work
+-- (forked live-trading loops) with it.
+--
+-- On EOF the interactive prompt is permanently unavailable, so instead of
+-- returning (which would let a caller's re-prompt loop busy-spin on the
+-- instantly-failing read) this parks the calling thread indefinitely.  Other
+-- threads keep running, so the process stays alive and only its unusable
+-- interactive menu is disabled.  Any non-EOF I/O error is re-thrown unchanged.
+readValueSafe :: forall a. (Read a) => IO (Maybe a)
 readValueSafe = do
   liftIO $ putStr "Enter value: " >> hFlush stdout
-  readMaybe <$> getLine
+  eLine <- try getLine
+  case eLine of
+    Right line -> return (readMaybe line)
+    Left e
+      | isEOFError e -> forever (threadDelay maxBound)
+      | otherwise    -> throwIO (e :: IOException)
 
 
 readListValueSafeName :: [(a, T.Text)] -> IO (Maybe a)
